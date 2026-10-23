@@ -79,24 +79,32 @@ func _make_button(def: BuildingDef) -> Button:
 	v.add_theme_constant_override("separation", 0)
 	b.add_child(v)
 	v.add_child(UIUtil.label(def.short_label if not def.short_label.is_empty() else def.display_name))
-	var cost := UIUtil.label("%s cr   %s mat   %ds" % [Economy.format_amount(def.cost_credits), Economy.format_amount(def.cost_materials), roundi(def.build_time)], &"DimLabel")
+	var cost := UIUtil.label("%s cr   %s   %ds" % [Economy.format_amount(def.cost_credits), _short_ore(def), roundi(def.build_time)], &"DimLabel")
 	v.add_child(cost)
 	UIUtil.ignore_mouse(b)
 	b.pressed.connect(_on_pressed.bind(def))
 	return b
 
 
+## "100 Fe 30 Ti" for the compact button line.
+static func _short_ore(def: BuildingDef) -> String:
+	var t := "%d Fe" % def.cost_iron
+	if def.cost_titanium > 0:
+		t += " %d Ti" % def.cost_titanium
+	return t
+
+
 func _refresh() -> void:
 	for def: BuildingDef in _buttons:
 		var b: Button = _buttons[def]
-		var why := Economy.shortfall_text(def.cost_credits, def.cost_materials)
+		var why := Economy.shortfall_text(def.cost_credits, def.cost_ore())
 		if hud.manager and not hud.manager.limit_reason(def).is_empty():
 			why = hud.manager.limit_reason(def)
 		var armed := hud.placement != null and hud.placement.def == def
 		b.disabled = not why.is_empty() and not armed
 		b.modulate = Color(1, 1, 1, 0.5) if b.disabled else Color.WHITE
 		b.set_pressed_no_signal(armed)
-		var tip := "%s\n%s\nCost: %d credits, %d materials\nBuild time: %d s" % [def.display_name, def.description, def.cost_credits, def.cost_materials, roundi(def.build_time)]
+		var tip := "%s\n%s\nCost: %d credits, %s\nBuild time: %d s" % [def.display_name, def.description, def.cost_credits, Economy.cost_text(def.cost_ore()), roundi(def.build_time)]
 		b.tooltip_text = tip + ("\n\nCannot build: " + why if not why.is_empty() else "")
 
 

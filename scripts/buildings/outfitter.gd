@@ -3,25 +3,29 @@ extends Node
 ## Service node of the Outfitter building (see BuildingDef.service_script).
 ## Docked captains walk in on their own (Ship._visit_services) and buy one
 ## module per visit from their wallet: a Mk I..III module for a free unlocked
-## slot, or an upgrade of a bought one. The best tier allowed is the lower of
-## the captain's rank tier and the Outfitter's unlocked tier (Mk I at first;
-## "Unlock Mk II" / "Unlock Mk III" cost materials). Rare salvaged parts stock
-## one Mk II/III module early, or discount it when already stocked.
+## slot, or an upgrade of a bought one. Stock comes from the Factory
+## warehouse (finite, see [Factory]); the best tier allowed is the lower of
+## the captain's rank tier and what the Factory is tooled for (or a rare part
+## lets it make). Without an Outfitter captains cannot buy modules at all.
 ##
 ## What they buy follows personality (slot weights in [constant SLOT_WEIGHTS]):
 ##   Bold      guns and engines
 ##   Cautious  shields, armour, escape pods
 ##   Greedy    cargo holds and tools (drills), prospecting scanners
 ##   Lazy      engines, always the cheapest
-## Each captain keeps a reserve in the wallet ([constant RESERVE]). The
-## player gets [member sale_share] of every price as income.
+## When the part they want is out of stock:
+##   Bold      takes the best part in stock, else places a backorder
+##   Cautious  places a backorder and waits for it
+##   Greedy    places a backorder and waits for it
+##   Lazy      takes whatever is in stock, else tries again next visit
+## A captain with an open backorder buys nothing else until it arrives (or
+## lapses). Each captain keeps a reserve in the wallet ([constant RESERVE]).
+## The player gets [member sale_share] of every price as income.
 
 signal sold(sale: Dictionary)
 signal changed
 
 const GROUP := "outfitters"
-## Materials to unlock tier 2 / 3.
-const UNLOCK_COST := {2: 300, 3: 800}
 ## Slot weights per personality, in ShipModule.Slot order
 ## (tool, cargo, defense, engine, sensor).
 const SLOT_WEIGHTS := [
@@ -32,22 +36,17 @@ const SLOT_WEIGHTS := [
 ]
 ## Credits each personality keeps back (Bold, Cautious, Greedy, Lazy).
 const RESERVE: PackedInt32Array = [40, 150, 220, 60]
-## Rare part discount on the stocked module.
-const RARE_DISCOUNT := 0.4
 const MAX_SALES_LISTED := 12
 
 @export var sale_share: float = 0.35
 
 var building: Building
-## Highest tier on sale (1..3).
-var unlocked_tier: int = 1
 ## Newest last: {time, captain, module, tier, price, income}.
 var sales: Array[Dictionary] = []
 var total_sales: int = 0
 var total_income: int = 0
-## Rare parts: module id -> "stocked" (sold before its tier is unlocked) or
-## "discount" (next sale RARE_DISCOUNT off).
-var rare_parts: Dictionary = {}
+## Visits that found the wanted part out of stock.
+var stockouts: int = 0
 
 
 static func find(tree: SceneTree) -> Outfitter:
@@ -66,76 +65,55 @@ func _ready() -> void:
 	add_to_group(GROUP)
 
 
-# --- Unlocks ------------------------------------------------------------------
-
-## Materials needed for the next tier, 0 when all are unlocked.
-func next_unlock_cost() -> int:
-	return int(UNLOCK_COST.get(unlocked_tier + 1, 0))
-
-
-## Why the next tier cannot be unlocked now, or "".
-func unlock_block_reason() -> String:
-	if unlocked_tier >= 3:
-		return "All tiers unlocked"
-	if building and not building.is_active():
-		return "Finish construction first"
-	return Economy.shortfall_text(0, next_unlock_cost())
-
-
-func unlock_next() -> bool:
-	if not unlock_block_reason().is_empty():
-		return false
-	if not Economy.spend(0, next_unlock_cost()):
-		return false
-	unlocked_tier += 1
-	EventLog.post("Outfitter now sells %s modules" % ShipModule.TIER_NAMES[unlocked_tier], EventLog.Kind.INFO, building)
-	changed.emit()
-	return true
+## The Factory this shop sells from, or null.
+func factory() -> Factory:
+	return Factory.find(get_tree()) if is_inside_tree() else null
 
 
 # --- Stock ----------------------------------------------------------------------
 
+## Highest tier the Factory can supply now (0 without a Factory).
+func supplied_tier() -> int:
+	var f := factory()
+	return f.tooling_tier if f else 0
+
+
 func is_stocked(m: ShipModule) -> bool:
-	return m.tier <= unlocked_tier or rare_parts.get(m.id, "") == "stocked"
+	var f := factory()
+	return f != null and f.can_make(m)
 
 
-## Highest tier [param captain] may buy here (rank and unlocks).
+## Highest tier [param captain] may buy here (rank and Factory tooling).
 func max_tier_for(captain: Captain) -> int:
-	return mini(Reputation.max_tier_for(captain.rank), unlocked_tier)
+	return mini(Reputation.max_tier_for(captain.rank), supplied_tier())
 
 
 func price_of(m: ShipModule) -> int:
-	if rare_parts.get(m.id, "") == "discount":
-		return roundi(m.cost * (1.0 - RARE_DISCOUNT))
-	return m.cost
+	var f := factory()
+	return f.price_of(m) if f else m.cost
 
 
-## Why [param m] is not for [param captain] now, or "".
+## Why [param m] is not for [param captain] now, or "". Stock aside.
 func block_reason(captain: Captain, m: ShipModule) -> String:
 	if not m.fits_role(captain.role):
 		return "Not for a %s" % captain.role.to_lower()
 	if m.tier > Reputation.max_tier_for(captain.rank):
 		return "Needs %s rank" % Reputation.rank_name(Reputation.MAX_TIER.find(m.tier))
-	if not is_stocked(m):
-		return "%s not unlocked here" % ShipModule.TIER_NAMES[m.tier]
+	if factory() == null:
+		return "No Factory"
+	if not is_stocked(m) and factory().stock_of(m) <= 0:
+		return "Factory not tooled for %s" % ShipModule.TIER_NAMES[m.tier]
 	return ""
-
-
-## A salvaged rare part: [param m] is stocked before its tier is unlocked, or
-## discounted when it already is.
-func add_rare_part(m: ShipModule) -> String:
-	var kind := "discount" if m.tier <= unlocked_tier or rare_parts.get(m.id, "") == "stocked" else "stocked"
-	rare_parts[m.id] = kind
-	changed.emit()
-	return kind
 
 
 # --- Shopping -------------------------------------------------------------------
 
 ## The module this captain wants most and can afford now, or null.
-func choose_for(ship: Ship) -> ShipModule:
+## [param in_stock_only] skips parts the warehouse has none of for them.
+func choose_for(ship: Ship, in_stock_only: bool = false) -> ShipModule:
 	var cap := ship.captain
-	if cap == null or ship.loadout == null:
+	var f := factory()
+	if cap == null or ship.loadout == null or f == null:
 		return null
 	var budget := cap.wallet - RESERVE[cap.personality]
 	if budget <= 0:
@@ -145,6 +123,8 @@ func choose_for(ship: Ship) -> ShipModule:
 	var best_score := 0.0
 	for m in ModuleCatalog.shared().for_role(cap.role):
 		if not block_reason(cap, m).is_empty() or not ship.loadout.can_fit(m):
+			continue
+		if in_stock_only and f.free_stock_for(m, cap) <= 0:
 			continue
 		var price := price_of(m)
 		if price > budget:
@@ -163,26 +143,59 @@ func choose_for(ship: Ship) -> ShipModule:
 
 
 ## A docked captain looks in. Buys at most one module. Returns it or null.
+## An open backorder comes first; out of stock goes by personality.
 func visit(ship: Ship) -> ShipModule:
 	if building == null or not building.is_active() or not is_instance_valid(ship) or ship.dead:
 		return null
-	var m := choose_for(ship)
-	if m == null:
+	var f := factory()
+	var cap := ship.captain
+	if f == null or cap == null:
 		return null
-	return sell(ship, m)
+	var order := f.order_of(cap)
+	if not order.is_empty():
+		var om := order["module"] as ShipModule
+		if not ship.loadout.can_fit(om) or not block_reason(cap, om).is_empty():
+			f.cancel_backorder(cap)
+		elif f.free_stock_for(om, cap) > 0:
+			return sell(ship, om)
+		else:
+			return null
+	var want := choose_for(ship)
+	if want == null:
+		return null
+	if f.free_stock_for(want, cap) > 0:
+		return sell(ship, want)
+	stockouts += 1
+	f.note_miss(want)
+	var alt: ShipModule = null
+	if cap.personality == Captain.Personality.BOLD or cap.personality == Captain.Personality.LAZY:
+		alt = choose_for(ship, true)
+	if alt:
+		return sell(ship, alt)
+	if cap.personality == Captain.Personality.LAZY:
+		ship.show_toast("%s out of stock" % want.display_name, Color(1.0, 0.8, 0.5))
+		changed.emit()
+		return null
+	f.place_backorder(want, cap)
+	ship.show_toast("Ordered %s" % want.display_name, Color(1.0, 0.85, 0.5))
+	EventLog.post("%s ordered %s from the Factory (out of stock)" % [cap.captain_name, want.display_name], EventLog.Kind.INFO, ship, Vector3.INF, "order:%s:%s" % [cap.captain_name, want.id])
+	changed.emit()
+	return null
 
 
-## Installs [param m] on [param ship], paid from the captain's wallet.
+## Installs [param m] on [param ship], paid from the captain's wallet, from
+## the Factory warehouse.
 func sell(ship: Ship, m: ShipModule) -> ShipModule:
 	var cap := ship.captain
+	var f := factory()
 	var price := price_of(m)
-	if cap == null or cap.wallet < price or not ship.loadout.can_fit(m) or not block_reason(cap, m).is_empty():
+	if f == null or cap == null or cap.wallet < price or not ship.loadout.can_fit(m) or not block_reason(cap, m).is_empty():
+		return null
+	if not f.take(m, cap):
 		return null
 	cap.wallet -= price
 	cap.credits_spent += price
 	cap.modules_bought += 1
-	if rare_parts.get(m.id, "") == "discount":
-		rare_parts.erase(m.id)
 	var fitted := m.duplicate() as ShipModule
 	ship.loadout.set_module(m.slot, fitted)
 	ship.refit()

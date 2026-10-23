@@ -11,11 +11,11 @@ extends Node
 ## station, spread round it. --cam / --focus (ScreenshotMode) override the view.
 
 ## Building def indices (BuildingManager.building_defs) in build order.
-@export var layout: PackedInt32Array = PackedInt32Array([0, 1, 2, 3, 0, 1, 3, 0])
+@export var layout: PackedInt32Array = PackedInt32Array([0, 1, 2, 3, 0, 1, 3, 0, 5, 4, 4])
 @export var ghost_def_index: int = 3
 ## Search rings (distance from the station, m) and angle step.
-@export var search_radii: Vector2 = Vector2(170.0, 1400.0)
-@export var search_step: float = 25.0
+@export var search_radii: Vector2 = Vector2(100.0, 900.0)
+@export var search_step: float = 10.0
 @export var search_angle_deg: float = 9.0
 ## Weight of the angle from the preferred direction against distance (m per radian).
 @export var spread_weight: float = 160.0

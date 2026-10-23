@@ -6,7 +6,9 @@ extends Node3D
 ## the building under the cursor (green = valid, red = invalid), its link
 ## corridor to the complex as a ghost corridor, and the area a new
 ## structure's centre can link from. The ghost turns the way the link wants
-## (docking mouth away from the complex).
+## (docking mouth away from the complex). Standalone structures (defense
+## turrets) have no corridor and no link area; their ghost shows a range ring
+## (BuildingDef.preview_range) instead.
 ##
 ## A left click (press and release within [member click_slop_px], no camera
 ## orbit) places, Shift keeps placing; a left drag orbits the camera and
@@ -81,7 +83,8 @@ func arm(building_def: BuildingDef) -> void:
 	def = building_def
 	_camera = get_tree().get_first_node_in_group("rts_camera") as RTSCamera
 	_build_ghost()
-	_build_zone()
+	if not def.standalone:
+		_build_zone()
 	valid = false
 	reason = ""
 	_press_pos = Vector2.INF
@@ -129,7 +132,10 @@ func frame_build_view(snap: bool = false) -> void:
 	if _camera == null or def == null or manager.solar_system.home_station == null:
 		return
 	var box := manager.links.complex_bounds()
-	var reach := manager.links.max_link + def.footprint_radius * 2.0
+	var reach := manager.links.reach_for(def) + def.footprint_radius * 2.0
+	if def.standalone:
+		# Room to see the range ring around a spot near the complex.
+		reach = maxf(reach, def.preview_range * 0.8)
 	var radius := (maxf(box.size.x, box.size.y) * 0.5 + reach) * frame_margin
 	var c := box.get_center()
 	var center := manager.to_world(Vector3(c.x, 0.0, c.y)) - manager.to_world(Vector3.ZERO)
@@ -241,6 +247,10 @@ func _build_ghost() -> void:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_ghost_ring = RingUtil.make_ring(def.footprint_radius, VALID_COLOR, 2.0, 64)
 	_ghost.add_child(_ghost_ring)
+	if def.preview_range > 0.0:
+		var reach := RingUtil.make_ring(def.preview_range, Color(ZONE_COLOR, 0.55), 3.0, 128)
+		reach.name = "RangeRing"
+		_ghost.add_child(reach)
 	manager.frame.add_child(_ghost)
 	# Ghost corridor: frame-local pieces, so it sits on the frame beside the ghost.
 	_ghost_corridor = Node3D.new()
@@ -276,7 +286,7 @@ func _build_zone() -> void:
 func _update_zone() -> void:
 	if _zone == null or def == null:
 		return
-	var shapes := manager.links.zone_shapes(def.footprint_radius)
+	var shapes := manager.links.zone_shapes(def.footprint_radius, manager.links.gap_for(def), manager.links.reach_for(def))
 	var discs: PackedVector4Array = shapes["discs"]
 	var segs: PackedVector4Array = shapes["segs"]
 	if discs.size() > MAX_ZONE_DISCS:
@@ -295,7 +305,7 @@ func _update_zone() -> void:
 	_zone_mat.set_shader_parameter("seg_reach", shapes["seg_reach"])
 	_zone_mat.set_shader_parameter("band", manager.planet_band(def.footprint_radius))
 	_zone_mat.set_shader_parameter("zone_radius", manager.zone_radius - def.footprint_radius)
-	var box := manager.links.complex_bounds().grow(manager.links.max_link + def.footprint_radius * 2.0 + 20.0)
+	var box := manager.links.complex_bounds().grow(manager.links.reach_for(def) + def.footprint_radius * 2.0 + 20.0)
 	var quad := PlaneMesh.new()
 	quad.size = box.size
 	quad.center_offset = Vector3(box.get_center().x, 0.0, box.get_center().y)

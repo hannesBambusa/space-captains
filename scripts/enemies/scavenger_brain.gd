@@ -10,13 +10,18 @@ extends RefCounted
 ## - ATTACKING whoever shoots at it;
 ## - FLEEING to the den when the hull drops below [constant FLEE_HULL]
 ##   (docks there and leaves the map with its loot);
-## - RAIDING (raiders): fly at the colony, attack ships near home, and loot
-##   credits from a structure until driven off.
+## - RAIDING (raiders): fly at the colony and attack it in order: the
+##   station shield bubble while it is up (nothing inside can be hit through
+##   it), then the defense turrets, then the shield generator, then ships
+##   near home; with nothing left to shoot, loot credits from a structure
+##   until driven off.
+## Targets inside an up shield bubble are never chased from outside: the
+## bubble is attacked instead (raiders, retaliation) or the prey is skipped.
 ## Checks run on a timer ([constant AI_INTERVAL]).
 
 enum State { LAUNCHING, ROAMING, HUNTING, ATTACKING, FLEEING, RAIDING, RETURNING }
 
-const STATE_NAMES: PackedStringArray = ["Launching", "Roaming", "Hunting", "Attacking", "Fleeing", "Raiding", "Returning to den"]
+const STATE_NAMES: PackedStringArray = ["Launching", "Roaming", "Hunting", "Attacking", "Fleeing", "Raiding", "Returning to hideout"]
 const AI_INTERVAL := 0.5
 const FLEE_HULL := 0.35
 const STEAL_RANGE := 140.0
@@ -125,7 +130,7 @@ func _think() -> void:
 	var la := _last_attacker.get_ref() as Node3D if _last_attacker else null
 	if Combat.is_live_target(la) and ship.durability.seconds_since_hit() < 4.0 and Combat.flat_distance(ship.global_position, la.global_position) < RETALIATE_RANGE:
 		if not (la is MinerShip):
-			target = la
+			target = _through_shield(la)
 			_set_state(State.ATTACKING)
 			return
 	if ship.is_raider:
@@ -135,6 +140,7 @@ func _think() -> void:
 			_set_state(State.RAIDING)
 		return
 	if state == State.ATTACKING and Combat.is_live_target(target) and Combat.flat_distance(ship.global_position, target.global_position) < RETALIATE_RANGE * 1.4:
+		target = _through_shield(target)
 		return
 	var prey := _pick_prey()
 	if prey:
@@ -165,6 +171,8 @@ func _pick_prey() -> Ship:
 					and SpaceNav.distance_to_belt(den.belt, m.global_position) < den.belt.def.width * 0.5 + 1500.0
 		if d > ship.stats.sensor_range and not on_turf:
 			continue
+		if StationShield.shielding(tree, m.global_position, pos):
+			continue
 		var score := d
 		if m is MinerShip and (m as MinerShip).is_loaded():
 			score -= 1800.0
@@ -189,21 +197,36 @@ func _guns_near(pos: Vector3, radius: float) -> int:
 	return n
 
 
+## Raid objective: the shield bubble while it is up (from outside), then the
+## nearest turret, then the shield generator, then the nearest ship.
 func _raid_pick() -> Node3D:
-	var sys := ship.get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
-	var home := sys.home_station.global_position if sys and sys.home_station else ship.global_position
-	if Combat.flat_distance(ship.global_position, home) > RAID_ENGAGE_RADIUS * 2.0:
+	var tree := ship.get_tree()
+	var pos := ship.global_position
+	var sys := tree.get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var home := sys.home_station.global_position if sys and sys.home_station else pos
+	if Combat.flat_distance(pos, home) > RAID_ENGAGE_RADIUS * 2.0:
 		return null
-	var best: Node3D = null
-	var best_d := INF
-	for h in Combat.hostiles_near(ship.get_tree(), ship.global_position, RAID_ENGAGE_RADIUS, ship.faction):
-		if not (h is Ship):
-			continue
-		var d := Combat.flat_distance(ship.global_position, h.global_position)
-		if d < best_d:
-			best_d = d
-			best = h
-	return best
+	var bubble := StationShield.find(tree)
+	if bubble and bubble.is_up() and not bubble.contains(pos):
+		return bubble
+	# Nearest first (hostiles_near sorts by distance).
+	var near := Combat.hostiles_near(tree, pos, RAID_ENGAGE_RADIUS, ship.faction)
+	for h in near:
+		if h is DefenseTurret:
+			return h
+	for h in near:
+		if h is ShieldGenerator:
+			return h
+	for h in near:
+		if h is Ship:
+			return h
+	return null
+
+
+## [param t], or the shield bubble when it stands between us and [param t].
+func _through_shield(t: Node3D) -> Node3D:
+	var bubble := StationShield.shielding(ship.get_tree(), t.global_position, ship.global_position)
+	return bubble if bubble else t
 
 
 # --- Steps ---------------------------------------------------------------------

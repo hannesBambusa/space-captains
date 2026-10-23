@@ -5,8 +5,8 @@ extends Node
 ## [signal contract_removed].
 ##
 ## Payment model (mining): nothing is reserved when posting. The player pays
-## the per-load reward when a miner delivers a load, and the ore becomes
-## materials. When the player cannot pay a delivery in full, the miner sells
+## the per-load reward when a miner delivers a load, and the ore goes into
+## the player's stock by type (Economy.ore_of_belt). When the player cannot pay a delivery in full, the miner sells
 ## only the part that can be paid for (credits run to 0, materials scale
 ## down). Captains also refuse new runs while the station cannot pay one full
 ## load ("Station can't pay"), so this only happens to loads already mined.
@@ -19,7 +19,8 @@ extends Node
 ## share of it back (Economy.collect_fees).
 ##
 ## Stage 3: salvage contracts on scrap fields (paid per delivered load, the
-## scrap turns into materials, sometimes a rare part for the Outfitter), and
+## scrap turns into iron plus a little titanium ([constant SALVAGE_TITANIUM]),
+## sometimes a rare part for the Factory), and
 ## reputation for escort trips. Bigger holds deliver bigger loads (more pay
 ## and materials); prospecting scanners add materials only.
 
@@ -27,11 +28,14 @@ signal contract_posted(contract: Contract)
 signal contract_changed(contract: Contract)
 ## Completed or cancelled: it leaves the lists.
 signal contract_removed(contract: Contract)
+## [param ore] is the AsteroidBelt.OreType (-1 for salvage).
 signal delivery_made(contract: Contract, ship: Node, credits: int, materials: int, ore: int)
 ## Bounty or escort pay to one captain.
 signal payout_made(contract: Contract, ship: Node, credits: int)
 
 const RULES_PATH := "res://data/contracts/mining_rules.tres"
+## Share of salvaged materials that comes out as titanium (the rest is iron).
+const SALVAGE_TITANIUM := 0.2
 
 var mining_rules: MiningRules
 ## Open and active contracts, in posting order.
@@ -191,7 +195,7 @@ func deliver_mining_load(contract: MiningContract, ship: Node, ore: int, fractio
 	if pay > 0:
 		Economy.spend(pay)
 	if mat > 0:
-		Economy.add(0, mat)
+		Economy.add_ore_of(Economy.ore_of_belt(ore), mat)
 	contract.credits_paid += pay
 	contract.materials_delivered += mat
 	if s and s.captain and pay > 0:
@@ -217,7 +221,8 @@ func deliver_salvage_load(contract: SalvageContract, ship: Node, scrap: int) -> 
 	if pay > 0:
 		Economy.spend(pay)
 	if mat > 0:
-		Economy.add(0, mat)
+		var ti := roundi(float(mat) * SALVAGE_TITANIUM)
+		Economy.add(0, Economy.cost(mat - ti, ti))
 	contract.credits_paid += pay
 	contract.materials_delivered += mat
 	if s and s.captain and pay > 0:
@@ -231,10 +236,11 @@ func deliver_salvage_load(contract: SalvageContract, ship: Node, scrap: int) -> 
 	return {"credits": pay, "materials": mat, "escorted": escorted, "rare": rare}
 
 
-## A rare Mk II/III part in the haul: the Outfitter stocks or discounts it.
-## Returns the module name ("" without an Outfitter).
+## A rare Mk II/III part in the haul: it goes into the Factory warehouse and
+## lets the Factory make it early, or discounts it when already tooled.
+## Returns the module name ("" without a Factory).
 func _find_rare_part(ship: Ship) -> String:
-	var o := Outfitter.find(ship.get_tree())
+	var o := Factory.find(ship.get_tree())
 	if o == null:
 		return ""
 	var pool: Array[ShipModule] = []
@@ -247,9 +253,9 @@ func _find_rare_part(ship: Ship) -> String:
 	var kind := o.add_rare_part(m)
 	var cap_name := ship.captain.captain_name if ship.captain else ship.get_display_name()
 	if kind == "stocked":
-		EventLog.post("%s salvaged a rare %s: the Outfitter can now sell it" % [cap_name, m.display_name], EventLog.Kind.REWARD, ship)
+		EventLog.post("%s salvaged a rare %s: the Factory can now make it" % [cap_name, m.display_name], EventLog.Kind.REWARD, ship)
 	else:
-		EventLog.post("%s salvaged a rare %s: %d%% off at the Outfitter" % [cap_name, m.display_name, roundi(Outfitter.RARE_DISCOUNT * 100.0)], EventLog.Kind.REWARD, ship)
+		EventLog.post("%s salvaged a rare %s: %d%% off the next one" % [cap_name, m.display_name, roundi(Factory.RARE_DISCOUNT * 100.0)], EventLog.Kind.REWARD, ship)
 	return m.display_name
 
 
@@ -285,6 +291,8 @@ func _resolve_bounty(c: BountyContract, killer: Node3D) -> void:
 		return
 	var target := c.target
 	var d := target.get(&"durability") as Durability if is_instance_valid(target) else null
+	if c.fleet and c.fleet.state != MercFleet.State.DONE and _resolve_fleet_bounty(c, killer, d):
+		return
 	var earners: Array[Ship] = []
 	if d:
 		for o in d.attackers(BountyContract.CREDIT_WINDOW):
@@ -304,12 +312,45 @@ func _resolve_bounty(c: BountyContract, killer: Node3D) -> void:
 		c.payouts.append({"ship_name": s.get_display_name(), "credits": pay})
 		s.show_toast("+%d cr bounty" % pay, Color(1.0, 0.85, 0.4))
 	var who := c.killer_name if not c.killer_name.is_empty() else ("%d mercenaries" % earners.size() if earners.size() > 1 else "")
+	var solo := c.solo_runner()
+	if earners.size() == 1 and solo == earners[0]:
+		who = "%s, alone" % solo.get_display_name()
 	if earners.size() > 1:
 		who = "%s and %d more" % [earners[0].get_display_name() if c.killer_name.is_empty() else c.killer_name, earners.size() - 1]
 	var tname := c.get_target_name()
 	if not who.is_empty():
 		EventLog.post("%s destroyed by %s (+%d cr bounty)" % [tname, who, total], EventLog.Kind.REWARD, null, target.global_position if is_instance_valid(target) else Vector3.INF)
 	c.mark_completed()
+
+
+## A fleet's kill: the reward split by rank and damage (MercFleet.split).
+## False when nobody in the fleet can be paid (then the usual split runs).
+func _resolve_fleet_bounty(c: BountyContract, killer: Node3D, d: Durability) -> bool:
+	var f := c.fleet
+	var k := killer as Ship
+	if k and k.captain:
+		c.killer_name = k.captain.captain_name
+	var parts := f.split(c.reward, d.tally if d else {})
+	if parts.is_empty():
+		return false
+	var total := 0
+	var lines: PackedStringArray = []
+	for p in parts:
+		var s := p["ship"] as Ship
+		var pay := pay_captain(s, int(p["credits"]), c)
+		total += pay
+		c.payouts.append({"ship_name": s.get_display_name(), "credits": pay})
+		lines.append("%s %s%s" % [String(p["name"]).get_slice(" ", 0), UIUtil.amount(pay), " (left early)" if bool(p["left_early"]) else ""])
+		s.show_toast("+%d cr fleet share" % pay, Color(1.0, 0.85, 0.4))
+		if s.captain:
+			s.captain.note_job(true)
+	var target := c.target
+	EventLog.post("%s's fleet (%d) destroyed %s, %s cr split: %s" % [f.leader_name, f.roster.size(), c.get_target_name(), UIUtil.amount(total), ", ".join(lines)],
+			EventLog.Kind.REWARD, null, target.global_position if is_instance_valid(target) else Vector3.INF)
+	f.state = MercFleet.State.DONE
+	c.fleet = null
+	c.mark_completed()
+	return true
 
 
 func _on_contract_changed(contract: Contract) -> void:

@@ -7,8 +7,9 @@ extends Node
 ##   --progress-demo=traits     a miner back from a near-loss (Survivor,
 ##                              Shaken fading) with Crystal Hound; selected.
 ##   --progress-demo=outfitter  outfitter and outposts, captains with money;
-##                              fast-forwards through their shopping, Mk II
-##                              unlocked. The Outfitter is selected.
+##                              fast-forwards through their shopping, the
+##                              Factory tooled for Mk II and stocked with a
+##                              few parts. The Outfitter is selected.
 ##   --progress-demo=career     a Bold veteran miner quits mining for a
 ##                              mercenary berth; the new ship is selected.
 ##   --progress-demo=salvage    salvage yard, 3 salvagers and a salvage
@@ -18,10 +19,10 @@ extends Node
 ##                              captain ejects. Follows the pod home.
 ## --cam / --focus (ScreenshotMode) override the demo camera.
 
-@export var mining_offset: Vector3 = Vector3(260.0, 0.0, 180.0)
-@export var merc_offset: Vector3 = Vector3(-230.0, 0.0, 250.0)
-@export var outfitter_offset: Vector3 = Vector3(-60.0, 0.0, -300.0)
-@export var yard_offset: Vector3 = Vector3(330.0, 0.0, -200.0)
+@export var mining_offset: Vector3 = Vector3(115.0, 0.0, 80.0)
+@export var merc_offset: Vector3 = Vector3(-96.0, 0.0, 104.0)
+@export var outfitter_offset: Vector3 = Vector3(-27.0, 0.0, -134.0)
+@export var yard_offset: Vector3 = Vector3(120.0, 0.0, -73.0)
 @export var demo_seed: int = 31
 @export var max_search_time: float = 900.0
 
@@ -67,7 +68,7 @@ func _run() -> void:
 	seed(demo_seed)
 	Career.rng.seed = demo_seed
 	Economy.credits = 9000
-	Economy.materials = 1500
+	Economy.set_ore(1500, 600, 300)
 	var mine := manager.spawn_finished(manager.building_defs[0], mining_offset, deg_to_rad(-30.0))
 	await tree.process_frame
 	var follow: Node3D = mine
@@ -107,13 +108,17 @@ func _run() -> void:
 			await tree.process_frame
 			var ships := _hire(mine, [0, 1, 2, 3])
 			ships.append_array(_hire(merc, [0, 1, 2]))
-			var o := outf.get_service() as Outfitter
+			var factory := manager.get_factory()
 			for s in ships:
 				s.captain.add_reputation(Reputation.THRESHOLDS[Reputation.Rank.VETERAN] + 10.0 * float(ships.find(s)))
 				s.captain.wallet = 900
-			o.unlock_next()
+			if factory:
+				factory.upgrade_tooling()
+				for id: StringName in [&"autocannon_1", &"armor_plating_1", &"combat_thrusters_1", &"shield_projector_2", &"ore_hold_2", &"mining_laser_2"]:
+					factory.add_stock(ModuleCatalog.shared().find(id), 1)
 			_run_for(100.0)
-			o.add_rare_part(ModuleCatalog.shared().find(&"deflector_3"))
+			if factory:
+				factory.add_rare_part(ModuleCatalog.shared().find(&"deflector_3"))
 			hud.selection.select(outf)
 			follow = outf
 			dist = 260.0

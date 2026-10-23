@@ -1,7 +1,8 @@
 class_name ContractRow
 extends OverviewRow
 ## One posted contract in a list: type and target (or just the reward when
-## the list is already about one target), reward, takers and progress, and a
+## the list is already about one target), reward, takers (or the bounty's
+## fleet, "Fleet of 3 forming", or its lone wolf) and progress, and a
 ## cancel button. Click = camera flies to the contract beacon and the target
 ## is selected.
 
@@ -37,7 +38,11 @@ func refresh() -> void:
 	if subtitle_has_reward():
 		parts.append(contract.get_reward_text())
 	var n := contract.takers.size()
-	parts.append("%d on it" % n if n > 0 else contract.get_status_name().to_lower())
+	var team := (contract as BountyContract).get_team_text() if contract is BountyContract else ""
+	if not team.is_empty():
+		parts.append(team)
+	else:
+		parts.append("%d on it" % n if n > 0 else contract.get_status_name().to_lower())
 	var prog := contract.get_progress_text()
 	if not prog.is_empty() and not subtitle_has_reward():
 		parts.append(prog)

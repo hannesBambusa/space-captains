@@ -10,6 +10,11 @@ extends Node
 ## distances |orbit - d| .. orbit + d from the planet). On top of that every
 ## structure links to the station complex by a corridor ([member links],
 ## CorridorNetwork), which decides the link range and the building's yaw.
+##
+## The Factory ([member factory_def]) is there from the start: placed at
+## [member factory_offset] with its corridor as if the player had built it,
+## counted like any structure (link range, overlaps), but not in the build
+## menu and never built again (max 1).
 
 signal building_added(building: Building)
 signal building_changed(building: Building)
@@ -19,9 +24,14 @@ const GROUP := "building_manager"
 @export var solar_system_path: NodePath = ^"../SolarSystem"
 ## Buildable defs, one build menu button each.
 @export var building_defs: Array[BuildingDef] = []
+## Pre-built at game start (not buildable). Null = none.
+@export var factory_def: BuildingDef
+## Frame-local offset of the Factory: out of the way of the spots near the
+## station, its dock mouth turned away from the complex.
+@export var factory_offset: Vector3 = Vector3(-138.0, 0.0, -40.0)
 @export var zone_radius: float = 3000.0
 ## Keep-out radius around the station hub.
-@export var station_clearance: float = 90.0
+@export var station_clearance: float = 75.0
 ## Extra gap kept from the host planet's surface.
 @export var planet_margin: float = 60.0
 
@@ -31,6 +41,8 @@ var buildings: Array[Building] = []
 ## Corridors joining the station and its structures (created with the frame).
 var links: CorridorNetwork
 var rng := RandomNumberGenerator.new()
+## The start Factory building (null without [member factory_def]).
+var factory_building: Building
 
 var _counts: Dictionary = {}
 
@@ -97,8 +109,8 @@ func plan_placement(def: BuildingDef, offset: Vector3, check_cost: bool = true, 
 	var base := _base_problem(def, offset)
 	if not base.is_empty():
 		p.problem = base
-	elif p.is_valid() and check_cost and not Economy.can_afford(def.cost_credits, def.cost_materials):
-		p.problem = Economy.shortfall_text(def.cost_credits, def.cost_materials)
+	elif p.is_valid() and check_cost and not Economy.can_afford(def.cost_credits, def.cost_ore()):
+		p.problem = Economy.shortfall_text(def.cost_credits, def.cost_ore())
 	return p
 
 
@@ -154,7 +166,7 @@ func place(def: BuildingDef, offset: Vector3, yaw: float = NAN) -> Building:
 	var p := plan_placement(def, offset, true, yaw)
 	if not p.is_valid():
 		return null
-	if not Economy.spend(def.cost_credits, def.cost_materials):
+	if not Economy.spend(def.cost_credits, def.cost_ore()):
 		return null
 	var b := _spawn(def, offset, p.yaw)
 	links.commit(p, b)
@@ -189,11 +201,17 @@ func remove_building(b: Building) -> void:
 	b.queue_free()
 
 
-func _spawn(def: BuildingDef, offset: Vector3, yaw: float) -> Building:
+## The Factory service of the start Factory, or null.
+func get_factory() -> Factory:
+	return factory_building.get_service() as Factory if is_instance_valid(factory_building) else null
+
+
+## [param label] "" = "<name> <n>".
+func _spawn(def: BuildingDef, offset: Vector3, yaw: float, label: String = "") -> Building:
 	var n: int = _counts.get(def.id, 0) + 1
 	_counts[def.id] = n
 	var b := Building.new()
-	b.setup(def, "%s %d" % [def.display_name, n], SimClock.time)
+	b.setup(def, label if not label.is_empty() else "%s %d" % [def.display_name, n], SimClock.time)
 	b.captain_rng = rng
 	b.position = Vector3(offset.x, 0.0, offset.z)
 	b.rotation.y = yaw
@@ -230,3 +248,18 @@ func _make_frame() -> void:
 	links.name = "Corridors"
 	frame.add_child(links)
 	links.setup(solar_system.home_station.get_node_or_null(^"Station") as HomeStation)
+	_spawn_factory()
+
+
+## The start Factory with its corridor, finished. The link turns its dock
+## mouth away from the station.
+func _spawn_factory() -> void:
+	if factory_def == null:
+		return
+	var p := links.plan(factory_def, factory_offset)
+	if not p.is_valid():
+		push_warning("BuildingManager: Factory link at %s: %s" % [factory_offset, p.problem])
+	factory_building = _spawn(factory_def, factory_offset, p.yaw, factory_def.display_name)
+	if p.has_link:
+		links.commit(p, factory_building)
+	factory_building.finish_construction()

@@ -9,10 +9,10 @@ extends Node
 ## Without --cam/--focus the camera follows the outpost (or the station).
 
 ## Station-relative spot used for the demo outpost and the valid ghost.
-@export var demo_offset: Vector3 = Vector3(260.0, 0.0, 180.0)
+@export var demo_offset: Vector3 = Vector3(115.0, 0.0, 80.0)
 @export var invalid_offset: Vector3 = Vector3(70.0, 0.0, -40.0)
 ## Valid ghost spot: within corridor reach of the station.
-@export var ghost_offset: Vector3 = Vector3(-90.0, 0.0, 220.0)
+@export var ghost_offset: Vector3 = Vector3(-75.0, 0.0, 125.0)
 @export var demo_seed: int = 7
 
 var _ghost_offset := Vector3.INF

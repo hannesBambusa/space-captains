@@ -1,2 +1,6 @@
 build/
 .godot/
+
+# Python caches from blender scripts, CI page staging
+blender/__pycache__/
+_site/

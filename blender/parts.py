@@ -451,3 +451,145 @@ def ship_previews(name, span, target=(0.0, 0.0, 0.0)):
     cam.data.ortho_scale = span * 1.35
     scene.render.resolution_x, scene.render.resolution_y = 1200, 1200
     common.render(f"{common.PREVIEW_DIR}/{name}_top.png")
+
+
+# --- Added for the factory (gen_factory.py). Existing methods untouched.
+
+class PanelPart(Part):
+    """Part that also writes the "panel" UV layer (metres in each primitive's own frame)
+    that station_textures bakes plates, seams and rivets from. box/beam/cyl/tube use
+    their own frame, lathe unrolls like gen_station.Part. Anything else (slab, loft,
+    sphere, torus, rock, part_hull) gets a per-face world box projection in finish().
+    Box bevel offset is capped at `bevel_max` metres so big blocks keep crisp edges."""
+
+    bevel_max = 0.35
+
+    def __init__(self, name, mats):
+        super().__init__(name, mats)
+        self.uv = self.bm.loops.layers.uv.new("panel")
+        self.n_prims = 0
+
+    def _offset(self):
+        self.n_prims += 1
+        k = self.n_prims
+        return Vector(((k * 7) % 31 * 64.0, (k * 13) % 29 * 64.0))
+
+    def _planar_uv(self, faces, inv, shift):
+        off = self._offset()
+        r3 = inv.to_3x3()
+        for f in faces:
+            f.normal_update()
+            n = r3 @ f.normal
+            k = max(range(3), key=lambda i: abs(n[i]))
+            a, b = ((1, 2), (0, 2), (0, 1))[k]
+            for lp in f.loops:
+                q = inv @ lp.vert.co + shift
+                lp[self.uv].uv = (q[a] + off.x, q[b] + off.y)
+
+    def box(self, center, size, mat, rot_z=0.0, bevel=0.12, r=None):
+        fr = Matrix.Translation(center) @ (r if r is not None else Matrix.Rotation(rot_z, 4, "Z"))
+        m = fr @ Matrix.Diagonal((*size, 1.0))
+        verts = bmesh.ops.create_cube(self.bm, size=1.0, matrix=m)["verts"]
+        idx = self.mi(mat)
+        faces = self._faces(verts)
+        for f in faces:
+            f.material_index = idx
+        if bevel > 0:
+            edges = list({e for v in verts for e in v.link_edges})
+            res = bmesh.ops.bevel(self.bm, geom=verts + edges,
+                                  offset=min(min(size) * bevel, self.bevel_max), segments=1,
+                                  affect="EDGES", profile=0.5, clamp_overlap=True)
+            for f in res["faces"]:
+                f.material_index = idx
+            faces = list({g for f in res["faces"] for v in f.verts for g in v.link_faces})
+        self._planar_uv(faces, fr.inverted(), Vector(size) / 2)
+
+    def beam(self, p0, p1, w, h, mat, up=Vector((0, 0, 1))):
+        p0, p1 = Vector(p0), Vector(p1)
+        d = p1 - p0
+        x = d.normalized()
+        if abs(x.dot(up)) > 0.99:
+            up = Vector((1, 0, 0))
+        z = (up - x * up.dot(x)).normalized()
+        y = z.cross(x)
+        rm = Matrix((x, y, z)).transposed().to_4x4()
+        self.box((p0 + p1) / 2, (d.length, w, h), mat, r=rm, bevel=0.0)
+
+    def cyl(self, center, r1, r2, depth, mat, segs=12, axis_rot=None):
+        m = Matrix.Translation(center)
+        if axis_rot is not None:
+            m = m @ axis_rot
+        res = bmesh.ops.create_cone(self.bm, cap_ends=True, cap_tris=False, segments=segs,
+                                    radius1=r1, radius2=r2, depth=depth, matrix=m)
+        idx = self.mi(mat)
+        faces = self._faces(res["verts"])
+        for f in faces:
+            f.material_index = idx
+        inv = m.inverted()
+        r3 = inv.to_3x3()
+        off = self._offset()
+        rm, ra = max(r1, r2), (r1 + r2) / 2
+        for f in faces:
+            f.normal_update()
+            pts = [inv @ lp.vert.co for lp in f.loops]
+            if abs((r3 @ f.normal).z) > 0.7:
+                uvs = [(q.x + rm, q.y + rm) for q in pts]
+            else:
+                th = [math.atan2(q.y, q.x) for q in pts]
+                if max(th) - min(th) > math.pi:
+                    th = [t + 2 * math.pi if t < 0 else t for t in th]
+                uvs = [(t * ra, q.z + depth / 2) for t, q in zip(th, pts)]
+            for lp, uv in zip(f.loops, uvs):
+                lp[self.uv].uv = (uv[0] + off.x, uv[1] + off.y)
+
+    def lathe(self, profile, segs, mat_fn, matrix=None, start=0.0):
+        m = matrix or Matrix()
+        rings = []
+        for i in range(segs):
+            a = start + 2 * math.pi * i / segs
+            ca, sa = math.cos(a), math.sin(a)
+            rings.append([self.bm.verts.new(m @ Vector((r * ca, r * sa, z))) for r, z in profile])
+        off = self._offset()
+        s_len = [0.0]
+        for j in range(len(profile) - 1):
+            s_len.append(s_len[-1] + math.hypot(profile[j + 1][0] - profile[j][0],
+                                                profile[j + 1][1] - profile[j][1]))
+        r_max = max(r for r, _ in profile)
+        chunk = max(1, round(segs / max(1, round(2 * math.pi * r_max / 12.0))))
+        for i in range(segs):
+            a, b = rings[i], rings[(i + 1) % segs]
+            cu = off.x + (i // chunk) * 64.0
+            for j in range(len(profile) - 1):
+                if profile[j][0] < 1e-4 and profile[j + 1][0] < 1e-4:
+                    continue
+                n_pl = max(1, round(math.pi * (profile[j][0] + profile[j + 1][0]) / 2.0))
+                u0, u1 = i / segs * n_pl * 2.0 + cu, (i + 1) / segs * n_pl * 2.0 + cu
+                v0, v1 = s_len[j] + off.y, s_len[j + 1] + off.y
+                if profile[j][0] < 1e-4:
+                    vs, uvs = (a[j], b[j + 1], a[j + 1]), ((u0, v0), (u1, v1), (u0, v1))
+                elif profile[j + 1][0] < 1e-4:
+                    vs, uvs = (a[j], b[j], a[j + 1]), ((u0, v0), (u1, v0), (u0, v1))
+                else:
+                    vs = (a[j], b[j], b[j + 1], a[j + 1])
+                    uvs = ((u0, v0), (u1, v0), (u1, v1), (u0, v1))
+                f = self.bm.faces.new(vs)
+                f.material_index = self.mi(mat_fn(i, j))
+                for lp, uv in zip(f.loops, uvs):
+                    lp[self.uv].uv = uv
+        axis = [v for ring in rings for v, (r, _) in zip(ring, profile) if r < 1e-4]
+        if axis:
+            bmesh.ops.remove_doubles(self.bm, verts=axis, dist=1e-3)
+
+    def finish(self, parent, sharp_deg=32):
+        # faces no helper projected (all UVs still 0, 0): world box projection
+        off = Vector((17 * 64.0, 23 * 64.0))
+        for f in self.bm.faces:
+            if all(lp[self.uv].uv.length < 1e-6 for lp in f.loops):
+                f.normal_update()
+                n = f.normal
+                k = max(range(3), key=lambda i: abs(n[i]))
+                a, b = ((1, 2), (0, 2), (0, 1))[k]
+                for lp in f.loops:
+                    q = lp.vert.co
+                    lp[self.uv].uv = (q[a] + off.x, q[b] + off.y)
+        return super().finish(parent, sharp_deg)

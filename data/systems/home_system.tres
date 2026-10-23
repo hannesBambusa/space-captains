@@ -183,7 +183,7 @@ atmosphere_color = Color(0.6, 0.8, 1, 0.6)
 
 [sub_resource type="Resource" id="Resource_den_talon"]
 script = ExtResource("5_den")
-name = "Rustjaw Den"
+name = "Rustjaw Hideout"
 gang = "Rustjaw"
 belt_name = "Talon Reach"
 angle_deg = 212.0
@@ -200,7 +200,7 @@ hunt_range = 9000.0
 
 [sub_resource type="Resource" id="Resource_den_veil"]
 script = ExtResource("5_den")
-name = "Ashfang Den"
+name = "Ashfang Hideout"
 gang = "Ashfang"
 belt_name = "Crystal Veil"
 angle_deg = 168.0

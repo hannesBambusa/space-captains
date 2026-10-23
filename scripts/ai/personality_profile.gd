@@ -38,12 +38,15 @@ extends Resource
 @export_range(0.0, 1.0, 0.01) var flee_threat: float = 0.5
 ## Mercenaries break off and go home to repair below this hull fraction.
 @export_range(0.0, 1.0, 0.01) var retreat_hull: float = 0.4
+## Mercenaries: after a fight, go home to repair (paid) below this hull
+## fraction (minus the Nerve offset). Cautious near any damage, Greedy late.
+@export_range(0.0, 1.0, 0.01) var repair_hull: float = 0.75
 ## Mercenaries: chance per idle evaluation to fly a patrol around home.
 @export_range(0.0, 1.0, 0.01) var patrol_chance: float = 0.5
 
 @export_group("Attributes")
-## Base for Nerve, Greed, Diligence, Piloting, Skill, Loyalty (1..10).
-@export var attribute_base: PackedInt32Array = [5, 5, 5, 5, 5, 5]
+## Base for Nerve, Greed, Diligence, Piloting, Skill, Loyalty, Teamwork (1..10).
+@export var attribute_base: PackedInt32Array = [5, 5, 5, 5, 5, 5, 5]
 ## Each attribute is rolled base +- this, clamped 1..10.
 @export var attribute_spread: int = 2
 

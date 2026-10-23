@@ -1,7 +1,8 @@
 class_name HUD
 extends CanvasLayer
 ## Game HUD root. Finds the world-side controllers by group and hands itself
-## to each widget. Tab toggles the system overview.
+## to each widget. Tab toggles the system overview;
+## M cycles the ship markers (see [ShipMarkers]).
 
 const GROUP := "hud"
 
@@ -14,6 +15,8 @@ const GROUP := "hud"
 @onready var captain_panel: CaptainPanel = $Root/CaptainPanel
 @onready var target_panel: TargetPanel = $Root/TargetPanel
 @onready var event_feed: EventFeed = $Root/EventFeed
+@onready var ship_markers: ShipMarkers = $Root/ShipMarkers
+@onready var minimap: Minimap = $Root/Minimap
 
 var solar_system: SolarSystem
 var camera: RTSCamera
@@ -38,6 +41,8 @@ func _ready() -> void:
 	captain_panel.setup(self)
 	target_panel.setup(self)
 	event_feed.setup(self)
+	ship_markers.setup(self)
+	minimap.setup(self, ship_markers)
 	if selection:
 		selection.selection_changed.connect(func(t: Node3D) -> void:
 			marker.select_target = t if (t is Building or t is Ship or t is ScavengerDen or t is ScrapField) else null)

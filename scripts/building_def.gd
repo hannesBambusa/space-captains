@@ -12,7 +12,9 @@ extends Resource
 ## .glb or .tscn. Missing file = procedural placeholder.
 @export_file("*.glb", "*.tscn") var model_path: String = ""
 @export var cost_credits: int = 0
-@export var cost_materials: int = 0
+## Ore cost: mostly iron; advanced structures also need titanium.
+@export var cost_iron: int = 0
+@export var cost_titanium: int = 0
 @export var build_time: float = 20.0
 ## Clearance radius on the plane, used for placement and picking.
 @export var footprint_radius: float = 35.0
@@ -22,6 +24,19 @@ extends Resource
 @export var placeholder_tint: Color = Color(0, 0, 0, 0)
 ## Optional service node added to the building when placed (e.g. Outfitter).
 @export var service_script: Script
+
+@export_group("Link")
+## Stands on its own (defense turrets): no corridor, placed anywhere in the
+## build zone clear of other footprints, corridors and docking lanes; not a
+## link target for other structures, not part of the complex bounds.
+@export var standalone: bool = false
+## Radius of a range ring shown around the placement ghost, m (0 = none).
+@export var preview_range: float = 0.0
+## Clear gap kept to other structures, m. -1 = CorridorNetwork.min_gap.
+## Small structures (turrets) sit closer to the complex on a short strut.
+@export var link_gap: float = -1.0
+## Longest corridor link, m. -1 = CorridorNetwork.max_link.
+@export var link_reach: float = -1.0
 
 @export_group("Hiring")
 ## Max ships this building can hold. 0 = no hiring.
@@ -44,6 +59,11 @@ extends Resource
 @export var outer_berth_side: float = -1.0
 ## Gap between outer berths on the same side, metres.
 @export var outer_berth_step: float = 12.0
+
+
+## Ore cost in Economy.Ore order.
+func cost_ore() -> PackedInt32Array:
+	return Economy.cost(cost_iron, cost_titanium)
 
 
 func can_hire() -> bool:

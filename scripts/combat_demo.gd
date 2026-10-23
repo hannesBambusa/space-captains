@@ -11,19 +11,28 @@ extends Node
 ##                            with two escorts in formation, shield beacon.
 ##   --combat-demo=bounty     bounty on a scavenger: target panel and red
 ##                            reticle, a merc on the way.
-##   --combat-demo=den        Rustjaw Den selected, its scavengers around it.
-##   --combat-demo=denfight   bounty on Rustjaw Den, mercs attacking it.
+##   --combat-demo=den        Rustjaw Hideout selected, its scavengers around it.
+##   --combat-demo=denfight   bounty on Rustjaw Hideout, mercs attacking it.
+##   --combat-demo=fleet      bounty on Rustjaw Hideout: the mercs (team
+##                            players) form a fleet, fly out in formation
+##                            and attack it; the leader is selected.
 ##   --combat-demo=outpost    the Mercenary Outpost with its mercs docked.
 ##   --combat-demo=scrap      a scrap field from a fresh kill, selected.
 ##   --combat-demo=captain    a fighting merc selected: captain panel.
 ##   --combat-demo=feed       wide view after a raid: event feed and overview.
 ##   --combat-demo=swarm      performance check: two more outposts (16 player
 ##                            ships) and a 16-ship raid fighting near home.
+##   --combat-demo=defense    a Shield Generator and two Defense Turrets; the
+##                            mercs are away on a bounty when a 4-ship raid
+##                            hits the station shield bubble, turrets firing.
+##                            Frames the bubble.
+##   --combat-demo=turret     ... the same fight, close on a firing turret
+##                            (selected: its panel).
 ## Works with --advance and --time-scale (MiningDemo reads those); --cam /
 ## --focus (ScreenshotMode) override the demo camera.
 
-@export var mining_offset: Vector3 = Vector3(260.0, 0.0, 180.0)
-@export var merc_offset: Vector3 = Vector3(-230.0, 0.0, 250.0)
+@export var mining_offset: Vector3 = Vector3(115.0, 0.0, 80.0)
+@export var merc_offset: Vector3 = Vector3(-96.0, 0.0, 104.0)
 @export var demo_seed: int = 23
 @export var max_search_time: float = 600.0
 
@@ -120,8 +129,8 @@ func _run() -> void:
 					follow = fighter
 				dist = 900.0
 		"swarm":
-			var extra_m := manager.spawn_finished(manager.building_defs[0], mining_offset + Vector3(150.0, 0.0, 260.0), 0.0)
-			var extra_c := manager.spawn_finished(manager.building_defs[1], merc_offset + Vector3(-180.0, 0.0, 220.0), 0.0)
+			var extra_m := _place_near(manager.building_defs[0], rad_to_deg(atan2(mining_offset.z, mining_offset.x)) + 15.0, 200)
+			var extra_c := _place_near(manager.building_defs[1], rad_to_deg(atan2(merc_offset.z, merc_offset.x)) + 15.0, 200)
 			await tree.process_frame
 			for p in 4:
 				for b in [extra_m, extra_c]:
@@ -140,6 +149,46 @@ func _run() -> void:
 			follow = sys.home_station
 			dist = 1600.0
 			print("CombatDemo swarm: %d ships, %d tracers" % [tree.get_nodes_in_group(Ship.GROUP).size(), world.projectiles.count()])
+		"defense", "turret":
+			var gen := _place_near(_def(&"shield_generator"), -95.0)
+			var turrets: Array[Building] = []
+			for a in [-25.0, -60.0]:
+				var t := _place_near(_def(&"defense_turret"), a, 200)
+				if t:
+					turrets.append(t)
+			# Every merc out on a bounty far from home.
+			ContractBoard.post_bounty(sys.dens[0], 2400, 4)
+			SimStepper.run(tree, 150.0, 0.1, func() -> bool:
+				for m in mercs:
+					if is_instance_valid(m) and Combat.flat_distance(m.global_position, home) < 3500.0:
+						return false
+				return true)
+			# Whoever turned the bounty down is sent off duty.
+			for m in mercs:
+				if is_instance_valid(m) and Combat.flat_distance(m.global_position, home) < 3500.0:
+					m.retire()
+			var raiders := world.raids.trigger_raid(4, sys.dens[1] if sys.dens.size() > 1 else sys.dens[0])
+			var bubble := StationShield.find(tree)
+			var from := Vector3(cos(deg_to_rad(-40.0)), 0.0, sin(deg_to_rad(-40.0)))
+			for i in raiders.size():
+				raiders[i].global_position = home + from * (1500.0 + 80.0 * i) + from.cross(Vector3.UP) * (120.0 * i - 180.0)
+			SimStepper.run(tree, max_search_time, 0.05, func() -> bool:
+				var firing := false
+				for t in turrets:
+					var dt := t.get_service() as DefenseTurret if is_instance_valid(t) else null
+					if dt and dt.mode == DefenseTurret.Mode.FIRING:
+						firing = true
+				return firing and bubble and bubble.hits_taken > 16 and bubble.seconds_since_hit() < 0.3 and world.projectiles.count() > 6)
+			follow = bubble if bubble else sys.home_station
+			dist = (bubble.radius if bubble else 400.0) * 3.1
+			yaw = rad_to_deg(atan2(-from.x, -from.z)) + 180.0 + 25.0
+			if _view == "turret" and not turrets.is_empty() and is_instance_valid(turrets[0]):
+				hud.selection.select(turrets[0])
+				follow = turrets[0]
+				dist = 85.0
+				yaw = rad_to_deg(atan2(-from.x, -from.z)) + 180.0 + 35.0
+			print("CombatDemo defense: generator %s, %d turrets, shield %s %d HP, %d hits" % [
+					gen != null, turrets.size(), bubble.get_state_name() if bubble else "-", roundi(bubble.hp) if bubble else 0, bubble.hits_taken if bubble else 0])
 		"escort":
 			var talon := _belt("Talon Reach")
 			var mc := ContractBoard.post_mining(talon, 220)
@@ -174,6 +223,21 @@ func _run() -> void:
 			hud.selection.select(mark)
 			follow = mark
 			dist = 420.0
+		"fleet":
+			var den := sys.dens[0]
+			for s in mercs:
+				s.captain.teamwork = 8
+			ContractBoard.post_bounty(den, 1800, 4)
+			var lead := _until(mercs, func(s: Ship) -> bool:
+				var mb := s.brain as MercenaryBrain
+				if mb.fleet == null or mb.fleet.leader != s or mb.fleet.state != MercFleet.State.ENGAGING or mb.fleet.members.size() < 2:
+					return false
+				return s.global_position.distance_to(den.global_position) < 1100.0 and world.projectiles.count() > 2)
+			if lead:
+				hud.selection.select(lead)
+				follow = lead
+				dist = 420.0
+				yaw = _sunlit_yaw(den, 20.0)
 		"den", "denfight":
 			var den := sys.dens[0]
 			if _view == "denfight":
@@ -246,6 +310,30 @@ func _anchor_at(pos: Vector3) -> Node3D:
 static func _sunlit_yaw(n: Node3D, offset_deg: float) -> float:
 	var p := n.global_position
 	return rad_to_deg(atan2(-p.x, -p.z)) + offset_deg
+
+
+func _def(id: StringName) -> BuildingDef:
+	for d in manager.building_defs:
+		if d.id == id:
+			return d
+	return null
+
+
+## Places [param def] finished on the first valid spot near the station,
+## searching outward from [param min_dist] m around [param angle_deg]
+## (frame-local, from +X).
+func _place_near(def: BuildingDef, angle_deg: float, min_dist: int = 100) -> Building:
+	if def == null:
+		return null
+	for r in range(min_dist, 520, 10):
+		for k in 15:
+			var a := deg_to_rad(angle_deg + ceilf(k / 2.0) * 10.0 * (1.0 if k % 2 == 1 else -1.0))
+			var off := Vector3(cos(a), 0.0, sin(a)) * float(r)
+			var p := manager.plan_placement(def, off, false)
+			if p.is_valid():
+				return manager.spawn_finished(def, off, p.yaw)
+	push_warning("CombatDemo: no spot for %s" % def.display_name)
+	return null
 
 
 func _belt(belt_name: String) -> SystemBelt:

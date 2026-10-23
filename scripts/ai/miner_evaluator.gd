@@ -10,7 +10,11 @@ extends RoleEvaluator
 ## premium_factor times the fair reward (MiningRules.default_reward).
 ## Attributes: Greed scales the pay term, Nerve the danger term, Loyalty adds
 ## a small bonus. An escorted mining contract (linked EscortContract) counts
-## as [constant ESCORT_DANGER_RELIEF] danger levels safer.
+## as [constant ESCORT_DANGER_RELIEF] danger levels safer. Well-equipped
+## ships feel safer too: every [constant GEAR_TIERS_PER_LEVEL] module tiers in
+## the defense and engine slots count one danger level less (at most
+## [constant GEAR_MAX_RELIEF]), so Mk II/III gear from the Factory opens the
+## dangerous belts.
 ## Traits (see CaptainTraits): Crystal Hound +[constant CRYSTAL_HOUND_BONUS] on
 ## crystal belts; Lone Wolf ignores escort cover and scores solo work
 ## +[constant LONE_WOLF_BONUS]; Union Rep scores below-fair pay
@@ -22,6 +26,20 @@ const ESCORT_DANGER_RELIEF := 2
 const CRYSTAL_HOUND_BONUS := 0.3
 const LONE_WOLF_BONUS := 0.1
 const UNION_SULK := 0.35
+const GEAR_TIERS_PER_LEVEL := 3
+const GEAR_MAX_RELIEF := 2
+
+
+## Danger levels a ship's defense and engine modules take off.
+static func gear_relief(ship: Ship) -> int:
+	if ship == null or ship.loadout == null:
+		return 0
+	var tiers := 0
+	for slot: ShipModule.Slot in [ShipModule.Slot.DEFENSE, ShipModule.Slot.ENGINE]:
+		var m := ship.loadout.get_module(slot)
+		if m:
+			tiers += m.tier
+	return mini(floori(float(tiers) / GEAR_TIERS_PER_LEVEL), GEAR_MAX_RELIEF)
 
 
 func handles(type: Contract.Type) -> bool:
@@ -42,6 +60,8 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 	var lone := cap != null and cap.has_trait(CaptainTraits.LONE_WOLF)
 	if escorted and not lone:
 		danger = maxi(danger - ESCORT_DANGER_RELIEF, 1)
+	var gear := gear_relief(brain.ship)
+	danger = maxi(danger - gear, 1)
 	var fair := ContractBoard.mining_rules.default_reward(mc.belt)
 	var pay := prof.pay_weight * float(mc.reward) / PAY_SCALE * (cap.pay_scale() if cap else 1.0)
 	var dist := prof.distance_weight * km / DIST_SCALE_KM
@@ -58,7 +78,7 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 			traits -= UNION_SULK
 			sulking = true
 	e.utility = pay - dist - dang + loyal + traits + brain.rng.randf_range(-prof.noise, prof.noise)
-	e.terms = {"pay": pay, "distance": dist, "danger": dang, "km": km, "fair": fair, "escorted": escorted, "traits": traits}
+	e.terms = {"pay": pay, "distance": dist, "danger": dang, "km": km, "fair": fair, "escorted": escorted, "traits": traits, "gear": gear}
 	if Economy.credits < mc.reward:
 		e.reason = CANT_PAY
 	elif prof.max_trip_km > 0.0 and km > prof.max_trip_km:

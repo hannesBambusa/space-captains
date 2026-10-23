@@ -20,6 +20,8 @@ extends RefCounted
 ## toward traits (Crystal Hound, Lone Wolf); back in the berth the ship
 ## counts the trip's damage (Ship.on_docked_home). Salvage contracts run the
 ## same trip (SalvagerShip does the work, the board pays per load).
+## Repairs: a badly damaged captain who can pay waits in the berth for the
+## (paid, RepairBay) repairs before the next trip.
 
 signal state_changed(brain: CaptainBrain)
 ## A decision on a contract: accepted, or refused with a reason.
@@ -221,6 +223,10 @@ func score_contracts(contracts: Array[Contract] = []) -> RoleEvaluator.Evaluatio
 
 
 func _decide() -> void:
+	if ship.hull_fraction() < MercenaryEvaluator.MIN_HULL and RepairBay.can_afford(ship):
+		last_decision = "Repairing first (hull %d%%)" % roundi(ship.hull_fraction() * 100.0)
+		_back_to_docked()
+		return
 	var contracts := ContractBoard.get_available()
 	var e := evaluator.pick(self, contracts)
 	if e == null:
@@ -330,7 +336,7 @@ func _deliver() -> void:
 					captain.add_trait(CaptainTraits.CRYSTAL_HOUND)
 			captain.note_job(bool(res.get("escorted", false)))
 		ship.on_cargo_delivered()
-		ship.show_toast("+%d materials" % mats, Color(0.55, 1.0, 0.65))
+		ship.show_toast("+%d %s" % [mats, Economy.ORE_NAMES[Economy.ore_of_belt(trip.ore)].to_lower()], Color(0.55, 1.0, 0.65))
 	elif trip.loaded and c is SalvageContract:
 		var scrap := roundi(float(trip.meta.get("scrap", 0)) * trip.cargo)
 		var res := ContractBoard.deliver_salvage_load(c as SalvageContract, ship, scrap)
@@ -341,7 +347,7 @@ func _deliver() -> void:
 			captain.add_reputation(Reputation.SALVAGE_LOAD * clampf(float(scrap) / float(SalvageContract.LOAD_SCRAP), 0.3, 1.5))
 			captain.note_job(bool(res.get("escorted", false)))
 		ship.on_cargo_delivered()
-		ship.show_toast("+%d materials" % mats, Color(0.55, 1.0, 0.65))
+		ship.show_toast("+%d scrap metal" % mats, Color(0.55, 1.0, 0.65))
 	else:
 		_release(c)
 	trip = null

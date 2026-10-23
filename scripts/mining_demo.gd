@@ -11,13 +11,15 @@ extends Node
 ##   --mining-demo=docking    ... fast-forwards until a miner backs into the hangar.
 ##   --mining-demo=crossing   ... fast-forwards until a miner flies its lane over
 ##                            (or under) a belt, follows it.
+##   --mining-demo=unload     ... fast-forwards until a miner unloads at the
+##                            outpost, mid-swing of the crane arm (lights on).
 ##   --mining-demo=captain    ... only Talon Reach (fair) and Crystal Veil (low pay):
 ##                            the Cautious captain refuses; its panel is open.
 ##   --advance=<sim seconds>  fast-forward this much after setup (any view).
 ##   --time-scale=<x>         sim speed multiplier (any value, e.g. 8).
 ## --cam / --focus (ScreenshotMode) override the demo camera.
 
-@export var demo_offset: Vector3 = Vector3(260.0, 0.0, 180.0)
+@export var demo_offset: Vector3 = Vector3(115.0, 0.0, 80.0)
 @export var demo_seed: int = 11
 ## Upper bound for "until" fast-forwards, sim seconds.
 @export var max_search_time: float = 400.0
@@ -26,6 +28,7 @@ var _view := ""
 var _advance := 0.0
 var _time_scale := 0.0
 var _has_view := false
+var _yaw_offset := 40.0
 
 
 func _ready() -> void:
@@ -42,6 +45,8 @@ func _ready() -> void:
 			_time_scale = arg.trim_prefix("--time-scale=").to_float()
 		elif arg.begins_with("--cam=") or arg.begins_with("--focus="):
 			_has_view = true
+		elif arg.begins_with("--demo-yaw="):
+			_yaw_offset = arg.trim_prefix("--demo-yaw=").to_float()
 	if _time_scale > 0.0:
 		SimClock.set_speed(_time_scale)
 	if on:
@@ -139,6 +144,20 @@ func _run() -> void:
 				# Look into the hangar mouth (outpost +Z).
 				var mouth := outpost.global_basis.z
 				yaw = rad_to_deg(atan2(mouth.x, mouth.z)) + 35.0
+		"unload":
+			var fx := outpost.get_unload_fx()
+			if fx:
+				SimStepper.run(tree, max_search_time * 2.0, 0.05, func() -> bool:
+					return fx.is_unloading() and fx.swing > 0.45 and fx.swing < 0.7 and fx.chunks_spawned > 0)
+			# Frame the crane: between the hold and the hopper.
+			var anchor := Node3D.new()
+			anchor.name = "UnloadView"
+			outpost.add_child(anchor)
+			anchor.position = Vector3(14.0, 0.0, 9.0)
+			follow = anchor
+			dist = 55.0
+			var side := outpost.global_basis.x
+			yaw = rad_to_deg(atan2(side.x, side.z)) + _yaw_offset
 		"captain":
 			var cautious := ships[1] if ships.size() > 1 else null
 			_until(ships, func(_s: Ship) -> bool:

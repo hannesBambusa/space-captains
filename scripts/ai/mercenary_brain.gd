@@ -10,10 +10,19 @@ extends CaptainBrain
 ##   launch), fly in formation, engage what comes near it, and finish when it
 ##   delivers (the board pays per trip) or docks.
 ## - Retreat: below the retreat hull level (profile minus Nerve) the merc
-##   drops its job and goes home; docked, it repairs (REPAIRING) before it
-##   takes new work.
+##   drops its job and goes home; docked, it repairs (REPAIRING, paid from
+##   its wallet, see RepairBay) before it takes new work. A broke merc
+##   repairs what it can pay for and flies on damaged.
+## - Repairs after a fight: patrolling or defending with the hull below the
+##   personality's repair level ([method repair_level]) and no hostile near,
+##   it goes home to dock and repair. Escorts and fleet members keep their
+##   job (they repair when it ends) unless below the retreat level.
 ## Target choice: whoever attacks the merc or its ward first, then the
 ## nearest hostile in the mode's area. AI checks run on a timer.
+## Fleets ([MercFleet]): a bounty too strong for one ship is taken by a
+## fleet (or by a lone wolf alone, [member solo_brave], who also holds on
+## longer: [constant SOLO_RETREAT_SCALE]). Members fly the fleet's rally,
+## formation and focus target instead of their own bounty steering.
 
 enum Mode { NONE, PATROL, DEFEND, BOUNTY, ESCORT }
 
@@ -34,12 +43,20 @@ const RETALIATE_RANGE := 1100.0
 ## Gives up waiting for a miner to launch after this long, sim seconds.
 const ESCORT_WAIT_LIMIT := 120.0
 ## Repairs are done at this hull fraction.
-const REPAIRED := 0.97
+const REPAIRED := RepairBay.DONE_AT
+## Calm this long (no hit, no hostile in guard range) before going home to repair.
+const REPAIR_CALM := 6.0
+## Lone wolves on a run above their weight retreat this much later.
+const SOLO_RETREAT_SCALE := 0.6
 
 var mode: Mode = Mode.NONE
 var combat_target: Node3D
 ## True while heading home to repair.
 var retreating: bool = false
+## The fleet this merc flies in (null when none).
+var fleet: MercFleet
+## On a bounty above their weight, alone.
+var solo_brave: bool = false
 
 var _ai_timer: float = 0.0
 var _patrol_until: float = 0.0
@@ -69,6 +86,17 @@ func get_status_text() -> String:
 				return "Waiting for %s" % w.get_display_name()
 			return "Escorting %s" % w.get_display_name()
 		State.HUNTING:
+			if fleet:
+				var tn := trip.contract.get_target_name() if trip and trip.contract else "?"
+				match fleet.state:
+					MercFleet.State.FORMING:
+						return "Forming up, %s's fleet (%d/%d)" % [fleet.leader_name, fleet.members.size(), fleet.wanted] if fleet.leader != ship \
+								else "Calling a fleet for %s (%d/%d)" % [tn, fleet.members.size(), fleet.wanted]
+					_:
+						return "Leading a fleet of %d to %s" % [fleet.members.size(), tn] if fleet.leader == ship \
+								else "In %s's fleet to %s" % [fleet.leader_name, tn]
+			if solo_brave:
+				return "Hunting %s alone" % (trip.contract.get_target_name() if trip and trip.contract else "bounty")
 			return "Hunting bounty"
 		State.RETURNING:
 			return "Returning for repairs" if retreating else "Returning"
@@ -117,6 +145,10 @@ func update(dt: float) -> void:
 			if ship.hull_fraction() >= REPAIRED:
 				_set_state(State.RESTING)
 				_timer = rest_duration() * 0.5
+			elif not RepairBay.can_afford(ship):
+				last_decision = "Out of credits for repairs (hull %d%%)" % roundi(ship.hull_fraction() * 100.0)
+				_set_state(State.RESTING)
+				_timer = rest_duration() * 0.5
 		State.UNDOCKING:
 			if ship.mover.path_done():
 				ship.enter_space()
@@ -132,7 +164,7 @@ func update(dt: float) -> void:
 				_end_trip()
 				retreating = false
 				mode = Mode.NONE
-				if ship.hull_fraction() < REPAIRED:
+				if ship.hull_fraction() < REPAIRED and RepairBay.can_afford(ship):
 					_set_state(State.REPAIRING)
 					_timer = 1.0
 				else:
@@ -155,13 +187,13 @@ func _decide_merc() -> void:
 		last_decision = "Scrambling to defend home"
 		_launch(Mode.DEFEND, null)
 		return
-	if ship.hull_fraction() < REPAIRED:
+	if ship.hull_fraction() < REPAIRED and RepairBay.can_afford(ship):
 		last_decision = "Repairing"
 		_set_state(State.REPAIRING)
 		_timer = 1.0
 		return
 	var e := evaluator.pick(self, ContractBoard.get_available())
-	if e and e.accept and _take(e.contract):
+	if e and e.accept and _take(e.contract, e):
 		return
 	if e and not e.accept:
 		var target := e.contract.get_target_name()
@@ -184,7 +216,14 @@ func _decide_merc() -> void:
 	_back_to_docked()
 
 
-func _take(contract: Contract) -> bool:
+func _take(contract: Contract, e: RoleEvaluator.Evaluation = null) -> bool:
+	var bounty := contract as BountyContract
+	var terms: Dictionary = e.terms if e else {}
+	if terms.has("join_fleet"):
+		if bounty == null or bounty.fleet == null:
+			return false
+		join_fleet(bounty.fleet, e)
+		return fleet != null
 	if not contract.add_taker(ship):
 		return false
 	var m := Mode.BOUNTY if contract is BountyContract else Mode.ESCORT
@@ -199,9 +238,63 @@ func _take(contract: Contract) -> bool:
 	last_refusal = ""
 	last_refusal_target = ""
 	last_decision = "Took %s, %s" % [contract.get_target_name(), contract.get_reward_text()]
+	if bounty and terms.has("call_fleet"):
+		last_decision = "Called a fleet for %s, %s" % [contract.get_target_name(), contract.get_reward_text()]
+	elif bounty and terms.has("solo_brave"):
+		last_decision = "Took on %s alone, %s" % [contract.get_target_name(), contract.get_reward_text()]
 	decided.emit(self, true, last_decision)
 	_launch(m, t)
+	if bounty and terms.has("call_fleet"):
+		MercFleet.call_fleet(bounty, ship, float(terms.get("need", 2.0)))
+	elif bounty and terms.has("solo_brave"):
+		solo_brave = true
+		bounty.claim_solo(ship)
+		EventLog.post("%s took on the %s alone" % [ship.get_display_name(), contract.get_target_name()], EventLog.Kind.COMBAT, ship)
 	return true
+
+
+# --- Fleets -------------------------------------------------------------------
+
+## Free to answer a fleet call: idle at home or on patrol, repaired.
+func can_answer_fleet() -> bool:
+	if fleet != null or trip != null or ship.dead or ship.hull_fraction() < MercenaryEvaluator.MIN_HULL:
+		return false
+	match state:
+		State.DOCKED, State.EVALUATING, State.RESTING:
+			return true
+		State.PATROLLING:
+			return mode == Mode.PATROL
+	return false
+
+
+## Joins [param f] and flies out to its rally point.
+func join_fleet(f: MercFleet, _e: RoleEvaluator.Evaluation = null) -> void:
+	var c := f.contract
+	if not f.is_recruiting() or not c.add_taker(ship):
+		return
+	var t := Trip.new()
+	t.contract = c
+	t.started_at = SimClock.time
+	last_refusal = ""
+	last_refusal_target = ""
+	last_decision = "Joined %s's fleet for %s" % [f.leader_name, c.get_target_name()]
+	decided.emit(self, true, last_decision)
+	_launch(Mode.BOUNTY, t)
+	f.join(ship)
+
+
+## Said no to [param f]'s call.
+func decline_fleet(f: MercFleet, reason: String) -> void:
+	last_decision = "Declined %s's fleet: %s" % [f.leader_name, reason.to_lower()]
+
+
+## The fleet fell apart around this merc and it goes on alone.
+func go_solo() -> void:
+	fleet = null
+	solo_brave = true
+	if trip and trip.contract is BountyContract:
+		(trip.contract as BountyContract).claim_solo(ship)
+	_enter_work_state()
 
 
 func _launch(m: Mode, t: Trip) -> void:
@@ -245,6 +338,11 @@ func return_home(for_repairs: bool) -> void:
 
 
 func _end_trip() -> void:
+	var f := fleet
+	fleet = null
+	if f:
+		f.leave(ship, false)
+	solo_brave = false
 	if trip and trip.contract:
 		trip.contract.remove_taker(ship)
 	trip = null
@@ -257,6 +355,12 @@ func on_escort_trip_completed(contract: EscortContract, _miner: Ship) -> void:
 
 
 func on_ship_destroyed() -> void:
+	var f := fleet
+	fleet = null
+	if f:
+		f.leave(ship, true)
+	if solo_brave and trip and trip.contract and captain:
+		EventLog.post("%s's solo run on %s ended in wreckage" % [captain.captain_name, trip.contract.get_target_name()], EventLog.Kind.LOSS, null, ship.global_position)
 	_end_trip()
 	combat_target = null
 	_set_state(State.DESTROYED)
@@ -271,8 +375,20 @@ func _space_update(dt: float) -> void:
 		if ship.hull_fraction() < retreat_level():
 			return_home(true)
 			return
+		if _wants_repairs():
+			if captain:
+				EventLog.post("%s heads home for repairs (hull %d%%)" % [captain.captain_name, roundi(ship.hull_fraction() * 100.0)], EventLog.Kind.INFO, ship)
+			retreating = true
+			_end_trip()
+			combat_target = null
+			_set_state(State.RETURNING)
+			return
 		if not _check_job():
 			return
+		if fleet:
+			fleet.update()
+			if not is_instance_valid(ship) or ship.dead or state == State.RETURNING:
+				return
 		combat_target = _pick_target()
 	if Combat.is_live_target(combat_target):
 		if state != State.ENGAGING:
@@ -287,6 +403,9 @@ func _space_update(dt: float) -> void:
 			_patrol_step(dt)
 			_reconsider_contracts(dt)
 		Mode.BOUNTY:
+			if fleet:
+				fleet.steer(ship)
+				return
 			var t := trip.contract.target if trip else null
 			if is_instance_valid(t):
 				ship.set_world_goal(t.global_position, Vector3.ZERO, Vector3.ZERO, 60.0)
@@ -311,12 +430,30 @@ func _reconsider_contracts(dt: float) -> void:
 		return
 	var e := evaluator.pick(self, ContractBoard.get_available())
 	if e and e.accept:
-		_take(e.contract)
+		_take(e.contract, e)
+
+
+## Hull fraction below which a patrol ends early for repairs (profile minus
+## half the Nerve offset).
+func repair_level() -> float:
+	return clampf(profile.repair_hull - 0.5 * (captain.nerve_offset() if captain else 0.0), retreat_level(), 0.97)
+
+
+## After a fight on patrol: damaged past the repair level, calm, can pay.
+func _wants_repairs() -> bool:
+	if mode != Mode.PATROL and mode != Mode.DEFEND:
+		return false
+	if ship.hull_fraction() >= repair_level() or ship.durability.seconds_since_hit() < REPAIR_CALM or not RepairBay.can_afford(ship):
+		return false
+	if Combat.is_live_target(combat_target):
+		return false
+	return Combat.nearest_hostile(ship.get_tree(), ship.global_position, RETALIATE_RANGE, ship.faction) == null
 
 
 ## Hull fraction below which this captain goes home (profile minus Nerve).
 func retreat_level() -> float:
-	return clampf(profile.retreat_hull - (captain.nerve_offset() if captain else 0.0), 0.1, 0.8)
+	var r := clampf(profile.retreat_hull - (captain.nerve_offset() if captain else 0.0), 0.1, 0.8)
+	return r * SOLO_RETREAT_SCALE if solo_brave else r
 
 
 ## False when the job ended (and the merc is now returning).
@@ -362,6 +499,14 @@ func _pick_target() -> Node3D:
 		return la
 	match mode:
 		Mode.BOUNTY:
+			if fleet:
+				# Forming up or on the way: only fight back. Engaging: the focus.
+				if fleet.state == MercFleet.State.ENGAGING:
+					if Combat.is_live_target(fleet.focus):
+						return fleet.focus
+					if Combat.is_live_target(trip.contract.target):
+						return trip.contract.target
+				return null
 			var t := trip.contract.target
 			if Combat.is_live_target(t):
 				return t

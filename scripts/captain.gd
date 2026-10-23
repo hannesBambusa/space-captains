@@ -12,6 +12,9 @@ extends Resource
 ##   Skill      the specialty: Mining or Salvage (work time) or Gunnery
 ##              (accuracy, damage)
 ##   Loyalty    a small bonus for station contracts, defence eagerness
+##   Teamwork   how readily they call or join a mercenary fleet ([MercFleet]);
+##              low Teamwork with high Nerve makes a lone wolf who takes on
+##              bounties above their weight alone
 ##
 ## Stage 3: reputation and rank ([Reputation]: rank unlocks module slots and
 ## tiers, never stats), traits from events ([CaptainTraits], at most 3, some
@@ -45,7 +48,7 @@ const PERSONALITY_HINTS: PackedStringArray = [
 	"Wants short trips and takes long breaks.",
 ]
 const SPECIALTY_NAMES: PackedStringArray = ["Mining", "Gunnery", "Salvage"]
-const ATTRIBUTE_NAMES: PackedStringArray = ["Nerve", "Greed", "Diligence", "Piloting", "Skill", "Loyalty"]
+const ATTRIBUTE_NAMES: PackedStringArray = ["Nerve", "Greed", "Diligence", "Piloting", "Skill", "Loyalty", "Teamwork"]
 const ATTRIBUTE_HINTS: PackedStringArray = [
 	"Nerve: how much danger they accept before refusing, fleeing or retreating.",
 	"Greed: how much pay matters. Greedy captains spend less at the station.",
@@ -53,7 +56,11 @@ const ATTRIBUTE_HINTS: PackedStringArray = [
 	"Piloting: top speed, turn rate and the chance to dodge a hit.",
 	"Specialty skill: Mining and Salvage shorten the work, Gunnery raises accuracy and damage.",
 	"Loyalty: favours station contracts and defending home.",
+	"Teamwork: how readily they fly in a fleet and split a bounty. Low Teamwork and high Nerve: a lone wolf who takes on big bounties alone. Lone Wolf counts 3 lower, Union Rep 2 higher.",
 ]
+## Teamwork shift from traits (see [method effective_teamwork]).
+const LONE_WOLF_TEAMWORK := -3
+const UNION_REP_TEAMWORK := 2
 
 @export var captain_name: String = ""
 @export var personality: Personality = Personality.BOLD
@@ -69,6 +76,7 @@ const ATTRIBUTE_HINTS: PackedStringArray = [
 ## Specialty skill (Mining or Gunnery, see [member specialty]).
 @export_range(1, 10) var skill: int = 5
 @export_range(1, 10) var loyalty: int = 5
+@export_range(1, 10) var teamwork: int = 5
 
 ## Career stats.
 var loads_delivered: int = 0
@@ -122,9 +130,9 @@ func get_profile() -> PersonalityProfile:
 	return PersonalityProfile.for_personality(personality)
 
 
-## Attributes in [constant ATTRIBUTE_NAMES] order.
+## Attributes in [constant ATTRIBUTE_NAMES] order (Teamwork after traits).
 func get_attributes() -> PackedInt32Array:
-	return PackedInt32Array([nerve, greed, diligence, piloting, skill, loyalty])
+	return PackedInt32Array([nerve, greed, diligence, piloting, skill, loyalty, effective_teamwork()])
 
 
 # --- Reputation -------------------------------------------------------------
@@ -258,6 +266,22 @@ func effective_nerve() -> int:
 	return clampi(nerve - (3 if has_trait(CaptainTraits.SHAKEN) else 0), 1, 10)
 
 
+## Teamwork after traits (Lone Wolf lower, Union Rep higher).
+func effective_teamwork() -> int:
+	var t := teamwork
+	if has_trait(CaptainTraits.LONE_WOLF):
+		t += LONE_WOLF_TEAMWORK
+	if has_trait(CaptainTraits.UNION_REP):
+		t += UNION_REP_TEAMWORK
+	return clampi(t, 1, 10)
+
+
+## 0..1: how ready this captain is to take on a fight above their weight
+## alone (high Nerve, low Teamwork). See MercenaryEvaluator.
+func daring() -> float:
+	return 0.6 * unit(effective_nerve()) + 0.4 * (1.0 - unit(effective_teamwork()))
+
+
 ## Chance to eject when the ship is destroyed: Piloting, modules, Survivor.
 func eject_chance(stats: ShipStats = null) -> float:
 	var c := 0.1 + 0.3 * unit(piloting)
@@ -283,6 +307,7 @@ func roll_attributes(rng: RandomNumberGenerator) -> void:
 	piloting = vals[3]
 	skill = vals[4]
 	loyalty = vals[5]
+	teamwork = vals[6]
 
 
 ## -1 at 1, 0 at 5.5, +1 at 10.

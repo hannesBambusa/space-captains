@@ -6,9 +6,11 @@ extends VBoxContainer
 ## hired ships with live status, updated live), threats (Scavenger Dens
 ## with their status and the scavengers out, raiders included), scrap
 ## fields and the captain roster (grouped by role, rank badge, live status;
-## captains without a ship included).
+## captains without a ship included). Mercenaries flying in a fleet are
+## grouped under a fleet line (leader first).
 ## Click a row = camera flies to it and follows; the row stays highlighted
-## while the camera follows that target. Collapses with its button or Tab.
+## while the camera follows that target or while it is selected. Collapses
+## with its button or Tab.
 
 const PLANET_TYPES: PackedStringArray = ["Rocky world", "Ocean world", "Desert world", "Ice world", "Lava world", "Gas giant"]
 const MOON_TYPES: PackedStringArray = ["Rocky moon", "Ocean moon", "Desert moon", "Ice moon", "Lava moon", "Gas moon"]
@@ -84,6 +86,8 @@ func setup(owner_hud: HUD) -> void:
 	hud = owner_hud
 	if hud.camera:
 		hud.camera.follow_changed.connect(_sync_pressed)
+	if hud.selection:
+		hud.selection.selection_changed.connect(func(_t: Node3D) -> void: _sync_pressed(hud.camera.get_follow_target() if hud.camera else null))
 	if hud.manager:
 		hud.manager.building_added.connect(func(_b: Building) -> void: _rebuild_structures())
 		hud.manager.building_changed.connect(func(_b: Building) -> void: _rebuild_structures())
@@ -322,7 +326,9 @@ func _roster_signature() -> String:
 	for role: String in by:
 		for e: Dictionary in by[role]:
 			var c := e["captain"] as Captain
-			parts.append("%s:%s:%d:%d" % [role, c.captain_name, c.rank, (c.ship.get_instance_id() if is_instance_valid(c.ship) else 0)])
+			var f := _fleet_of(c)
+			parts.append("%s:%s:%d:%d:%d:%d" % [role, c.captain_name, c.rank, (c.ship.get_instance_id() if is_instance_valid(c.ship) else 0),
+					f.get_instance_id() if f else 0, f.members.size() if f else 0])
 	return ",".join(parts)
 
 
@@ -336,17 +342,28 @@ func _rebuild_roster() -> void:
 	for role in ["Miner", "Mercenary", "Salvager"]:
 		if not by.has(role):
 			continue
-		var list: Array = by[role]
+		var list: Array = _group_fleets(by[role])
 		var h := HBoxContainer.new()
 		h.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		h.add_child(UIUtil.spacer(14.0))
 		h.add_child(UIUtil.label(UIUtil.plural(role), &"DimLabel"))
 		h.add_child(UIUtil.label(str(list.size()), &"DimLabel"))
 		_roster.add_child(h)
+		var shown_fleet: MercFleet = null
 		for e: Dictionary in list:
 			var c := e["captain"] as Captain
 			var t: Node3D = c.ship if is_instance_valid(c.ship) else e["building"] as Building
-			var row := _add_row(_roster, t, c.captain_name, _captain_subtitle(c), 1)
+			var f := _fleet_of(c)
+			if f and f != shown_fleet:
+				shown_fleet = f
+				var fh := HBoxContainer.new()
+				fh.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				fh.add_child(UIUtil.spacer(26.0))
+				var fl := UIUtil.label("%s's fleet (%d) for %s" % [f.leader_name, f.members.size(), f.contract.get_target_name()], &"DimLabel")
+				fl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.45))
+				fh.add_child(fl)
+				_roster.add_child(fh)
+			var row := _add_row(_roster, t, c.captain_name, _captain_subtitle(c), 2 if f else 1)
 			row.set_meta(&"captain", c)
 			row.title_label.add_theme_color_override("font_color", BuildingPanel.PERSONALITY_COLORS[c.personality].lerp(Color.WHITE, 0.55))
 			row.title_label.size_flags_stretch_ratio = 0.9
@@ -369,6 +386,37 @@ func _rebuild_roster() -> void:
 		_roster_header.text = str(total)
 	_sync_pressed(hud.camera.get_follow_target() if hud.camera else null)
 	_fit_height.call_deferred()
+
+
+## The fleet [param c]'s ship flies in, or null.
+static func _fleet_of(c: Captain) -> MercFleet:
+	if not is_instance_valid(c.ship):
+		return null
+	var mb := c.ship.brain as MercenaryBrain
+	return mb.fleet if mb and mb.fleet and mb.fleet.state != MercFleet.State.DONE else null
+
+
+## Roster entries with each fleet's members together, leader first, in
+## the place of the fleet's first member.
+static func _group_fleets(list: Array) -> Array:
+	var out: Array = []
+	var done: Dictionary = {}
+	for e: Dictionary in list:
+		var f := _fleet_of(e["captain"] as Captain)
+		if f == null:
+			out.append(e)
+			continue
+		if done.has(f):
+			continue
+		done[f] = true
+		var group: Array = []
+		for g: Dictionary in list:
+			if _fleet_of(g["captain"] as Captain) == f:
+				group.append(g)
+		group.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			return f.members.find((a["captain"] as Captain).ship) < f.members.find((b["captain"] as Captain).ship))
+		out.append_array(group)
+	return out
 
 
 func _captain_subtitle(c: Captain) -> String:
@@ -421,7 +469,14 @@ func _building_subtitle(b: Building) -> String:
 	if not b.is_active():
 		return b.get_status_text().to_lower()
 	if b.def.can_hire():
-		return "active, %d/%d %s" % [b.ships.size(), b.def.max_hires, UIUtil.plural(b.def.hire_role).to_lower()]
+		var rep := b.repairing_count()
+		return "active, %d/%d %s%s" % [b.ships.size(), b.def.max_hires, UIUtil.plural(b.def.hire_role).to_lower(), ", %d repairing" % rep if rep > 0 else ""]
+	var ds := b.get_service() as DefenseStructure
+	if ds:
+		return ds.get_status_text().to_lower()
+	var f := b.get_service() as Factory
+	if f:
+		return "%s, %d parts" % [f.status_text().to_lower(), f.warehouse_total()]
 	return "active"
 
 
@@ -550,10 +605,12 @@ func _on_row_hovered(row: OverviewRow, on: bool) -> void:
 		hud.marker.hover_target = null
 
 
+## Highlights the rows of the followed target and the selection.
 func _sync_pressed(target: Node3D) -> void:
+	var sel: Node3D = hud.selection.selected if hud and hud.selection else null
 	for r in rows:
 		if is_instance_valid(r):
-			r.set_pressed_no_signal(target != null and r.target == target)
+			r.set_pressed_no_signal(r.target != null and (r.target == target or r.target == sel))
 
 
 func _fit_height() -> void:

@@ -136,7 +136,7 @@ func get_dodge() -> float:
 
 
 func get_display_name() -> String:
-	return def.name if def else "Scavenger Den"
+	return def.name if def else "Scavenger Hideout"
 
 
 func get_status_text() -> String:

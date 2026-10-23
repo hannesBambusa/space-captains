@@ -6,6 +6,10 @@ extends Contract
 ## [constant CREDIT_WINDOW] seconds (the killer alone when it was alone).
 ## The contract completes on its own when the target dies, and is cancelled
 ## when the target leaves without dying (a scavenger slipping home).
+## Fleets: a target too strong for one ship gets a [MercFleet]; once it
+## leaves the rally point nobody else takes the contract, and the fleet
+## splits the reward (ContractBoard). A lone wolf going after it alone
+## claims it ([method claim_solo]) and keeps the whole reward.
 
 ## Damage older than this does not earn a share, sim seconds.
 const CREDIT_WINDOW := 90.0
@@ -13,6 +17,9 @@ const CREDIT_WINDOW := 90.0
 ## Who got paid and how much, filled on completion: [{ship_name, credits}].
 var payouts: Array[Dictionary] = []
 var killer_name: String = ""
+## The fleet working it (null when none).
+var fleet: MercFleet
+var _solo: WeakRef
 
 
 func _init(on_target: Node3D = null, credits: int = 0, taker_limit: int = 3) -> void:
@@ -27,7 +34,35 @@ func is_den() -> bool:
 
 
 func is_available() -> bool:
-	return super.is_available() and Combat.is_live(target)
+	if not super.is_available() or not Combat.is_live(target):
+		return false
+	if fleet and not fleet.is_recruiting():
+		return false
+	return solo_runner() == null
+
+
+## A lone wolf took it on alone: nobody else joins while they are on it.
+func claim_solo(ship: Ship) -> void:
+	_solo = weakref(ship)
+	changed.emit(self)
+
+
+## The lone wolf on it alone, or null.
+func solo_runner() -> Ship:
+	var s := _solo.get_ref() as Ship if _solo else null
+	if s == null or s.dead or not takers.has(s):
+		return null
+	return s
+
+
+## "Fleet of 3 forming", "Rhea Voss alone" or "".
+func get_team_text() -> String:
+	if fleet and fleet.state != MercFleet.State.DONE:
+		return fleet.get_label()
+	var s := solo_runner()
+	if s:
+		return "%s alone" % s.get_display_name()
+	return ""
 
 
 func get_target_name() -> String:

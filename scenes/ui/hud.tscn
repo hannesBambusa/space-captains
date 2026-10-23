@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=14 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/hud.gd" id="1_hud"]
 [ext_resource type="Theme" path="res://ui/theme.tres" id="2_theme"]
@@ -11,6 +11,8 @@
 [ext_resource type="Script" path="res://scripts/ui/captain_panel.gd" id="9_captain"]
 [ext_resource type="Script" path="res://scripts/ui/target_panel.gd" id="10_target"]
 [ext_resource type="Script" path="res://scripts/ui/event_feed.gd" id="11_feed"]
+[ext_resource type="Script" path="res://scripts/ui/ship_markers.gd" id="12_markers"]
+[ext_resource type="Script" path="res://scripts/ui/minimap.gd" id="13_minimap"]
 
 [node name="HUD" type="CanvasLayer"]
 layer = 10
@@ -25,6 +27,16 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 theme = ExtResource("2_theme")
+
+[node name="ShipMarkers" type="Control" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("12_markers")
 
 [node name="TargetMarker" type="Control" parent="Root"]
 layout_mode = 1
@@ -139,3 +151,15 @@ offset_bottom = -12.0
 grow_vertical = 0
 mouse_filter = 2
 script = ExtResource("11_feed")
+
+[node name="Minimap" type="PanelContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -12.0
+offset_top = 12.0
+offset_right = -12.0
+grow_horizontal = 0
+mouse_filter = 2
+script = ExtResource("13_minimap")

@@ -15,7 +15,8 @@ extends Node3D
 ## Stage 2: the hardware comes from a [ShipLoadout] (default per role) turned
 ## into [ShipStats] with the captain's attributes. Ships are combatants (see
 ## [Combat]): hull and shields ([Durability]), optional cannons
-## ([ShipWeapon]), repair while docked, separation from nearby ships while in
+## ([ShipWeapon]), paid hull repair while docked ([RepairBay]: hull never
+## regenerates in space, shields do), separation from nearby ships while in
 ## open space, and [method destroy] (explosion, scrap field, captain lost).
 ##
 ## Stage 3: the loadout's unlocked slots follow the captain's rank;
@@ -72,7 +73,8 @@ const GOAL_HEIGHT_EXIT := 45.0
 ## Toasts are hidden when the camera is farther than this, metres.
 @export var toast_max_distance: float = 2500.0
 @export var glow_full: float = 1.5
-## Hull repaired per sim second while docked, as a share of max hull.
+## Hull repaired per sim second while docked, as a share of max hull (paid,
+## see RepairBay).
 @export var dock_repair_rate: float = 0.04
 ## Radius used for hits and picking, metres.
 @export var hit_radius: float = 8.0
@@ -94,6 +96,11 @@ var dead: bool = false
 ## Lowest hull share since the last dock, and whether it was hit at all.
 var trip_lowest_hull: float = 1.0
 var trip_was_hit: bool = false
+## Docked and being repaired right now.
+var repairing: bool = false
+## Repair credits paid but not used yet, and paid this docking (RepairBay).
+var repair_credit: float = 0.0
+var repair_session_paid: int = 0
 
 var _model: Node3D
 var _model_path := ""
@@ -182,7 +189,10 @@ func sim_step(dt: float) -> void:
 		weapon.step(dt)
 	if is_docked():
 		if durability.hull < durability.max_hull:
-			durability.repair(durability.max_hull * dock_repair_rate * dt)
+			RepairBay.step(self, dt)
+		elif repairing:
+			repairing = false
+			RepairBay.end_session(self)
 		durability.shields = durability.max_shields
 	if brain:
 		brain.update(dt)
@@ -216,7 +226,10 @@ func get_display_name() -> String:
 
 
 func get_status_text() -> String:
-	return brain.get_status_text() if brain else "Idle"
+	var text := brain.get_status_text() if brain else "Idle"
+	if is_docked() and not repairing and RepairBay.needs_repair(self) and not RepairBay.can_afford(self):
+		text += ", needs repairs"
+	return text
 
 
 func is_docked() -> bool:
@@ -510,6 +523,8 @@ func enter_home_frame() -> void:
 
 ## Path from the berth out past the spawn point (home frame).
 func start_undock() -> void:
+	repairing = false
+	RepairBay.end_session(self)
 	if home:
 		mover.set_path(home.undock_path(slot_index))
 

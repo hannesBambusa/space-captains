@@ -270,7 +270,12 @@ func _refresh_form() -> void:
 		verdict = "low"
 	elif reward < fair:
 		verdict = "below fair"
-	_fair.text = "Fair pay here is about %d cr (%s). One load = %d materials." % [fair, verdict, mats]
+	var ore := Economy.ore_of_belt(belt.ore_type)
+	var worth := ""
+	var f := Factory.find(get_tree())
+	if f:
+		worth = " The Factory pays about %d cr for it now." % roundi(float(mats) * f.market.willing_price(ore))
+	_fair.text = "Fair pay here is about %d cr (%s). One load = %d %s.%s" % [fair, verdict, mats, Economy.ORE_NAMES[ore].to_lower(), worth]
 	var limit := rules.load_limit_options[load_limit_index]
 	_limit_value.text = "No limit" if limit <= 0 else "%d loads" % limit
 	_limit_minus.disabled = load_limit_index <= 0

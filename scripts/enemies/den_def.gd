@@ -7,7 +7,7 @@ extends Resource
 ## [member danger_bonus]; destroying the den takes it off (min 1), so the
 ## ratings agree with where the dens are.
 
-@export var name: String = "Scavenger Den"
+@export var name: String = "Scavenger Hideout"
 ## Gang name used for the den's ships ("Rustjaw" -> "Scavenger Rustjaw-3").
 @export var gang: String = "Rustjaw"
 @export var belt_name: String = ""

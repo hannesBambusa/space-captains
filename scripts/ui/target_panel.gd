@@ -145,16 +145,16 @@ func show_target(t: Node3D) -> void:
 	_post.text = "Post salvage contract" if t is ScrapField else "Post bounty"
 	if t is ScavengerDen:
 		var d := t as ScavengerDen
-		_header.text = "SCAVENGER DEN"
-		_info.text = "Raider base claiming %s. Launches scavengers up to %d at a time. Destroy it to stop them and lower the belt's danger." % [d.belt.def.name if d.belt else "?", d.def.spawn_cap]
+		_header.text = "SCAVENGER HIDEOUT"
+		_info.text = "Raider base dug into an asteroid, claiming %s. Launches scavengers up to %d at a time. Destroy it to stop them and lower the belt's danger." % [d.belt.def.name if d.belt else "?", d.def.spawn_cap]
 	elif t is ScavengerShip:
 		var sc := t as ScavengerShip
 		_header.text = "SCAVENGER"
-		_info.text = "Junk raider from %s. Hunts loaded miners and steals cargo." % (sc.den.get_display_name() if is_instance_valid(sc.den) else "a destroyed den")
+		_info.text = "Junk raider from %s. Hunts loaded miners and steals cargo." % (sc.den.get_display_name() if is_instance_valid(sc.den) else "a destroyed hideout")
 	elif t is ScrapField:
 		_header.text = "SCRAP FIELD"
 		var sf := t as ScrapField
-		_info.text = "Wreckage drifting apart. Salvagers from a Salvage Yard strip it on contract: %d scrap is about %d loads of %d materials. It stops fading while a contract is open. Danger here: %d of 5." % [
+		_info.text = "Wreckage drifting apart. Salvagers from a Salvage Yard strip it on contract: %d scrap is about %d loads of %d scrap metal (mostly iron, some titanium). It stops fading while a contract is open. Danger here: %d of 5." % [
 				sf.amount, ceili(float(sf.amount) / SalvageContract.LOAD_SCRAP), roundi(SalvageContract.LOAD_SCRAP * SalvageContract.MATERIALS_PER_SCRAP), SalvageContract.danger_at(get_tree(), sf.global_position)]
 	_title.text = String(t.call(&"get_display_name"))
 	_title.add_theme_color_override("font_color", Color(1.0, 0.6, 0.5) if hostile else Color(0.95, 0.9, 0.78))

@@ -5,6 +5,10 @@ extends Node3D
 ## tracer that rolled a hit applies its damage to the target on arrival (if
 ## the target is still alive) and leaves a spark. Misses fly on and fade.
 ## Fixed capacity: when full, the oldest tracer is reused.
+## Station shield: a hostile tracer that would enter an up bubble from
+## outside hits its surface instead (StationShield.intercept): a hit's
+## damage goes to the bubble, a miss only ripples it. Friendly tracers and
+## hostile ones fired from inside pass.
 
 const SPEED := 950.0
 const CAPACITY := 600
@@ -25,11 +29,16 @@ var _hits: Array[bool] = []
 var _targets: Array[WeakRef] = []
 var _attackers: Array[WeakRef] = []
 var _colors: Array[Color] = []
+var _hostile: Array[bool] = []
 var hits_applied: int = 0
+## Tracers stopped by a station shield.
+var shield_hits: int = 0
+var _world: CombatWorld
 
 
 func _ready() -> void:
 	add_to_group(SimStepper.GROUP)
+	_world = get_parent() as CombatWorld
 	_mm = MultiMesh.new()
 	_mm.transform_format = MultiMesh.TRANSFORM_3D
 	_mm.use_colors = true
@@ -82,15 +91,23 @@ func fire(from: Vector3, aim: Vector3, target: Node3D, damage: float, hits: bool
 	_targets.append(weakref(target))
 	_attackers.append(weakref(attacker))
 	_colors.append(color)
+	_hostile.append(is_instance_valid(attacker) and attacker.has_method(&"get_faction") and int(attacker.call(&"get_faction")) != Combat.Faction.PLAYER)
 
 
 func sim_step(dt: float) -> void:
 	if dt <= 0.0 or _pos.is_empty():
 		return
 	var step := SPEED * dt
+	var shields: Array[StationShield] = []
+	if _world:
+		shields = _world.shields
 	var i := _pos.size() - 1
 	while i >= 0:
 		var s := minf(step, _left[i])
+		if _hostile[i] and not shields.is_empty() and _hit_shield(i, shields, s):
+			_remove(i)
+			i -= 1
+			continue
 		_pos[i] += _dir[i] * s
 		_left[i] -= s
 		_flown[i] += s
@@ -115,6 +132,27 @@ func _apply_hit(i: int) -> void:
 		fx.spark(at, _colors[i])
 
 
+## True when tracer [param i] runs into a shield within [param s] metres
+## (the bubble takes the hit there).
+func _hit_shield(i: int, shields: Array[StationShield], s: float) -> bool:
+	var a := _pos[i]
+	var b := a + _dir[i] * s
+	for sh in shields:
+		if not is_instance_valid(sh):
+			continue
+		var t := sh.intercept(a, b)
+		if t < 0.0:
+			continue
+		var at := a.lerp(b, t)
+		sh.absorb(_damage[i] if _hits[i] else 0.0, _attackers[i].get_ref() as Node3D, at)
+		shield_hits += 1
+		var fx := CombatWorld.fx_of(get_tree())
+		if fx:
+			fx.spark(at, _colors[i])
+		return true
+	return false
+
+
 func _remove(i: int) -> void:
 	_pos.remove_at(i)
 	_dir.remove_at(i)
@@ -125,6 +163,7 @@ func _remove(i: int) -> void:
 	_targets.remove_at(i)
 	_attackers.remove_at(i)
 	_colors.remove_at(i)
+	_hostile.remove_at(i)
 
 
 func _draw_tracers() -> void:

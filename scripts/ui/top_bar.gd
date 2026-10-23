@@ -1,22 +1,32 @@
 class_name TopBar
 extends PanelContainer
-## Compact top bar: credits, materials, sim time and speed/pause state.
-## Deliveries flash a short "-credits / +materials" delta next to the values;
-## income (station fees, the corporate grant) flashes a green "+credits"
-## beside it. Deltas landing within one flash add up.
+## Compact top bar: credits, iron / titanium / crystal (in ore colours, each
+## with a small Factory demand meter: 1 to 3 pips, tooltip with its price),
+## sim time and speed/pause state. Deliveries flash a short "-credits / +ore"
+## delta next to the values; income (station fees, the corporate grant,
+## Factory ore sales) flashes a green "+credits" beside it. Deltas landing
+## within one flash add up. With a Shield Generator built, a SHIELD bar
+## shows the station bubble's charge (and the countdown while it is down).
 
 ## Seconds a delta stays visible before it fades.
 @export var flash_hold: float = 1.6
 @export var flash_fade: float = 0.8
 
 var _credits: Label
-var _materials: Label
+## Per ore: count label, delta label, demand pips.
+var _ore_labels: Array[Label] = []
+var _ore_deltas: Array[Label] = []
+var _ore_demand: Array[PipMeter] = []
+var _demand_timer := 0.0
 var _time: Label
 var _speed: Label
 var _speed_pips: PipMeter
 var _credits_delta: Label
-var _materials_delta: Label
 var _income_delta: Label
+var _shield_box: HBoxContainer
+var _shield_bar: PipMeter
+var _shield_value: Label
+var _shield_timer := 0.0
 var _tweens: Dictionary = {}
 ## Running sums while a delta is still showing: label -> int.
 var _sums: Dictionary = {}
@@ -30,8 +40,41 @@ func _ready() -> void:
 	_credits_delta = _add_delta(h, PipMeter.BAD)
 	_income_delta = _add_delta(h, PipMeter.GOOD)
 	_add_divider(h)
-	_materials = _add_stat(h, "MATERIALS")
-	_materials_delta = _add_delta(h, PipMeter.GOOD)
+	for i in Economy.ORE_NAMES.size():
+		var title := UIUtil.label(Economy.ORE_NAMES[i].to_upper(), &"HeaderLabel")
+		title.add_theme_color_override("font_color", Economy.ORE_COLORS[i].darkened(0.1))
+		h.add_child(title)
+		var v := UIUtil.label("", &"ValueLabel")
+		v.add_theme_color_override("font_color", Economy.ORE_COLORS[i].lerp(Color.WHITE, 0.35))
+		v.mouse_filter = Control.MOUSE_FILTER_PASS
+		h.add_child(v)
+		var pips := PipMeter.new()
+		pips.style = PipMeter.Style.PIPS
+		pips.max_value = 3.0
+		pips.pip_size = 4.0
+		pips.pip_gap = 2.0
+		h.add_child(pips)
+		_ore_labels.append(v)
+		_ore_demand.append(pips)
+		_ore_deltas.append(_add_delta(h, PipMeter.GOOD))
+	_shield_box = HBoxContainer.new()
+	_shield_box.add_theme_constant_override("separation", 6)
+	_shield_box.visible = false
+	h.add_child(_shield_box)
+	_add_divider(_shield_box)
+	var st := UIUtil.label("SHIELD", &"HeaderLabel")
+	st.add_theme_color_override("font_color", DefenseSection.SHIELD_COLOR.darkened(0.1))
+	_shield_box.add_child(st)
+	_shield_bar = PipMeter.new()
+	_shield_bar.style = PipMeter.Style.BAR
+	_shield_bar.max_value = 1.0
+	_shield_bar.color = DefenseSection.SHIELD_COLOR
+	_shield_bar.custom_minimum_size = Vector2(70.0, 6.0)
+	_shield_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_shield_box.add_child(_shield_bar)
+	_shield_value = UIUtil.label("", &"ValueLabel")
+	_shield_value.custom_minimum_size.x = 64.0
+	_shield_box.add_child(_shield_value)
 	_add_divider(h)
 	_time = _add_stat(h, "SIM")
 	_speed_pips = PipMeter.new()
@@ -56,7 +99,15 @@ func _ready() -> void:
 	_update_speed()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_demand_timer -= delta
+	if _demand_timer <= 0.0:
+		_demand_timer = 0.5
+		_update_demand()
+	_shield_timer -= delta
+	if _shield_timer <= 0.0:
+		_shield_timer = 0.2
+		_update_shield()
 	var t := int(SimClock.time)
 	var text := "%02d:%02d:%02d" % [floori(t / 3600.0), floori(t / 60.0) % 60, t % 60]
 	if _time.text != text:
@@ -104,11 +155,49 @@ func _flash_sum(label: Label, amount: int) -> void:
 	flash(label, ("+%s" if sum > 0 else "-%s") % UIUtil.amount(absi(sum)))
 
 
-func _on_delivery(_contract: Contract, _ship: Node, credits: int, materials: int, _ore: int) -> void:
+## [param ore] is the AsteroidBelt.OreType, -1 for salvage (mostly iron).
+func _on_delivery(_contract: Contract, _ship: Node, credits: int, materials: int, ore: int) -> void:
 	if credits != 0:
 		_flash_sum(_credits_delta, -credits)
 	if materials != 0:
-		_flash_sum(_materials_delta, materials)
+		_flash_sum(_ore_deltas[Economy.ore_of_belt(ore)], materials)
+
+
+## Factory demand pips (Low 1, Normal 2, High 3) and the price tooltip.
+func _update_demand() -> void:
+	var f := Factory.find(get_tree())
+	for i in _ore_demand.size():
+		var pips := _ore_demand[i]
+		pips.visible = f != null
+		if f == null:
+			continue
+		var m := f.market
+		var lvl := m.demand_level(i)
+		pips.value = float(lvl + 1)
+		pips.color = FactoryPanel.DEMAND_COLORS[lvl]
+		_ore_labels[i].tooltip_text = "%s %d. Factory demand %s, pays %.1f cr (%s). Auto-sell %s at %.1f cr, keeping %d." % [
+				Economy.ORE_NAMES[i], Economy.ore[i], m.demand_name(i).to_lower(), m.willing_price(i), m.trend_text(i),
+				"on" if m.auto_sell else "off", m.ask[i], m.reserve[i]] + (" Ask follows the market." if m.is_following(i) else "")
+
+
+func _update_shield() -> void:
+	var b := StationShield.find(get_tree())
+	_shield_box.visible = b != null
+	if b == null:
+		return
+	_shield_bar.value = b.charge()
+	_shield_bar.color = DefenseSection.SHIELD_COLOR if b.charge() > 0.25 else PipMeter.BAD
+	var text := "%d%%" % roundi(b.charge() * 100.0)
+	match b.state:
+		StationShield.State.OFFLINE:
+			text = "offline"
+		StationShield.State.COLLAPSING:
+			text = "DOWN"
+		StationShield.State.DOWN:
+			text = "DOWN %ds" % ceili(b.cooldown_left)
+	_shield_value.text = text
+	_shield_value.add_theme_color_override("font_color", PipMeter.BAD if not b.is_up() else Color(0.85, 0.93, 1.0))
+	_shield_box.tooltip_text = "Station shield: %s, %d / %d HP, radius %d m" % [b.get_state_name().to_lower(), roundi(b.hp), roundi(b.max_hp), roundi(b.radius)]
 
 
 func _add_divider(parent: HBoxContainer) -> void:
@@ -118,9 +207,10 @@ func _add_divider(parent: HBoxContainer) -> void:
 	parent.add_child(d)
 
 
-func _on_economy(credits: int, materials: int) -> void:
+func _on_economy(credits: int, _materials: int) -> void:
 	_credits.text = Economy.format_amount(credits)
-	_materials.text = Economy.format_amount(materials)
+	for i in _ore_labels.size():
+		_ore_labels[i].text = Economy.format_amount(Economy.ore[i])
 
 
 func _update_speed() -> void:

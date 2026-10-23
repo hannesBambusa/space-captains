@@ -4,7 +4,8 @@ extends RefCounted
 ## (muzzle_l, muzzle_r) at [member ShipStats.fire_rate] shots per second when
 ## the target is in range and roughly ahead. Each shot rolls to hit
 ## (accuracy, range, target dodge) and becomes a tracer in the
-## ProjectilePool that deals its damage when it arrives.
+## ProjectilePool that deals its damage when it arrives. Shots at the
+## station shield bubble always land on its surface.
 
 const MUZZLE_NAMES: PackedStringArray = ["muzzle_l", "muzzle_r"]
 ## Shots are only fired at targets within this angle of the nose, degrees.
@@ -62,6 +63,11 @@ func try_fire(target: Node3D) -> bool:
 		return false
 	_cooldown = 1.0 / stats.fire_rate
 	var from := _muzzle_position()
+	if target is StationShield:
+		# A station-sized bubble cannot be missed: aim at its near surface.
+		pool.fire(from, (target as StationShield).aim_point(from, _rng), target, stats.weapon_damage, true, ship, color)
+		shots_fired += 1
+		return true
 	var tpos := target.global_position
 	var dist := from.distance_to(tpos)
 	var flight := dist / ProjectilePool.SPEED

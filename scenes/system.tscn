@@ -1,4 +1,4 @@
-[gd_scene load_steps=27 format=3]
+[gd_scene load_steps=31 format=3]
 
 [ext_resource type="Shader" path="res://shaders/space_sky.gdshader" id="1_sky"]
 [ext_resource type="Script" path="res://scripts/solar_system.gd" id="2_system"]
@@ -21,6 +21,10 @@
 [ext_resource type="Resource" path="res://data/buildings/salvage_yard.tres" id="19_salv"]
 [ext_resource type="Script" path="res://scripts/progress_demo.gd" id="20_pdemo"]
 [ext_resource type="Script" path="res://scripts/station_demo.gd" id="21_sdemo"]
+[ext_resource type="Resource" path="res://data/buildings/factory.tres" id="22_fact"]
+[ext_resource type="Resource" path="res://data/buildings/defense_turret.tres" id="30_turr"]
+[ext_resource type="Resource" path="res://data/buildings/shield_generator.tres" id="31_shld"]
+[ext_resource type="Script" path="res://scripts/factory_demo.gd" id="23_fdemo"]
 
 [sub_resource type="ShaderMaterial" id="sky_mat"]
 shader = ExtResource("1_sky")
@@ -89,7 +93,8 @@ script = ExtResource("6_shot")
 
 [node name="Buildings" type="Node" parent="."]
 script = ExtResource("7_bm")
-building_defs = Array[Resource]([ExtResource("8_outpost"), ExtResource("15_merc"), ExtResource("18_outf"), ExtResource("19_salv")])
+building_defs = Array[Resource]([ExtResource("8_outpost"), ExtResource("15_merc"), ExtResource("18_outf"), ExtResource("19_salv"), ExtResource("30_turr"), ExtResource("31_shld")])
+factory_def = ExtResource("22_fact")
 
 [node name="Combat" type="Node3D" parent="."]
 script = ExtResource("16_combat")
@@ -119,3 +124,6 @@ script = ExtResource("20_pdemo")
 
 [node name="StationDemo" type="Node" parent="."]
 script = ExtResource("21_sdemo")
+
+[node name="FactoryDemo" type="Node" parent="."]
+script = ExtResource("23_fdemo")

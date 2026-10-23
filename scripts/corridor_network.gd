@@ -10,7 +10,9 @@ extends Node3D
 ## ships fly on. A new structure links to the nearest anchor or to the middle
 ## of an existing corridor (a junction splits it), whichever gives the
 ## shortest valid link ([method plan]). Its docking mouth is turned away from
-## the link, so the corridor leaves from its back.
+## the link, so the corridor leaves from its back. Standalone structures
+## (BuildingDef.standalone, the defense turrets) are anchors for spacing only:
+## no corridor, never a link target, not in [method complex_bounds].
 ##
 ## Drawing: every finished piece shares one MultiMesh per kit part
 ## (CorridorKit); pieces of a structure under construction get their own
@@ -23,11 +25,11 @@ const PARTS := [CorridorKit.Part.SEGMENT, CorridorKit.Part.COLLAR, CorridorKit.P
 
 @export_group("Link rules")
 ## Minimum clear gap between the footprint edges of any two structures, m.
-@export var min_gap: float = 60.0
+@export var min_gap: float = 25.0
 ## Longest link: gap from the new footprint edge to the target's edge, m.
-@export var max_link: float = 300.0
+@export var max_link: float = 120.0
 ## Shortest corridor (and shortest branch onto a corridor), m.
-@export var min_corridor: float = 30.0
+@export var min_corridor: float = 20.0
 ## Height of every corridor's centre line above the plane, m.
 @export var corridor_height: float = 12.0
 ## Station hull edge used for link gaps, m.
@@ -47,7 +49,7 @@ const PARTS := [CorridorKit.Part.SEGMENT, CorridorKit.Part.COLLAR, CorridorKit.P
 ## Docking lane reach past the spawn point (Building.approach_distance + exit), m.
 @export var lane_reach: float = 80.0
 ## A junction keeps this far from either end of the corridor it splits, m.
-@export var junction_margin: float = 30.0
+@export var junction_margin: float = 20.0
 ## Corridor ends sink this far into the hull, m.
 @export var collar_inset: float = 0.8
 
@@ -59,6 +61,9 @@ class ModelInfo:
 	var mouth := Vector3.ZERO
 	var lane_a := Vector3.ZERO
 	var lane_b := Vector3.ZERO
+	## Models without a docking mouth: direction of their corridor port
+	## (link_point empty), model space. The link turns it toward the target.
+	var link := Vector3.ZERO
 
 
 class Anchor:
@@ -74,6 +79,10 @@ class Anchor:
 	var axis := Vector3.FORWARD
 	## Junction: the structure whose link made it (builds with it).
 	var owner: Building
+	## Clear gap this structure keeps (BuildingDef.link_gap), -1 = default.
+	var gap := -1.0
+	## Standalone structure (BuildingDef.standalone): no links to it.
+	var standalone := false
 	var info: ModelInfo
 	var corridors: Array[Corridor] = []
 
@@ -195,6 +204,8 @@ func add_building(b: Building) -> void:
 	an.position = Vector3(b.position.x, 0.0, b.position.z)
 	an.radius = b.def.footprint_radius
 	an.info = model_info(b.def)
+	an.gap = b.def.link_gap
+	an.standalone = b.def.standalone
 	anchors.append(an)
 	_by_building[b] = an
 	b.state_changed.connect(_on_building_state)
@@ -254,11 +265,14 @@ func plan(def: BuildingDef, offset: Vector3, fixed_yaw: float = NAN) -> Plan:
 	var info := model_info(def)
 	var pos := Vector3(offset.x, 0.0, offset.z)
 	var r := def.footprint_radius
+	if def.standalone:
+		return _plan_standalone(info, pos, r, fixed_yaw, gap_for(def))
+	var reach := reach_for(def)
 	var ok: Plan = null
 	var first: Plan = null
 	for c in _candidates(pos, r):
 		var t := Plan.new()
-		t.problem = _try(t, info, pos, r, fixed_yaw, c)
+		t.problem = _try(t, info, pos, r, fixed_yaw, c, reach)
 		if first == null:
 			first = t
 		if t.is_valid():
@@ -269,17 +283,40 @@ func plan(def: BuildingDef, offset: Vector3, fixed_yaw: float = NAN) -> Plan:
 		p = Plan.new()
 		p.yaw = 0.0 if is_nan(fixed_yaw) else fixed_yaw
 		p.problem = "No station to link to"
-	var g := _global_problem(pos, r)
+	var g := _global_problem(pos, r, gap_for(def))
 	if not g.is_empty():
 		p.problem = g
 	return p
+
+
+## A standalone structure: no link, only the spot rules. Its corridor port
+## side (if any) faces the station.
+func _plan_standalone(info: ModelInfo, pos: Vector3, r: float, fixed_yaw: float, gap: float) -> Plan:
+	var p := Plan.new()
+	var d := _flat(pos - (station.position if station else Vector3.ZERO))
+	if not is_nan(fixed_yaw):
+		p.yaw = fixed_yaw
+	elif info.link != Vector3.ZERO and d.length() > 0.5:
+		p.yaw = _yaw_facing(info.link, -d.normalized())
+	p.problem = _global_problem(pos, r, gap)
+	return p
+
+
+## Clear gap [param def] keeps to other structures, m.
+func gap_for(def: BuildingDef) -> float:
+	return def.link_gap if def.link_gap >= 0.0 else min_gap
+
+
+## Longest link for [param def], m.
+func reach_for(def: BuildingDef) -> float:
+	return def.link_reach if def.link_reach > 0.0 else max_link
 
 
 ## Link candidates (anchors and corridor points) sorted by gap.
 func _candidates(pos: Vector3, r: float) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for an in anchors:
-		if an.kind == Anchor.Kind.JUNCTION:
+		if an.kind == Anchor.Kind.JUNCTION or an.standalone:
 			continue
 		out.append({"anchor": an, "point": an.position, "gap": _flat(pos - an.position).length() - r - an.radius})
 	for c in corridors:
@@ -299,7 +336,7 @@ func _candidates(pos: Vector3, r: float) -> Array[Dictionary]:
 
 
 ## Fills [param t] with the link to candidate [param c]; returns its problem.
-func _try(t: Plan, info: ModelInfo, pos: Vector3, r: float, fixed_yaw: float, c: Dictionary) -> String:
+func _try(t: Plan, info: ModelInfo, pos: Vector3, r: float, fixed_yaw: float, c: Dictionary, reach: float) -> String:
 	var target: Anchor = c.get("anchor")
 	var split: Corridor = c.get("corridor")
 	var point: Vector3 = c["point"]
@@ -309,7 +346,13 @@ func _try(t: Plan, info: ModelInfo, pos: Vector3, r: float, fixed_yaw: float, c:
 	t.target = target
 	t.split = split
 	t.junction_pos = point
-	t.yaw = fixed_yaw if not is_nan(fixed_yaw) else _yaw_facing(info.mouth, d)
+	if not is_nan(fixed_yaw):
+		t.yaw = fixed_yaw
+	elif info.mouth == Vector3.ZERO and info.link != Vector3.ZERO:
+		# No docking mouth: turn the corridor port toward the target.
+		t.yaw = _yaw_facing(info.link, -d)
+	else:
+		t.yaw = _yaw_facing(info.mouth, d)
 	t.pa = _attach(info.profile, pos, t.yaw, -d, r)
 	if split:
 		t.pb = point + d * CorridorKit.JUNCTION_PORT + Vector3.UP * corridor_height
@@ -318,8 +361,8 @@ func _try(t: Plan, info: ModelInfo, pos: Vector3, r: float, fixed_yaw: float, c:
 	t.has_link = true
 	var target_name := target.label() if target else "a corridor"
 
-	if gap > max_link:
-		return "Too far from the station complex (corridors reach %d m)" % roundi(max_link)
+	if gap > reach:
+		return "Too far from the station complex (corridors reach %d m)" % roundi(reach)
 	if split and gap < min_corridor:
 		return "Too close to a corridor"
 	if info.mouth != Vector3.ZERO and _angle_deg(info.mouth.rotated(Vector3.UP, t.yaw), -d) < mouth_clear_deg:
@@ -368,12 +411,13 @@ func _try(t: Plan, info: ModelInfo, pos: Vector3, r: float, fixed_yaw: float, c:
 
 
 ## Problems of the spot itself, whatever the link.
-func _global_problem(pos: Vector3, r: float) -> String:
+func _global_problem(pos: Vector3, r: float, gap: float) -> String:
 	var p := _v2(pos)
 	for an in anchors:
 		if an.kind == Anchor.Kind.JUNCTION:
 			continue
-		if p.distance_to(_v2(an.position)) - r - an.radius < min_gap:
+		var pair_gap := minf(gap, an.gap) if an.gap >= 0.0 else gap
+		if p.distance_to(_v2(an.position)) - r - an.radius < pair_gap:
 			return "Too close to %s" % an.label()
 	for k in corridors:
 		if _seg_point(_v2(k.pa), _v2(k.pb), p) < r + footprint_margin + CorridorKit.TUBE_RADIUS:
@@ -426,6 +470,14 @@ func model_info(def: BuildingDef) -> ModelInfo:
 	info.mouth = out
 	info.lane_a = _flat(dock)
 	info.lane_b = _flat(spawn) + out * lane_reach
+	if dock_node == null:
+		# No docking mouth (turrets, the shield generator): no lane; the
+		# corridor leaves from the link_point port.
+		var link_node := model.find_child("link_point", true, false) as Node3D
+		var lp := _flat(ModelLoader.relative_transform(model, link_node).origin) if link_node else Vector3.ZERO
+		if lp.length() > 0.5:
+			info.link = lp.normalized()
+			info.mouth = Vector3.ZERO
 	model.free()
 	_infos[key] = info
 	return info
@@ -633,12 +685,13 @@ func _make_mmi(part: CorridorKit.Part, mat: Material) -> MultiMeshInstance3D:
 
 # --- Placement zone and framing -------------------------------------------------
 
-## Plane rectangle (frame-local x, z) covering every structure's footprint.
+## Plane rectangle (frame-local x, z) covering every linked structure's
+## footprint (standalone ones excluded).
 func complex_bounds() -> Rect2:
 	var box := Rect2()
 	var first := true
 	for an in anchors:
-		if an.kind == Anchor.Kind.JUNCTION:
+		if an.kind == Anchor.Kind.JUNCTION or an.standalone:
 			continue
 		var r := Rect2(an.position.x - an.radius, an.position.z - an.radius, an.radius * 2.0, an.radius * 2.0)
 		box = r if first else box.merge(r)
@@ -649,20 +702,24 @@ func complex_bounds() -> Rect2:
 ## Zone shapes for a structure of footprint [param r], for shaders/link_zone:
 ## "discs" (x, z, inner, outer) per structure: centres between inner and outer
 ## reach it; "segs" (ax, az, bx, bz) per corridor, reach = "seg_reach".
-func zone_shapes(r: float) -> Dictionary:
+## [param gap] / [param reach] < 0 = the network defaults.
+func zone_shapes(r: float, gap: float = -1.0, reach: float = -1.0) -> Dictionary:
+	var g := gap if gap >= 0.0 else min_gap
+	var link := reach if reach > 0.0 else max_link
 	var discs := PackedVector4Array()
 	var segs := PackedVector4Array()
 	for an in anchors:
-		if an.kind == Anchor.Kind.JUNCTION:
+		if an.kind == Anchor.Kind.JUNCTION or an.standalone:
 			continue
-		discs.append(Vector4(an.position.x, an.position.z, an.radius + r + min_gap, an.radius + r + max_link))
+		var pair_gap := minf(g, an.gap) if an.gap >= 0.0 else g
+		discs.append(Vector4(an.position.x, an.position.z, an.radius + r + pair_gap, an.radius + r + link))
 	for c in corridors:
 		segs.append(Vector4(c.pa.x, c.pa.z, c.pb.x, c.pb.z))
 	return {
 		"discs": discs,
 		"segs": segs,
 		"seg_inner": r + footprint_margin + CorridorKit.TUBE_RADIUS,
-		"seg_reach": r + CorridorKit.JUNCTION_PORT + max_link,
+		"seg_reach": r + CorridorKit.JUNCTION_PORT + link,
 	}
 
 

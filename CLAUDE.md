@@ -1,6 +1,6 @@
 # Space Majesty (working title)
 
-Indirect-control space sim in the spirit of Majesty 2. You are a station administrator in a star sector. Ship captains (miners, escorts, scouts, bounty hunters) act on their own; you steer them with paid contracts (mining, explore, protect, bounty). Rich asteroid belts are more dangerous. Two resources: credits (pay contractors) and materials (ore, for building).
+Indirect-control space sim in the spirit of Majesty 2. You are a station administrator in a star sector. Ship captains (miners, escorts, scouts, bounty hunters) act on their own; you steer them with paid contracts (mining, explore, protect, bounty). Rich asteroid belts are more dangerous. Resources: credits (pay contractors) and typed ore (iron, titanium, crystal: for building, tooling, and to sell to the Factory, which makes the modules captains buy).
 
 Design: docs/DESIGN.md (agreed design and stages, read it first). Reference: ../majesty/docs/MAJESTY2_MECHANICS_RESEARCH.md (fantasy original, mechanics only).
 

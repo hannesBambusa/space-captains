@@ -76,6 +76,8 @@ func _on_destroyed(killer: Node3D) -> void:
 			has_bounty = true
 	if not has_bounty and k:
 		EventLog.post("%s destroyed by %s" % [get_display_name(), k.get_display_name()], EventLog.Kind.REWARD, null, global_position)
+	elif not has_bounty and killer is DefenseTurret:
+		EventLog.post("%s shot down by %s" % [get_display_name(), (killer as DefenseTurret).get_display_name()], EventLog.Kind.REWARD, null, global_position)
 
 
 ## Docked at its den: leaves without an explosion.

@@ -62,6 +62,7 @@ var _bar: MeshInstance3D
 var _bar_mat: ShaderMaterial
 var _model_box: AABB
 var _service: Node
+var _unload_fx: OutpostUnloadFx
 var _wait_timer := 0.0
 
 
@@ -102,6 +103,12 @@ func _ready() -> void:
 		_update_construction()
 	else:
 		_activate()
+	# After the construction look: it clears material overrides.
+	if _model.find_child("unload_arm", true, false):
+		_unload_fx = OutpostUnloadFx.new()
+		_unload_fx.name = "UnloadFx"
+		add_child(_unload_fx)
+		_unload_fx.setup(self, _model)
 
 
 func _process(delta: float) -> void:
@@ -125,9 +132,19 @@ func sim_step(dt: float) -> void:
 			buy_replacement(c, false)
 
 
+## The unloading look (Mining Outpost) or null.
+func get_unload_fx() -> OutpostUnloadFx:
+	return _unload_fx
+
+
 ## The service node (Outfitter) or null.
 func get_service() -> Node:
 	return _service
+
+
+## The instanced model (or its placeholder).
+func get_model() -> Node3D:
+	return _model
 
 
 func get_progress() -> float:
@@ -143,7 +160,19 @@ func is_active() -> bool:
 func get_status_text() -> String:
 	if state == State.CONSTRUCTING:
 		return "Constructing %d%%" % int(get_progress() * 100.0)
-	return "Active"
+	if _service is DefenseStructure:
+		return (_service as DefenseStructure).get_status_text()
+	var n := repairing_count()
+	return "Active, repairing %d" % n if n > 0 else "Active"
+
+
+## Docked ships being repaired now.
+func repairing_count() -> int:
+	var n := 0
+	for s in ships:
+		if is_instance_valid(s) and s.repairing:
+			n += 1
+	return n
 
 
 ## Skips the rest of construction.

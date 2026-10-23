@@ -3,8 +3,10 @@ extends PanelContainer
 ## Bottom-right panel for the selected building: name, status, description
 ## and, for buildings with hire options, the hire button and hired captains.
 ## Stage 3: captains without a ship (ejected, waiting here or still in their
-## pod) with a "Buy ship" button (the player pays), and for the Outfitter its
-## tier unlocks (materials), rare parts and recent sales.
+## pod) with a "Buy ship" button (the player pays), and for the Outfitter the
+## Factory warehouse stock it sells from, what the Factory is making, open
+## backorders and recent sales. The Factory has its own panel (FactoryPanel).
+## Defense Turrets and the Shield Generator get a DefenseSection.
 
 const PERSONALITY_COLORS: Array[Color] = [
 	Color(1.0, 0.55, 0.35), Color(0.5, 0.8, 1.0), Color(1.0, 0.82, 0.3), Color(0.7, 0.7, 0.78),
@@ -32,11 +34,14 @@ var _wait_rows: Array[Dictionary] = []
 var _outfit_section: VBoxContainer
 var _outfit_tier: Label
 var _outfit_stock: Label
-var _unlock_button: Button
-var _unlock_reason: Label
+var _outfit_making: Label
 var _rare: Label
 var _sales: VBoxContainer
 var _outfitter: Outfitter
+var _factory: Factory
+var _defense: DefenseSection
+## Sibling panel for Factory selections (made in [method setup]).
+var factory_panel: FactoryPanel
 
 
 func _ready() -> void:
@@ -94,20 +99,17 @@ func _ready() -> void:
 	_outfit_section.add_theme_constant_override("separation", 4)
 	v.add_child(_outfit_section)
 	_outfit_section.add_child(HSeparator.new())
-	_outfit_section.add_child(UIUtil.label("STOCK", &"HeaderLabel"))
+	_outfit_section.add_child(UIUtil.label("STOCK FROM THE FACTORY", &"HeaderLabel"))
 	_outfit_stock = UIUtil.label("", &"ValueLabel")
 	_outfit_section.add_child(_outfit_stock)
+	_outfit_making = UIUtil.label("", &"DimLabel")
+	_outfit_making.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_outfit_making.custom_minimum_size.x = panel_width - 24.0
+	_outfit_section.add_child(_outfit_making)
 	_outfit_tier = UIUtil.label("", &"DimLabel")
 	_outfit_tier.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_outfit_tier.custom_minimum_size.x = panel_width - 24.0
 	_outfit_section.add_child(_outfit_tier)
-	_unlock_button = UIUtil.button("", &"AccentButton")
-	_unlock_button.pressed.connect(func() -> void:
-		if _outfitter:
-			_outfitter.unlock_next())
-	_outfit_section.add_child(_unlock_button)
-	_unlock_reason = UIUtil.label("", &"WarnLabel")
-	_outfit_section.add_child(_unlock_reason)
 	_rare = UIUtil.label("", &"DimLabel")
 	_rare.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_rare.custom_minimum_size.x = panel_width - 24.0
@@ -117,24 +119,52 @@ func _ready() -> void:
 	_sales.add_theme_constant_override("separation", 1)
 	_outfit_section.add_child(_sales)
 
+	_defense = DefenseSection.new()
+	_defense.width = panel_width - 24.0
+	_defense.visible = false
+	v.add_child(_defense)
+
 
 func setup(owner_hud: HUD) -> void:
 	hud = owner_hud
+	factory_panel = FactoryPanel.new()
+	factory_panel.name = "FactoryPanel"
+	factory_panel.layout_mode = layout_mode
+	factory_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	factory_panel.offset_left = offset_left - (factory_panel.panel_width - panel_width)
+	factory_panel.offset_top = offset_top
+	factory_panel.offset_right = offset_right
+	factory_panel.offset_bottom = offset_bottom
+	factory_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	factory_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	get_parent().add_child.call_deferred(factory_panel)
+	_setup_factory_panel.call_deferred()
 	if hud.selection:
 		hud.selection.selection_changed.connect(func(t: Node3D) -> void: show_building(t as Building))
 	Economy.changed.connect(func(_c: int, _m: int) -> void: _refresh())
 
 
+func _setup_factory_panel() -> void:
+	UIUtil.no_focus(factory_panel)
+	factory_panel.setup(hud)
+
+
 func show_building(b: Building) -> void:
+	if b and b.get_service() is Factory:
+		b = null
 	if building and is_instance_valid(building):
 		if building.state_changed.is_connected(_on_building_event):
 			building.state_changed.disconnect(_on_building_event)
 			building.hires_changed.disconnect(_on_building_event)
 	if _outfitter and is_instance_valid(_outfitter) and _outfitter.changed.is_connected(_refresh_outfitter):
 		_outfitter.changed.disconnect(_refresh_outfitter)
+	if _factory and is_instance_valid(_factory) and _factory.changed.is_connected(_refresh_outfitter):
+		_factory.changed.disconnect(_refresh_outfitter)
+	_factory = null
 	building = b
 	visible = b != null
 	_outfitter = null
+	_defense.show_structure(b.get_service() as DefenseStructure if b else null)
 	if b == null:
 		return
 	b.state_changed.connect(_on_building_event)
@@ -142,6 +172,9 @@ func show_building(b: Building) -> void:
 	_outfitter = b.get_service() as Outfitter
 	if _outfitter:
 		_outfitter.changed.connect(_refresh_outfitter)
+		_factory = _outfitter.factory()
+		if _factory:
+			_factory.changed.connect(_refresh_outfitter)
 	_title.text = b.display_name
 	_desc.text = b.def.description
 	_refresh()
@@ -162,6 +195,8 @@ func _process(delta: float) -> void:
 	if _crew_timer <= 0.0:
 		_crew_timer = 0.25
 		_refresh_crew_status()
+		if building.is_active() and building.get_service() is DefenseStructure:
+			_status.text = building.get_status_text()
 
 
 func _on_building_event(_b: Building) -> void:
@@ -195,23 +230,23 @@ func _refresh_outfitter() -> void:
 	if _outfitter == null:
 		return
 	var o := _outfitter
-	_outfit_stock.text = "Sells Mk I%s" % ("" if o.unlocked_tier < 2 else (" and Mk II" if o.unlocked_tier == 2 else " to Mk III"))
-	_outfit_tier.text = "Captains also need the rank: Mk II from Veteran, Mk III from Ace. You get %d%% of each sale (%s cr so far)." % [
-			roundi(o.sale_share * 100.0), UIUtil.amount(o.total_income)]
-	var cost := o.next_unlock_cost()
-	_unlock_button.visible = cost > 0
-	_unlock_button.text = "Unlock %s - %d materials" % [ShipModule.TIER_NAMES[mini(o.unlocked_tier + 1, 3)], cost]
-	var why := o.unlock_block_reason() if cost > 0 else ""
-	_unlock_button.disabled = not why.is_empty()
-	_unlock_button.tooltip_text = why if not why.is_empty() else "Stock %s modules for every role." % ShipModule.TIER_NAMES[mini(o.unlocked_tier + 1, 3)]
-	_unlock_reason.text = why
-	_unlock_reason.visible = not why.is_empty()
+	var f := _factory if is_instance_valid(_factory) else null
+	if f == null:
+		_outfit_stock.text = "No Factory: nothing to sell"
+		_outfit_making.text = ""
+	else:
+		_outfit_stock.text = "%d parts in stock  (%s)" % [f.warehouse_total(), stock_summary(f)]
+		var orders := f.backorders.size()
+		_outfit_making.text = "Factory: %s.%s" % [f.status_text(), "  %d backorder%s." % [orders, "" if orders == 1 else "s"] if orders > 0 else ""]
+	_outfit_tier.text = "Factory tooled to %s. Captains also need the rank: Mk II from Veteran, Mk III from Ace. You get %d%% of each sale (%s cr so far)." % [
+			ShipModule.TIER_NAMES[o.supplied_tier()] if f else "none", roundi(o.sale_share * 100.0), UIUtil.amount(o.total_income)]
 	var rare: PackedStringArray = []
 	var catalog := ModuleCatalog.shared()
-	for id: StringName in o.rare_parts:
-		var m := catalog.find(id)
-		if m:
-			rare.append("%s (%s)" % [m.display_name, "stocked early" if o.rare_parts[id] == "stocked" else "%d%% off" % roundi(Outfitter.RARE_DISCOUNT * 100.0)])
+	if f:
+		for id: StringName in f.rare_parts:
+			var m := catalog.find(id)
+			if m:
+				rare.append("%s (%s)" % [m.display_name, "made early" if f.rare_parts[id] == "stocked" else "%d%% off" % roundi(Factory.RARE_DISCOUNT * 100.0)])
 	_rare.text = "Rare parts: " + ", ".join(rare) if not rare.is_empty() else "Rare parts from salvage show up here."
 	for c in _sales.get_children():
 		_sales.remove_child(c)
@@ -243,6 +278,21 @@ func _refresh_outfitter() -> void:
 		n += 1
 		if n >= 6:
 			break
+
+
+## "Mk I 7, Mk II 2" from the Factory warehouse.
+static func stock_summary(f: Factory) -> String:
+	var per := PackedInt32Array([0, 0, 0, 0])
+	var catalog := ModuleCatalog.shared()
+	for id: StringName in f.warehouse:
+		var m := catalog.find(id)
+		if m:
+			per[m.tier] += int(f.warehouse[id])
+	var parts: PackedStringArray = []
+	for t in range(1, 4):
+		if per[t] > 0:
+			parts.append("%s %d" % [ShipModule.TIER_NAMES[t], per[t]])
+	return ", ".join(parts) if not parts.is_empty() else "empty"
 
 
 func _rebuild_crew() -> void:

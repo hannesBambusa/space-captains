@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="BuildingDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_def.gd" id="1_bdef"]
+[ext_resource type="Script" path="res://scripts/buildings/shield_generator.gd" id="2_shld"]
+
+[resource]
+script = ExtResource("1_bdef")
+id = &"shield_generator"
+display_name = "Shield Generator"
+short_label = "Shield Generator"
+description = "Projects a shield bubble over the whole station complex. Hostile fire from outside hits the bubble instead of anything inside, so raiders must break it first. It recharges when left alone; broken, it re-raises after a cooldown."
+model_path = "res://assets/models/buildings/shield_generator.glb"
+cost_credits = 600
+cost_iron = 150
+cost_titanium = 60
+build_time = 30.0
+footprint_radius = 22.0
+max_count = 1
+placeholder_tint = Color(0.35, 0.75, 1, 1)
+service_script = ExtResource("2_shld")

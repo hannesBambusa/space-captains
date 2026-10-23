@@ -10,6 +10,9 @@ extends PanelContainer
 ## fading ones with time left), wallet, modules by slot with tier and the
 ## free slots, the career history, and "Offer transfer" buttons (the
 ## captain decides; the answer shows below them).
+## Fleets: the fleet the merc flies in and its role (leader or wingman), or
+## a solo run. Repairs: the bill for the missing hull, and whether the wallet
+## covers it (RepairBay). Teamwork is the seventh attribute.
 
 const ATTR_COLOR := Color(0.55, 0.85, 1.0)
 const HULL_COLOR := Color(0.45, 0.95, 0.55)
@@ -63,6 +66,9 @@ var _rank_text: Label
 var _traits: HFlowContainer
 var _traits_key := ""
 var _wallet: Label
+var _fleet: Label
+var _fleet_title: Label
+var _repairs: Label
 var _modules_box: VBoxContainer
 var _modules_header: Label
 var _module_names: Array[Label] = []
@@ -163,6 +169,9 @@ func _ready() -> void:
 	_earned = _add_stat(grid, "Credits earned")
 	_spent = _add_stat(grid, "Spent at station")
 	_wallet = _add_stat(grid, "Wallet")
+	_repairs = _add_stat(grid, "Repairs")
+	_fleet = _add_stat(grid, "Fleet")
+	_fleet_title = grid.get_child(grid.get_child_count() - 2) as Label
 
 	v.add_child(HSeparator.new())
 	v.add_child(UIUtil.label("ATTRIBUTES", &"HeaderLabel"))
@@ -364,6 +373,7 @@ func _refresh() -> void:
 		_earned.text = "%s cr" % UIUtil.amount(cap.credits_earned)
 		_spent.text = "%s cr" % UIUtil.amount(cap.credits_spent)
 		_wallet.text = "%s cr" % UIUtil.amount(cap.wallet)
+		_refresh_fleet_and_repairs(cap)
 		_refresh_career(cap)
 	_refresh_modules()
 	var text := ""
@@ -457,6 +467,32 @@ func _stepper_row(parent: Container, title: String, step: Callable) -> Label:
 	plus.pressed.connect(step.bind(1))
 	row.add_child(plus)
 	return value
+
+
+func _refresh_fleet_and_repairs(cap: Captain) -> void:
+	var bill := RepairBay.cost_to_repair(ship)
+	if ship.repairing:
+		_repairs.text = "Repairing, %d cr to go" % bill
+		_repairs.add_theme_color_override("font_color", PipMeter.MID)
+	elif bill <= 0:
+		_repairs.text = "Hull fine"
+		_repairs.remove_theme_color_override("font_color")
+	else:
+		var short := cap.wallet < bill
+		_repairs.text = "Needs repairs, %d cr%s" % [bill, " (wallet short)" if short else ""]
+		_repairs.add_theme_color_override("font_color", PipMeter.BAD if short else PipMeter.MID)
+	var mb := ship.brain as MercenaryBrain
+	_fleet.visible = mb != null
+	_fleet_title.visible = mb != null
+	if mb == null:
+		return
+	if mb.fleet:
+		var f := mb.fleet
+		_fleet.text = "%s's fleet (%d), %s, %s" % [f.leader_name, f.members.size(), f.role_of(ship), MercFleet.STATE_NAMES[f.state]]
+	elif mb.solo_brave:
+		_fleet.text = "Alone, above their weight"
+	else:
+		_fleet.text = "None (Teamwork %d)" % cap.effective_teamwork()
 
 
 func _add_stat(grid: GridContainer, title: String) -> Label:

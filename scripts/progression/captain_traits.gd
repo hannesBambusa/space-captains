@@ -10,9 +10,9 @@ extends RefCounted
 ##   Grudge         wingmate killed by scavengers: scavenger bounties score
 ##                  +40% pay, patrols more often, flees later; fades
 ##   Lone Wolf      works alone: escort cover means nothing to them, solo
-##                  work scores +0.1, escort jobs -0.25
+##                  work scores +0.1, escort jobs -0.25, Teamwork 3 lower
 ##   Union Rep      loyal long service: keeps 4% more of each payment; pay
-##                  below fair scores -0.35 (sulks)
+##                  below fair scores -0.35 (sulks), Teamwork 2 higher
 
 const MAX_TRAITS := 3
 
@@ -29,8 +29,8 @@ const INFO := {
 	&"shaken": {"name": "Shaken", "tip": "Badly damaged recently. Nerve counts 3 lower until it fades.", "fade": 300.0, "good": false},
 	&"crystal_hound": {"name": "Crystal Hound", "tip": "Has hauled a lot of crystal. Prefers crystal belts.", "fade": 0.0, "good": true},
 	&"grudge": {"name": "Grudge", "tip": "Lost a wingmate to scavengers. Hunts them harder; fades in time.", "fade": 900.0, "good": true},
-	&"lone_wolf": {"name": "Lone Wolf", "tip": "Works alone. Ignores escort cover and dislikes escort jobs.", "fade": 0.0, "good": true},
-	&"union_rep": {"name": "Union Rep", "tip": "Long, loyal service. Keeps 4% more of each payment; sulks at below-fair pay.", "fade": 0.0, "good": true},
+	&"lone_wolf": {"name": "Lone Wolf", "tip": "Works alone. Ignores escort cover, dislikes escort jobs and fleets (Teamwork -3).", "fade": 0.0, "good": true},
+	&"union_rep": {"name": "Union Rep", "tip": "Long, loyal service. Keeps 4% more of each payment; sulks at below-fair pay. Teamwork +2.", "fade": 0.0, "good": true},
 }
 
 ## Thresholds for earning them.
