@@ -239,9 +239,12 @@ func _draw_map() -> void:
 			hostiles.append(n)
 			continue
 		var m := _to_map(n.global_position)
+		_draw_warp_streak(c, n as Ship, m)
 		c.draw_circle(m, 2.0, ShipMarkers.color_for(n))
 	for n in hostiles:
 		var m := _to_map(n.global_position)
+		if n is Ship:
+			_draw_warp_streak(c, n as Ship, m)
 		if n is ScavengerDen:
 			c.draw_rect(Rect2(m - Vector2(3.0, 3.0), Vector2(6.0, 6.0)), ShipMarkers.DEN_COLOR, false, 1.5)
 		else:
@@ -252,6 +255,14 @@ func _draw_map() -> void:
 
 
 ## The camera's footprint on the plane (screen corners), or its pivot.
+## A short streak behind ships in a warp hop.
+func _draw_warp_streak(c: Control, s: Ship, m: Vector2) -> void:
+	if s.mover == null or s.mover.warp_state != ShipMover.Warp.WARP:
+		return
+	var back := _to_map(s.global_position - s.mover.warp_dir * 1800.0)
+	c.draw_line(back, m, Color(ShipMarkers.color_for(s), 0.6), 1.5, true)
+
+
 func _draw_view(c: Control) -> void:
 	if hud.camera == null:
 		return

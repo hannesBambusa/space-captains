@@ -18,6 +18,10 @@ extends RefCounted
 ## Targets inside an up shield bubble are never chased from outside: the
 ## bubble is attacked instead (raiders, retaliation) or the prey is skipped.
 ## Checks run on a timer ([constant AI_INTERVAL]).
+## Warp hops (ShipMover): raiders hop toward the colony but drop out
+## [constant RAID_WARP_DROP] short of it, so the raid warning still gives the
+## player time; fleeing and returning scavengers hop home when no player gun
+## is near. Roaming, hunting and fighting never warp.
 
 enum State { LAUNCHING, ROAMING, HUNTING, ATTACKING, FLEEING, RAIDING, RETURNING }
 
@@ -38,6 +42,9 @@ const RAID_LOOT_INTERVAL := 8.0
 const RAID_LOOT_CREDITS := 15
 const RAID_LOOT_MAX := 75
 const ROAM_SPEED := 0.55
+## Raiders drop out of a warp this far short of the colony, metres.
+const RAID_WARP_DROP := 9000.0
+const WARP_CLEAR := 1500.0
 
 var ship: ScavengerShip
 var state: State = State.LAUNCHING
@@ -79,6 +86,30 @@ func get_status_text() -> String:
 				return "Raiding %s" % _raid_target.display_name
 			return "Raiding"
 	return STATE_NAMES[state]
+
+
+func can_warp() -> bool:
+	if ship.durability.seconds_since_hit() < 5.0:
+		return false
+	match state:
+		State.RAIDING:
+			return not Combat.is_live_target(target)
+		State.FLEEING, State.RETURNING:
+			return Combat.nearest_hostile(ship.get_tree(), ship.global_position, WARP_CLEAR, ship.faction) == null
+	return false
+
+
+func warp_drop() -> float:
+	return RAID_WARP_DROP if state == State.RAIDING else SpaceNav.WARP_DROP
+
+
+func destination_name() -> String:
+	match state:
+		State.RAIDING:
+			return _raid_target.display_name if is_instance_valid(_raid_target) else "the colony"
+		State.FLEEING, State.RETURNING:
+			return ship.den.get_display_name() if is_instance_valid(ship.den) else ""
+	return ""
 
 
 func on_attacked(attacker: Node3D) -> void:

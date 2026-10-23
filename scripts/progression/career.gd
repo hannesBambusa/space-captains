@@ -96,24 +96,60 @@ static func consider(ship: Ship) -> bool:
 	if rng.randf() >= THINK_CHANCE:
 		return false
 	for target in targets_for(c):
-		if block_reason(ship, target, false).is_empty():
-			return switch(ship, target) != null
+		var why := block_reason(ship, target, false)
+		if why.is_empty():
+			return switch(ship, target, "Thought it over: appeal %.2f, wants %.2f" % [appeal(c, target), WANT]) != null
+		c.flight_log.note(CaptainLog.Kind.CAREER, CaptainLog.Outcome.REFUSED, "Thought about %s work: %s" % [target.to_lower(), why.to_lower()],
+				appeal_line(c, target, false), "", "career:%s:%s" % [target, why])
 	return false
+
+
+## "Appeal 0.32 (Bold +0.35, Nerve +0.12 ...), wants 0.50"
+static func appeal_line(c: Captain, target: String, offered: bool) -> String:
+	var parts: PackedStringArray = []
+	var rank_part := 0.08 * float(maxi(c.rank - MIN_RANK, 0))
+	if rank_part > 0.0:
+		parts.append("rank %+.2f" % rank_part)
+	match target:
+		"Mercenary":
+			parts.append("%s %+.2f" % [c.get_personality_name(), 0.35 if c.personality == Captain.Personality.BOLD else (-0.3 if c.personality == Captain.Personality.CAUTIOUS else 0.0)])
+			parts.append("Nerve %+.2f" % (0.25 * Captain.factor(c.effective_nerve())))
+			parts.append("Piloting %+.2f" % (0.15 * Captain.factor(c.piloting)))
+		"Salvager":
+			var p := 0.0
+			match c.personality:
+				Captain.Personality.CAUTIOUS:
+					p = 0.25
+				Captain.Personality.GREEDY:
+					p = 0.2
+				Captain.Personality.LAZY:
+					p = 0.1
+				Captain.Personality.BOLD:
+					p = -0.15
+			parts.append("%s %+.2f" % [c.get_personality_name(), p])
+	if offered:
+		parts.append("your offer %+.2f" % OFFER_BONUS)
+	return "Appeal %.2f (%s), wants %.2f" % [appeal(c, target) + (OFFER_BONUS if offered else 0.0), ", ".join(parts), WANT]
 
 
 ## The player suggests a move. Returns the captain's answer ("" = yes, they
 ## switched; else why not).
 static func offer(ship: Ship, target: String) -> String:
 	var why := block_reason(ship, target, true)
+	var c := ship.captain
 	if why.is_empty():
-		if switch(ship, target) == null:
+		if switch(ship, target, "You offered the move. " + appeal_line(c, target, true)) == null:
 			return "Could not switch"
 		return ""
+	if c:
+		c.flight_log.note(CaptainLog.Kind.CAREER, CaptainLog.Outcome.REFUSED, "Turned down your offer of %s work: %s" % [target.to_lower(), why.to_lower()],
+				appeal_line(c, target, true) if why == "Not interested" else why)
 	return why
 
 
 ## Moves the captain into a new ship of [param target]. Returns it.
-static func switch(ship: Ship, target: String) -> Ship:
+## [param why] goes to the decision log.
+static func switch(ship: Ship, target: String, why: String = "") -> Ship:
 	var c := ship.captain
 	var b := find_berth(ship.get_tree(), target)
 	if c == null or b == null or c.wallet < b.def.ship_cost:
@@ -129,6 +165,8 @@ static func switch(ship: Ship, target: String) -> Ship:
 	c.skill = rng.randi_range(NEW_SKILL.x, NEW_SKILL.y)
 	c.career_since = SimClock.time
 	c.add_history("Left %s, %s to %s at %s" % [old_home, old_role.to_lower(), target.to_lower(), b.display_name])
+	c.flight_log.note(CaptainLog.Kind.CAREER, CaptainLog.Outcome.DID, "Switched from %s to %s work at %s" % [old_role.to_lower(), target.to_lower(), b.display_name],
+			why, "Paid %s cr for the new ship; rank, traits and reputation carry over, the %s skill starts at %d" % [UIUtil.amount(b.def.ship_cost), c.get_specialty_name(), c.skill])
 	var ns := b.adopt(c)
 	EventLog.post("%s quit mining to fly as a %s" % [c.captain_name, target.to_lower()] if old_role == "Miner" else
 			"%s quit %s work to fly as a %s" % [c.captain_name, old_role.to_lower(), target.to_lower()],

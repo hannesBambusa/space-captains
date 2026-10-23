@@ -1,17 +1,23 @@
 class_name SalvageContract
 extends Contract
-## Salvage a scrap field: the player pays [member reward] credits for every
-## load a salvager delivers to its yard; the scrap turns into materials
-## ([constant MATERIALS_PER_SCRAP] each). One load is [constant LOAD_SCRAP]
-## scrap times the ship's hold. Scrap promised to ships on a trip is
-## reserved, so takers never outnumber what is left. Completes when the field
-## is stripped or gone. While the contract is open the field does not fade.
-## Danger comes from the place: near a living Scavenger Den, or the belt the
-## field lies in.
+## Salvage a scrap field. Every delivered load goes to the salvager's
+## Salvage Yard, which pays [constant FAIR_REWARD] per load from its own funds
+## and reprocesses the scrap into ore (SalvageYard). One load is
+## [constant LOAD_SCRAP] scrap times the ship's hold.
+## Free salvage: every scrap field has one unlisted [member free] contract
+## ([method free_for], reward 0, never on the board) that salvagers pick on
+## their own. A player-posted contract adds [member reward] credits per load
+## on top of the yard's pay (a bonus that draws salvagers to that field
+## first); while it is open the field does not fade.
+## Scrap promised to ships on a trip is reserved across every contract on the
+## field ([method reserved_loads]), so takers never outnumber what is left,
+## and no more than SalvagerShip.SLOT_COUNT ships work one field. Completes
+## when the field is stripped or gone. Danger comes from the place: near a
+## living Scavenger Den, or the belt the field lies in.
 
 const LOAD_SCRAP := 20
 const MATERIALS_PER_SCRAP := 1.0
-## Fair pay per load.
+## Fair pay per load (what the yard pays; player contracts add a bonus).
 const FAIR_REWARD := 40
 ## Chance per delivered load of a rare part (den ruins: [constant DEN_RARE_CHANCE]).
 const RARE_CHANCE := 0.06
@@ -21,12 +27,17 @@ const DEN_NEAR := 3500.0
 const DEN_FAR := 7000.0
 
 static var rng := RandomNumberGenerator.new()
+## Free salvage contracts: ScrapField instance id -> SalvageContract.
+static var _free: Dictionary = {}
+static var _next_free_id := -1
 
 var field: ScrapField
 var loads_delivered: int = 0
 var loads_in_flight: int = 0
 var materials_delivered: int = 0
 var rare_chance: float = RARE_CHANCE
+## Free salvage (not on the board, the yard's pay only).
+var free: bool = false
 
 
 func _init(on_field: ScrapField = null, credits_per_load: int = 0, taker_limit: int = 3) -> void:
@@ -39,10 +50,81 @@ func _init(on_field: ScrapField = null, credits_per_load: int = 0, taker_limit: 
 		rare_chance = DEN_RARE_CHANCE
 
 
+## The free salvage contract of [param f] (made on first use), or null.
+static func free_for(f: ScrapField) -> SalvageContract:
+	if f == null or not is_instance_valid(f) or f.is_queued_for_deletion():
+		return null
+	var key := f.get_instance_id()
+	var c := _free.get(key) as SalvageContract
+	if c:
+		return c
+	c = SalvageContract.new(f, 0, SalvagerShip.SLOT_COUNT)
+	c.free = true
+	c.id = _next_free_id
+	_next_free_id -= 1
+	c.created_time = SimClock.time
+	_free[key] = c
+	f.depleted.connect(func(_f: ScrapField) -> void: c.mark_done())
+	f.tree_exiting.connect(func() -> void:
+		c.mark_done()
+		_free.erase(key))
+	return c
+
+
+## Free salvage contracts open now, one per scrap field with scrap left.
+static func free_contracts(tree: SceneTree) -> Array[Contract]:
+	var out: Array[Contract] = []
+	for f in ScrapField.all(tree):
+		if f.amount <= 0:
+			continue
+		var c := free_for(f)
+		if c and c.is_available():
+			out.append(c)
+	return out
+
+
+## True while a salvager is on a free salvage trip to [param f].
+static func free_in_use(f: ScrapField) -> bool:
+	var c := _free.get(f.get_instance_id()) as SalvageContract if f else null
+	return c != null and not c.takers.is_empty()
+
+
+## Every salvage contract on [param f]: its free one and the posted ones.
+static func all_on(f: ScrapField) -> Array[SalvageContract]:
+	var out: Array[SalvageContract] = []
+	if f == null or not is_instance_valid(f):
+		return out
+	var fc := _free.get(f.get_instance_id()) as SalvageContract
+	if fc:
+		out.append(fc)
+	for c in ContractBoard.get_for_target(f):
+		if c is SalvageContract and not c.is_finished():
+			out.append(c as SalvageContract)
+	return out
+
+
+## Loads on their way from [param f] (reserved scrap), every contract.
+static func reserved_loads(f: ScrapField) -> int:
+	var n := 0
+	for c in all_on(f):
+		n += c.loads_in_flight
+	return n
+
+
+## Salvagers working [param f] now, every contract.
+static func workers_on(f: ScrapField) -> int:
+	var n := 0
+	for c in all_on(f):
+		n += c.takers.size()
+	return n
+
+
 func is_available() -> bool:
 	if not super.is_available() or not is_instance_valid(field):
 		return false
-	return field.amount - loads_in_flight * LOAD_SCRAP > 0
+	if workers_on(field) >= SalvagerShip.SLOT_COUNT:
+		return false
+	return field.amount - reserved_loads(field) * LOAD_SCRAP > 0
 
 
 func add_taker(ship: Node) -> bool:
@@ -80,8 +162,14 @@ func get_target_name() -> String:
 	return field.get_display_name() if is_instance_valid(field) else "Scrap field"
 
 
+func get_type_name() -> String:
+	return "free salvage" if free else super.get_type_name()
+
+
 func get_reward_text() -> String:
-	return "%d cr/load" % reward
+	if free:
+		return "yard pays %d cr/load" % FAIR_REWARD
+	return "%d cr/load bonus + yard %d" % [reward, FAIR_REWARD]
 
 
 func get_progress_text() -> String:

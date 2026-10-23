@@ -2,7 +2,10 @@ class_name MercenaryEvaluator
 extends RoleEvaluator
 ## Mercenary scoring for bounty and escort contracts.
 ##   pay      = pay_weight * Greed * reward / PAY_SCALE (bounty or escort scale)
-##   distance = distance_weight * one-way km from the home outpost / DIST_SCALE_KM
+##   distance = distance_weight * one-way travel time from the home outpost
+##              (warp hop plus flight) / MERC_TRAVEL_SCALE_S. Distance alone
+##              never refuses a job inside the system: a low score is "not
+##              worth it" (or too dangerous), never "too far"
 ##   danger   = danger_weight * Nerve * (danger - 1)^2 / 4 (escorts: half,
 ##              they fight beside the miner, not into the den)
 ##   utility  = pay - distance - danger + Loyalty bonus + noise
@@ -32,7 +35,7 @@ extends RoleEvaluator
 
 const BOUNTY_PAY_SCALE := 120.0
 const ESCORT_PAY_SCALE := 40.0
-const DIST_SCALE_KM := 6.0
+const MERC_TRAVEL_SCALE_S := 36.0
 const ESCORT_DANGER_SHARE := 0.5
 const MIN_HULL := 0.7
 ## Danger multiplier added per missing hull share when flying damaged.
@@ -82,7 +85,8 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 	var escort := contract is EscortContract
 	var scale := ESCORT_PAY_SCALE if escort else BOUNTY_PAY_SCALE
 	var pay := prof.pay_weight * float(contract.reward) / scale * (cap.pay_scale() if cap else 1.0)
-	var dist := prof.distance_weight * km / DIST_SCALE_KM
+	var trip := travel_of(brain, km)
+	var dist := prof.distance_weight * (trip.x + trip.y) / MERC_TRAVEL_SCALE_S
 	var dang := prof.danger_weight * pow(float(maxi(danger - 1, 0)), 2.0) / 4.0 * (cap.danger_scale() if cap else 1.0)
 	if escort:
 		dang *= ESCORT_DANGER_SHARE
@@ -92,7 +96,8 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 		pay *= GRUDGE_PAY
 	if cap and cap.has_trait(CaptainTraits.LONE_WOLF):
 		loyal += -LONE_WOLF_ESCORT if escort else LONE_WOLF_BONUS
-	e.terms = {"pay": pay, "distance": dist, "danger": dang, "km": km}
+	e.terms = {"pay": pay, "distance": dist, "danger": dang, "km": km, "reward": contract.reward, "danger_level": danger, "base_danger": danger,
+			"warp_s": trip.x, "flight_s": trip.y, "pay_div": scale, "time_div": MERC_TRAVEL_SCALE_S}
 	var too_strong := false
 	if bounty and cap:
 		var need := MercFleet.need_for(bounty, brain.ship)
@@ -101,6 +106,9 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 			var daring := cap.daring()
 			var grudge := cap.has_trait(CaptainTraits.GRUDGE) and _scavenger_target(bounty)
 			var solo_chance := lerpf(LONE_WOLF_CHANCE.x, LONE_WOLF_CHANCE.y, clampf((daring - LONE_WOLF_DARING) / (1.0 - LONE_WOLF_DARING), 0.0, 1.0))
+			e.terms["daring"] = daring
+			e.terms["solo_chance"] = solo_chance if daring >= LONE_WOLF_DARING else 0.0
+			e.terms["grudge"] = grudge
 			if daring >= LONE_WOLF_DARING and need <= 1.0 + LONE_WOLF_REACH * daring and brain.rng.randf() < solo_chance:
 				dang *= LONE_WOLF_DANGER
 				e.terms["solo_brave"] = true
@@ -113,7 +121,10 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 				too_strong = true
 			e.terms["pay"] = pay
 			e.terms["danger"] = dang
-	e.utility = pay - dist - dang + loyal + brain.rng.randf_range(-prof.noise, prof.noise)
+	var noise := brain.rng.randf_range(-prof.noise, prof.noise)
+	e.utility = pay - dist - dang + loyal + noise
+	e.terms["loyal"] = loyal
+	e.terms["noise"] = noise
 	if too_strong:
 		e.reason = TOO_STRONG
 	elif Economy.credits < contract.reward:
@@ -122,15 +133,8 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 		e.reason = NEEDS_REPAIRS
 	elif escort and (contract as EscortContract).ward != null and (contract as EscortContract).pick_ward() == null:
 		e.reason = NO_MINER
-	elif prof.max_trip_km > 0.0 and km > prof.max_trip_km:
-		e.reason = TOO_FAR
 	elif e.utility < prof.accept_threshold:
-		if dang >= dist and dang > pay * 0.25:
-			e.reason = TOO_DANGEROUS
-		elif dist > pay * 0.25:
-			e.reason = TOO_FAR
-		else:
-			e.reason = NOT_WORTH_IT
+		e.reason = TOO_DANGEROUS if dang >= dist and dang > pay * 0.25 else NOT_WORTH_IT
 	else:
 		e.accept = true
 	return e
@@ -153,17 +157,22 @@ func evaluate_fleet_join(brain: CaptainBrain, fleet: MercFleet) -> Evaluation:
 	var heads := float(fleet.members.size() + 1)
 	var km := Combat.flat_distance(brain.ship.global_position, fleet.rally_point()) / 1000.0
 	var pay := prof.pay_weight * fleet.share_for_next() / BOUNTY_PAY_SCALE * (cap.pay_scale() if cap else 1.0)
-	var dist := prof.distance_weight * km / DIST_SCALE_KM
+	var trip := travel_of(brain, km)
+	var dist := prof.distance_weight * (trip.x + trip.y) / MERC_TRAVEL_SCALE_S
 	var dang := prof.danger_weight * pow(float(maxi(bounty.get_danger() - 1, 0)), 2.0) / 4.0 * (cap.danger_scale() if cap else 1.0) / heads
 	var grudge := cap != null and cap.has_trait(CaptainTraits.GRUDGE) and _scavenger_target(bounty)
 	if grudge:
 		pay *= GRUDGE_PAY
-	e.utility = pay - dist - dang + (cap.loyalty_bonus() if cap else 0.0) + brain.rng.randf_range(-prof.noise, prof.noise)
+	var loyal := cap.loyalty_bonus() if cap else 0.0
+	var noise := brain.rng.randf_range(-prof.noise, prof.noise)
+	e.utility = pay - dist - dang + loyal + noise
 	var chance := JOIN_BASE + JOIN_PER_TEAMWORK * float((cap.effective_teamwork() if cap else 5) - 1)
 	if cap:
 		chance += JOIN_PERSONALITY[cap.personality]
 	chance += clampf((pay - 1.0) * 0.05, -0.2, 0.2) - JOIN_PER_KM * km
-	e.terms = {"pay": pay, "distance": dist, "danger": dang, "km": km, "join_chance": chance, "join_fleet": true}
+	e.terms = {"pay": pay, "distance": dist, "danger": dang, "km": km, "join_chance": chance, "join_fleet": true, "loyal": loyal, "noise": noise,
+			"share": fleet.share_for_next(), "heads": heads, "reward": bounty.reward, "danger_level": bounty.get_danger(), "base_danger": bounty.get_danger(),
+			"grudge": grudge, "leader": fleet.leader_name, "warp_s": trip.x, "flight_s": trip.y, "pay_div": BOUNTY_PAY_SCALE, "time_div": MERC_TRAVEL_SCALE_S}
 	if Economy.credits < bounty.reward:
 		e.reason = CANT_PAY
 	elif brain.ship.hull_fraction() < MIN_HULL and RepairBay.can_afford(brain.ship):

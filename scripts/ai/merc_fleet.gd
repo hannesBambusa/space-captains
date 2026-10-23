@@ -197,7 +197,7 @@ func invite(tree: SceneTree) -> void:
 			mb.join_fleet(self, e)
 		else:
 			declined[mb.ship.get_instance_id()] = true
-			mb.decline_fleet(self, e.reason)
+			mb.decline_fleet(self, e.reason, e)
 
 
 ## Credits one more member could expect (equal share).
@@ -252,6 +252,10 @@ func _depart() -> void:
 	var names: PackedStringArray = []
 	for m in members:
 		names.append(m.get_display_name())
+	for m in members:
+		if m.brain:
+			m.brain.note(CaptainLog.Kind.FLEET, CaptainLog.Outcome.DID, "Set out in a fleet of %d for %s, as %s" % [members.size(), contract.get_target_name(), role_of(m)],
+					"Leader by rank, then Nerve: %s" % leader_name, ", ".join(names))
 	EventLog.post("%s's fleet (%d) sets out for %s: %s" % [leader_name, members.size(), contract.get_target_name(), ", ".join(names)],
 			EventLog.Kind.COMBAT, leader)
 
@@ -317,6 +321,9 @@ func _check_retreat() -> void:
 		for m in members.duplicate():
 			var mb := m.brain as MercenaryBrain
 			if mb:
+				mb.note(CaptainLog.Kind.RETREAT, CaptainLog.Outcome.DID, "%s fleet broke off from %s" % ["Our" if m == leader else leader_name + "'s", contract.get_target_name()],
+						"Fleet hull %d%% under the leader's retreat level %d%% + %d%%, or half the ships lost; the target still has %d%%" % [roundi(mean * 100.0),
+						roundi(lb.retreat_level() * 100.0), roundi(RETREAT_MARGIN * 100.0), roundi(target_hull * 100.0)])
 				mb.return_home(m.hull_fraction() < MercenaryBrain.REPAIRED)
 
 
@@ -375,6 +382,8 @@ func _last_one_standing(s: Ship) -> void:
 		mb.go_solo()
 	else:
 		EventLog.post("%s's fleet is down to %s, who heads home" % [leader_name, s.get_display_name()], EventLog.Kind.COMBAT, s)
+		mb.note(CaptainLog.Kind.FLEET, CaptainLog.Outcome.DID, "Left alone in the fleet, headed home from %s" % contract.get_target_name(),
+				"Target at %d%% hull and daring %.2f below %.2f: not worth it alone" % [roundi(target_hull * 100.0), daring, MercenaryEvaluator.LONE_WOLF_DARING])
 		mb.return_home(s.hull_fraction() < MercenaryBrain.REPAIRED)
 
 
@@ -391,6 +400,7 @@ func disband(line: String) -> void:
 		var mb := m.brain as MercenaryBrain
 		if mb and mb.fleet == self:
 			mb.fleet = null
+			mb.note(CaptainLog.Kind.FLEET, CaptainLog.Outcome.FAILED, "Fleet for %s fell apart" % contract.get_target_name(), line if not line.is_empty() else "Not enough ships stayed in it")
 			mb.return_home(false)
 	members.clear()
 

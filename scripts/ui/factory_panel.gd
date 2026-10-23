@@ -7,9 +7,20 @@ extends PanelContainer
 ## the "keep at least" reserve; auto-sell
 ## on/off. Production: current item and progress, backorders, warehouse
 ## counts by slot and tier, tooling upgrades, and recent sales and output.
+## Tabs (the CaptainPanel idiom): "Production" (current job with progress
+## and ETA, the open buy orders in production order with captain, deposit
+## and state, the equipment demand table, the warehouse grid) and "Market"
+## (ore market, auto-sell, tooling, recent). The hidden tab keeps the
+## height of the taller one, so the panel does not jump when switching.
 
 const DEMAND_COLORS: Array[Color] = [Color(0.6, 0.66, 0.74), Color(1.0, 0.78, 0.25), Color(0.35, 0.9, 0.5)]
 const MAX_RECENT := 6
+const MAX_ORDERS := 6
+const MAX_DEMAND := 10
+const STATE_COLORS := {
+	"ready": Color(0.35, 0.9, 0.5), "making": Color(0.55, 0.85, 1.0), "next": Color(0.85, 0.9, 1.0),
+	"queued": Color(0.6, 0.66, 0.74), "ore": Color(1.0, 0.78, 0.25), "tooling": Color(1.0, 0.6, 0.4),
+}
 
 @export var panel_width: float = 400.0
 
@@ -19,7 +30,18 @@ var factory: Factory
 
 var _title: Label
 var _status: Label
+var _job_name: Label
 var _job_bar: ProgressBar
+var _job_eta: Label
+var _orders_header: Label
+var _orders_list: VBoxContainer
+var _demand_list: GridContainer
+var _production: VBoxContainer
+var _market_tab: VBoxContainer
+var _tab_buttons: Array[Button] = []
+## 0 = Production, 1 = Market.
+var _tab: int = 0
+var _tab_height: float = 0.0
 var _auto: CheckButton
 ## Per ore: {stock_bar, stock, demand_meter, demand, price, ask, rate, keep}.
 var _ore_rows: Array[Dictionary] = []
@@ -43,6 +65,18 @@ func _ready() -> void:
 	var top := HBoxContainer.new()
 	v.add_child(top)
 	top.add_child(UIUtil.label("STRUCTURE", &"HeaderLabel"))
+	top.add_child(UIUtil.spacer(6.0))
+	var tabs := ButtonGroup.new()
+	for i in 2:
+		var tb := UIUtil.button("Production" if i == 0 else "Market", &"IconButton")
+		tb.toggle_mode = true
+		tb.button_group = tabs
+		tb.button_pressed = i == 0
+		tb.custom_minimum_size = Vector2(84.0, 22.0)
+		tb.tooltip_text = "What is being made, buy orders and equipment demand" if i == 0 else "Ore market, auto-sell and tooling"
+		tb.pressed.connect(set_tab.bind(i))
+		top.add_child(tb)
+		_tab_buttons.append(tb)
 	top.add_child(UIUtil.spacer())
 	var close := UIUtil.button("x", &"IconButton")
 	close.custom_minimum_size = Vector2(26.0, 22.0)
@@ -53,21 +87,22 @@ func _ready() -> void:
 	top.add_child(close)
 	_title = UIUtil.label("Factory", &"TitleLabel")
 	v.add_child(_title)
-	var sh := HBoxContainer.new()
-	v.add_child(sh)
 	_status = UIUtil.label("", &"ValueLabel")
 	_status.clip_text = true
 	_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	sh.add_child(_status)
-	_job_bar = ProgressBar.new()
-	_job_bar.show_percentage = false
-	_job_bar.max_value = 1.0
-	_job_bar.custom_minimum_size = Vector2(80.0, 6.0)
-	_job_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_job_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	sh.add_child(_job_bar)
+	_status.custom_minimum_size.x = panel_width - 24.0
+	v.add_child(_status)
+	var root := v
+	_production = VBoxContainer.new()
+	_production.add_theme_constant_override("separation", 5)
+	root.add_child(_production)
+	_market_tab = VBoxContainer.new()
+	_market_tab.add_theme_constant_override("separation", 5)
+	_market_tab.visible = false
+	root.add_child(_market_tab)
+	_build_production(_production)
 
+	v = _market_tab
 	v.add_child(HSeparator.new())
 	var mh := HBoxContainer.new()
 	v.add_child(mh)
@@ -83,6 +118,74 @@ func _ready() -> void:
 	mh.add_child(_auto)
 	for i in FactoryMarket.TYPES:
 		_ore_rows.append(_make_ore_row(v, i))
+
+	v.add_child(HSeparator.new())
+	_tool_label = UIUtil.label("", &"DimLabel")
+	_tool_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_tool_label.custom_minimum_size.x = panel_width - 24.0
+	v.add_child(_tool_label)
+	_tool_button = UIUtil.button("", &"AccentButton")
+	_tool_button.pressed.connect(func() -> void:
+		if factory:
+			factory.upgrade_tooling())
+	v.add_child(_tool_button)
+	_tool_reason = UIUtil.label("", &"WarnLabel")
+	v.add_child(_tool_reason)
+
+	v.add_child(UIUtil.label("RECENT", &"HeaderLabel"))
+	_recent = VBoxContainer.new()
+	_recent.add_theme_constant_override("separation", 0)
+	v.add_child(_recent)
+
+
+## Production tab: job, orders, equipment demand, warehouse.
+func _build_production(v: VBoxContainer) -> void:
+	v.add_child(HSeparator.new())
+	v.add_child(UIUtil.label("NOW MAKING", &"HeaderLabel"))
+	var jr := HBoxContainer.new()
+	jr.add_theme_constant_override("separation", 8)
+	v.add_child(jr)
+	_job_name = UIUtil.label("", &"ValueLabel")
+	_job_name.custom_minimum_size.x = 170.0
+	_job_name.clip_text = true
+	_job_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	jr.add_child(_job_name)
+	_job_bar = ProgressBar.new()
+	_job_bar.show_percentage = false
+	_job_bar.max_value = 1.0
+	_job_bar.custom_minimum_size = Vector2(80.0, 6.0)
+	_job_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_job_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_job_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	jr.add_child(_job_bar)
+	_job_eta = UIUtil.label("", &"DimLabel")
+	_job_eta.custom_minimum_size.x = 64.0
+	_job_eta.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	jr.add_child(_job_eta)
+
+	v.add_child(HSeparator.new())
+	_orders_header = UIUtil.label("", &"HeaderLabel")
+	_orders_header.mouse_filter = Control.MOUSE_FILTER_PASS
+	_orders_header.tooltip_text = "Captains pay up front when they order. They pick the part up at the Outfitter; a cancelled or lapsed order is refunded."
+	v.add_child(_orders_header)
+	_orders_list = VBoxContainer.new()
+	_orders_list.add_theme_constant_override("separation", 0)
+	v.add_child(_orders_list)
+	_orders = UIUtil.label("", &"DimLabel")
+	_orders.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_orders.custom_minimum_size.x = panel_width - 24.0
+	v.add_child(_orders)
+
+	v.add_child(HSeparator.new())
+	var dh := UIUtil.label("EQUIPMENT DEMAND", &"HeaderLabel")
+	dh.mouse_filter = Control.MOUSE_FILTER_PASS
+	dh.tooltip_text = "Parts captains want: open orders, recent misses (wanted it, none in stock) and parts your hired captains could use that the warehouse has none of."
+	v.add_child(dh)
+	_demand_list = GridContainer.new()
+	_demand_list.columns = 5
+	_demand_list.add_theme_constant_override("h_separation", 10)
+	_demand_list.add_theme_constant_override("v_separation", 0)
+	v.add_child(_demand_list)
 
 	v.add_child(HSeparator.new())
 	_ware_header = UIUtil.label("", &"HeaderLabel")
@@ -113,28 +216,6 @@ func _ready() -> void:
 			grid.add_child(cell)
 			row.append(cell)
 		_ware_cells.append(row)
-	_orders = UIUtil.label("", &"DimLabel")
-	_orders.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_orders.custom_minimum_size.x = panel_width - 24.0
-	v.add_child(_orders)
-
-	v.add_child(HSeparator.new())
-	_tool_label = UIUtil.label("", &"DimLabel")
-	_tool_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_tool_label.custom_minimum_size.x = panel_width - 24.0
-	v.add_child(_tool_label)
-	_tool_button = UIUtil.button("", &"AccentButton")
-	_tool_button.pressed.connect(func() -> void:
-		if factory:
-			factory.upgrade_tooling())
-	v.add_child(_tool_button)
-	_tool_reason = UIUtil.label("", &"WarnLabel")
-	v.add_child(_tool_reason)
-
-	v.add_child(UIUtil.label("RECENT", &"HeaderLabel"))
-	_recent = VBoxContainer.new()
-	_recent.add_theme_constant_override("separation", 0)
-	v.add_child(_recent)
 
 
 func _make_ore_row(parent: VBoxContainer, ore: int) -> Dictionary:
@@ -249,6 +330,25 @@ func show_building(b: Building) -> void:
 	_refresh()
 
 
+## 0 = Production, 1 = Market. The hidden tab keeps the taller one's height.
+func set_tab(index: int) -> void:
+	var cur := _production if _tab == 0 else _market_tab
+	if cur.visible and cur.size.y > 0.0:
+		_tab_height = maxf(_tab_height, cur.size.y)
+	_tab = index
+	_tab_buttons[index].set_pressed_no_signal(true)
+	_tab_buttons[1 - index].set_pressed_no_signal(false)
+	_production.visible = index == 0
+	_market_tab.visible = index == 1
+	_production.custom_minimum_size.y = _tab_height
+	_market_tab.custom_minimum_size.y = _tab_height
+	_refresh()
+
+
+func get_tab() -> int:
+	return _tab
+
+
 func _process(delta: float) -> void:
 	if not visible or factory == null or not is_instance_valid(factory):
 		return
@@ -264,6 +364,17 @@ func _refresh_live() -> void:
 	_status.text = f.status_text()
 	_job_bar.value = f.job_progress()
 	_job_bar.visible = f.job != null
+	_status.visible = _tab == 1 or f.job == null
+	if f.job:
+		_job_name.text = f.job.display_name
+		_job_name.add_theme_color_override("font_color", CaptainPanel.TIER_COLORS[f.job.tier])
+		_job_eta.text = "%d s left" % ceili(f.job_eta())
+	else:
+		_job_name.text = "Nothing" if f.building.is_active() else "-"
+		_job_name.remove_theme_color_override("font_color")
+		_job_eta.text = ""
+	if _tab != 1:
+		return
 	var m := f.market
 	for i in _ore_rows.size():
 		var r := _ore_rows[i]
@@ -324,15 +435,8 @@ func _refresh() -> void:
 			row[t].text = str(n) if n > 0 else ("0" if can else "-")
 			row[t].add_theme_color_override("font_color", CaptainPanel.TIER_COLORS[t + 1] if n > 0 else Color(0.5, 0.55, 0.62))
 	_ware_header.text = "WAREHOUSE  %d / %d   (%d made)" % [f.warehouse_total(), f.warehouse_cap, f.total_built]
-	if f.backorders.is_empty():
-		_orders.text = "No backorders. Spare capacity goes to a spread of parts for the captains you hired."
-	else:
-		var names: PackedStringArray = []
-		for o in f.backorders:
-			names.append("%s (%s)" % [(o["module"] as ShipModule).display_name, (o["captain"] as Captain).captain_name])
-			if names.size() >= 3:
-				break
-		_orders.text = "Backorders first: " + ", ".join(names) + (" and %d more" % (f.backorders.size() - 3) if f.backorders.size() > 3 else "")
+	_rebuild_orders()
+	_rebuild_demand()
 	# Tooling.
 	var rare: PackedStringArray = []
 	for id: StringName in f.rare_parts:
@@ -352,6 +456,93 @@ func _refresh() -> void:
 	_tool_reason.text = why
 	_tool_reason.visible = not why.is_empty()
 	_rebuild_recent()
+
+
+## Open buy orders in production order: part, captain, deposit, state.
+func _rebuild_orders() -> void:
+	for c in _orders_list.get_children():
+		_orders_list.remove_child(c)
+		c.queue_free()
+	var f := factory
+	var orders := f.orders_in_production_order()
+	_orders_header.text = "BUY ORDERS  %d open, %s cr paid" % [orders.size(), UIUtil.amount(f.deposits_total())] if not orders.is_empty() else "BUY ORDERS"
+	_orders.visible = orders.is_empty() or orders.size() > MAX_ORDERS
+	if orders.is_empty():
+		_orders.text = "No open orders. Spare capacity goes to a spread of parts for the captains you hired."
+		return
+	_orders.text = "and %d more" % (orders.size() - MAX_ORDERS)
+	for i in mini(orders.size(), MAX_ORDERS):
+		var o := orders[i]
+		var m := o["module"] as ShipModule
+		var cap := o["captain"] as Captain
+		var box := VBoxContainer.new()
+		box.add_theme_constant_override("separation", -2)
+		box.mouse_filter = Control.MOUSE_FILTER_PASS
+		_orders_list.add_child(box)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		box.add_child(row)
+		var part := UIUtil.label(m.display_name, &"ValueLabel")
+		part.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		part.clip_text = true
+		part.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		part.add_theme_color_override("font_color", CaptainPanel.TIER_COLORS[m.tier])
+		row.add_child(part)
+		var state := f.order_state(o)
+		var st := UIUtil.label(f.order_state_text(o), &"ValueLabel")
+		st.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		st.add_theme_color_override("font_color", STATE_COLORS.get(state, Color(0.6, 0.66, 0.74)))
+		row.add_child(st)
+		var sub := UIUtil.label("   %s, paid %s cr" % [cap.captain_name if cap else "-", UIUtil.amount(int(o.get("paid", 0)))], &"DimLabel")
+		sub.clip_text = true
+		sub.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		sub.custom_minimum_size.x = panel_width - 24.0
+		box.add_child(sub)
+		box.tooltip_text = "Ordered %s ago, %s" % [UIUtil.clock(SimClock.time - float(o["time"])),
+				"blocked %s of %s before it lapses" % [UIUtil.clock(float(o.get("blocked", 0.0))), UIUtil.clock(f.backorder_timeout)] if float(o.get("blocked", 0.0)) > 0.0 else "never blocked"]
+
+
+## Parts in demand: part, tier, in stock, orders, misses.
+func _rebuild_demand() -> void:
+	for c in _demand_list.get_children():
+		_demand_list.remove_child(c)
+		c.queue_free()
+	var rows := factory.demand_rows(MAX_DEMAND)
+	if rows.is_empty():
+		_demand_list.columns = 1
+		_demand_list.add_child(UIUtil.label("No demand: every part your captains want is in stock.", &"DimLabel"))
+		return
+	_demand_list.columns = 5
+	var widths: PackedFloat32Array = [158.0, 40.0, 52.0, 44.0, 44.0]
+	var heads: PackedStringArray = ["Part", "Tier", "In stock", "Orders", "Misses"]
+	for i in heads.size():
+		var h := UIUtil.label(heads[i], &"DimLabel")
+		h.custom_minimum_size.x = widths[i]
+		if i >= 2:
+			h.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		_demand_list.add_child(h)
+	for r in rows:
+		var m := r["module"] as ShipModule
+		var name_l := UIUtil.label(m.display_name.trim_suffix(" " + ShipModule.TIER_NAMES[m.tier]), &"ValueLabel")
+		name_l.custom_minimum_size.x = widths[0]
+		name_l.clip_text = true
+		name_l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		name_l.mouse_filter = Control.MOUSE_FILTER_PASS
+		name_l.tooltip_text = "%s%s" % [m.display_name, ": none in stock, a hired captain could use it" if bool(r["wanted"]) else ""]
+		_demand_list.add_child(name_l)
+		var tier := UIUtil.label(ShipModule.TIER_NAMES[m.tier], &"DimLabel")
+		tier.add_theme_color_override("font_color", CaptainPanel.TIER_COLORS[m.tier])
+		_demand_list.add_child(tier)
+		var stock := int(r["stock"])
+		var cells: Array[String] = [str(stock), str(int(r["orders"])), str(ceili(float(r["misses"]))) if float(r["misses"]) >= 0.05 else "-"]
+		for i in cells.size():
+			var l := UIUtil.label(cells[i], &"ValueLabel")
+			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			if i == 0 and stock <= 0:
+				l.add_theme_color_override("font_color", PipMeter.BAD)
+			elif i == 1 and int(r["orders"]) > 0:
+				l.add_theme_color_override("font_color", PipMeter.MID)
+			_demand_list.add_child(l)
 
 
 ## Newest first: market sales and production lines, merged by time.

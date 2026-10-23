@@ -13,12 +13,20 @@ extends Node
 ## So mining titanium and crystal is what lets the Factory make the gear
 ## that gets captains through more dangerous belts.
 ##
-## Production order: backorders first (captains who could not buy a part,
+## Production order: buy orders first (captains who could not buy a part,
 ## oldest first, ignoring the warehouse cap), then a spread that keeps every
 ## part captains could use in stock, weighted by the roles and ranks hired
 ## and by recent misses. Rare parts from salvage go into the warehouse and
 ## let the Factory make that module before its tooling, or discount the
 ## next one when already tooled.
+##
+## Buy orders are paid up front: the price leaves the captain's wallet when
+## the order is placed and the Factory holds it ("paid"). Picking the part up
+## at the Outfitter completes the sale from that deposit. Cancelling or a
+## lapse refunds it; a dead captain's deposit is lost. An order only ages
+## while the Factory cannot work on it (no tooling or short of ore, and not
+## the current job): after [member backorder_timeout] sim seconds of that it
+## lapses. Ready orders (a unit held in the warehouse) never lapse.
 ##
 ## The furnace glow (mesh "factory_furnace_glow") pulses while producing.
 
@@ -39,7 +47,8 @@ const TIER_WEIGHT: PackedFloat32Array = [0.0, 1.0, 0.6, 0.35]
 const MAX_LOG := 12
 
 @export var warehouse_cap: int = 16
-## Backorders lapse after this many sim seconds.
+## Buy orders lapse after this many sim seconds of being blocked (no
+## tooling or short of ore while not the current job).
 @export var backorder_timeout: float = 600.0
 ## Warehouse at game start: one of each.
 @export var start_parts: PackedStringArray = PackedStringArray([
@@ -60,7 +69,9 @@ var warehouse: Dictionary = {}
 ## Module being made, or null; sim seconds into it.
 var job: ShipModule
 var job_time: float = 0.0
-## Oldest first: {module: ShipModule, captain: Captain, time: float}.
+## Oldest first: {module: ShipModule, captain: Captain, time: float (placed),
+## paid: int (deposit held), blocked: float (sim seconds blocked so far),
+## notified: bool (ready message sent)}.
 var backorders: Array[Dictionary] = []
 ## Module id -> "stocked" (can be made before its tooling) or "discount".
 var rare_parts: Dictionary = {}
@@ -122,7 +133,7 @@ func sim_step(dt: float) -> void:
 	if dt <= 0.0 or building == null or not building.is_active():
 		return
 	market.sim_step(dt)
-	_expire_backorders()
+	_expire_backorders(dt)
 	if job == null:
 		_start_next()
 	if job:
@@ -176,6 +187,7 @@ func add_stock(m: ShipModule, units: int = 1) -> void:
 	if m == null or units <= 0:
 		return
 	warehouse[m.id] = stock_of(m) + units
+	_notify_ready()
 	changed.emit()
 
 
@@ -195,25 +207,112 @@ func order_of(captain: Captain) -> Dictionary:
 	return {}
 
 
-## [param captain] orders [param m] (replaces an older order of theirs).
-func place_backorder(m: ShipModule, captain: Captain) -> void:
+## [param captain] orders [param m] and pays [param price] up front from the
+## wallet (the Factory holds it). Replaces an older order of theirs (refunded).
+## False when the wallet cannot cover it or they already ordered [param m].
+func place_backorder(m: ShipModule, captain: Captain, price: int) -> bool:
+	if m == null or captain == null or price < 0 or captain.wallet < price:
+		return false
 	var old := order_of(captain)
 	if not old.is_empty():
 		if old["module"] == m:
-			return
-		backorders.erase(old)
-	backorders.append({"module": m, "captain": captain, "time": SimClock.time})
+			return false
+		cancel_backorder(captain, "Replaced by an order for %s" % m.display_name)
+	captain.wallet -= price
+	backorders.append({"module": m, "captain": captain, "time": SimClock.time, "paid": price, "blocked": 0.0, "notified": false})
 	_update_need()
-	_log("Backorder: %s for %s" % [m.display_name, captain.captain_name])
+	_log("Order: %s for %s, paid %s cr" % [m.display_name, captain.captain_name, UIUtil.amount(price)])
+	changed.emit()
+	return true
+
+
+## Cancels [param captain]'s order and refunds the deposit; [param why] goes
+## into their decision log.
+func cancel_backorder(captain: Captain, why: String = "Order cancelled") -> void:
+	var o := order_of(captain)
+	if o.is_empty():
+		return
+	backorders.erase(o)
+	_refund(o, why)
+	_update_need()
 	changed.emit()
 
 
-func cancel_backorder(captain: Captain) -> void:
-	var o := order_of(captain)
-	if not o.is_empty():
-		backorders.erase(o)
-		_update_need()
-		changed.emit()
+## Deposit held by the Factory for open orders.
+func deposits_total() -> int:
+	var n := 0
+	for o in backorders:
+		n += int(o.get("paid", 0))
+	return n
+
+
+## Open orders in production order: ready ones, the job, then the queue.
+func orders_in_production_order() -> Array[Dictionary]:
+	var ready: Array[Dictionary] = []
+	var making: Array[Dictionary] = []
+	var rest: Array[Dictionary] = []
+	for o in backorders:
+		match order_state(o):
+			"ready":
+				ready.append(o)
+			"making":
+				making.append(o)
+			_:
+				rest.append(o)
+	return ready + making + rest
+
+
+## "ready" (a unit is held for it), "making" (the current job), "next" (the
+## next job), "queued", "tooling" (needs tooling), or "ore" (short of ore).
+## Units in stock go to the oldest orders of that module first.
+func order_state(o: Dictionary) -> String:
+	var m := o["module"] as ShipModule
+	var ahead := 0
+	for other in backorders:
+		if other == o:
+			break
+		if other["module"] == m:
+			ahead += 1
+	if ahead < stock_of(m):
+		return "ready"
+	if job == m and ahead == stock_of(m):
+		return "making"
+	if not can_make(m):
+		return "tooling"
+	if not market.has_stock(ore_cost(m)):
+		return "ore"
+	var next := _next_order_module()
+	if next == m and ahead == stock_of(m) + (1 if job == m else 0):
+		return "next"
+	return "queued"
+
+
+## Short text for [method order_state]: "ready for pickup", "in production",
+## "next", "queued", "needs Mk II tooling", "waiting for titanium".
+func order_state_text(o: Dictionary) -> String:
+	var m := o["module"] as ShipModule
+	match order_state(o):
+		"ready":
+			return "ready for pickup"
+		"making":
+			return "in production"
+		"next":
+			return "next"
+		"tooling":
+			return "needs %s tooling" % ShipModule.TIER_NAMES[m.tier]
+		"ore":
+			return "waiting for %s" % _short_ore(ore_cost(m))
+	return "queued"
+
+
+## Module of the first order [method _pick_job] would start now, or null.
+func _next_order_module() -> ShipModule:
+	for o in backorders:
+		var m := o["module"] as ShipModule
+		var wanted := orders_for(m) - (1 if job == m else 0)
+		if can_make(m) and stock_of(m) < wanted and market.has_stock(ore_cost(m)):
+			return m
+	return null
 
 
 func orders_for(m: ShipModule) -> int:
@@ -229,16 +328,56 @@ func note_miss(m: ShipModule) -> void:
 	misses[m.id] = float(misses.get(m.id, 0.0)) + 1.0
 
 
-func _expire_backorders() -> void:
+## Drops orders of dead captains (deposit lost) and refunds orders that were
+## blocked (no tooling, short of ore) for [member backorder_timeout].
+func _expire_backorders(dt: float) -> void:
 	var gone := false
 	for o in backorders.duplicate():
 		var c := o["captain"] as Captain
-		if c == null or not c.alive or SimClock.time - float(o["time"]) > backorder_timeout:
+		if c == null or not c.alive:
 			backorders.erase(o)
 			gone = true
+			_log("Order lapsed: %s, captain lost" % (o["module"] as ShipModule).display_name)
+			continue
+		var state := order_state(o)
+		if state == "tooling" or state == "ore":
+			o["blocked"] = float(o.get("blocked", 0.0)) + dt
+		if float(o.get("blocked", 0.0)) > backorder_timeout:
+			backorders.erase(o)
+			gone = true
+			_refund(o, "The Factory could not make it for %s (%s)" % [UIUtil.clock(backorder_timeout), order_state_text(o)])
 	if gone:
 		_update_need()
 		changed.emit()
+
+
+## Returns [param o]'s deposit to a living captain and logs why.
+func _refund(o: Dictionary, why: String) -> void:
+	var c := o["captain"] as Captain
+	var m := o["module"] as ShipModule
+	var paid := int(o.get("paid", 0))
+	if c == null or not c.alive:
+		return
+	c.wallet += paid
+	_log("Refunded %s cr: %s for %s" % [UIUtil.amount(paid), m.display_name, c.captain_name])
+	c.flight_log.note(CaptainLog.Kind.PURCHASE, CaptainLog.Outcome.FAILED, "Order for %s refunded, %s cr back" % [m.display_name, UIUtil.amount(paid)],
+			why, "Wallet %s cr" % UIUtil.amount(c.wallet), "refund:" + String(m.id))
+
+
+## Tells captains whose order just became ready (EventLog line, ship toast)
+## and lets a docked one walk to the Outfitter at once.
+func _notify_ready() -> void:
+	for o in backorders:
+		if bool(o.get("notified", false)) or order_state(o) != "ready":
+			continue
+		o["notified"] = true
+		var c := o["captain"] as Captain
+		var m := o["module"] as ShipModule
+		var s := c.ship if c and is_instance_valid(c.ship) else null
+		EventLog.post("%s ready at the Factory for %s" % [m.display_name, c.captain_name], EventLog.Kind.INFO, s if s else building, Vector3.INF, "ready:%s:%s" % [c.captain_name, m.id])
+		if s:
+			s.show_toast("%s ready at the Factory" % m.display_name, Color(0.6, 1.0, 0.7))
+			s.request_visit()
 
 
 ## Open orders per ore type, for the market's demand.
@@ -271,6 +410,34 @@ func job_progress() -> float:
 	return clampf(job_time / maxf(build_time(job), 0.01), 0.0, 1.0) if job else 0.0
 
 
+## Sim seconds until the current job is done, 0 when idle.
+func job_eta() -> float:
+	return maxf(build_time(job) - job_time, 0.0) if job else 0.0
+
+
+## Equipment demand, most wanted first, at most [param limit] rows:
+## {module, stock, orders, misses: float, wanted: bool (a hired captain could
+## use it and the warehouse has none)}. Only modules with any demand.
+func demand_rows(limit: int = 10) -> Array[Dictionary]:
+	var roles := _hired_roles()
+	var rows: Array[Dictionary] = []
+	for m in ModuleCatalog.shared().modules:
+		if m == null or m.tier < 1:
+			continue
+		var orders := orders_for(m)
+		var miss := float(misses.get(m.id, 0.0))
+		var rank := _role_rank(m, roles)
+		var wanted := stock_of(m) <= 0 and rank >= 0 and Reputation.max_tier_for(rank) >= m.tier
+		if orders <= 0 and miss < 0.05 and not wanted:
+			continue
+		var score := float(orders) * 3.0 + miss + (0.5 if wanted else 0.0)
+		rows.append({"module": m, "stock": stock_of(m), "orders": orders, "misses": miss, "wanted": wanted, "score": score})
+	rows.sort_custom(func(x: Dictionary, y: Dictionary) -> bool: return float(x["score"]) > float(y["score"]))
+	if rows.size() > limit:
+		rows.resize(limit)
+	return rows
+
+
 ## "Making Ore Hold Mk II 45%" / "Idle: warehouse full" / "Waiting for titanium".
 func status_text() -> String:
 	if building and not building.is_active():
@@ -300,6 +467,7 @@ func _finish_job() -> void:
 	if misses.has(m.id):
 		misses[m.id] = float(misses[m.id]) * 0.5
 	_log("Made %s" % m.display_name)
+	_notify_ready()
 	produced.emit(m)
 	changed.emit()
 
@@ -392,6 +560,7 @@ func add_rare_part(m: ShipModule) -> String:
 	rare_parts[m.id] = kind
 	warehouse[m.id] = stock_of(m) + 1
 	_log("Rare part: %s" % m.display_name)
+	_notify_ready()
 	changed.emit()
 	return kind
 

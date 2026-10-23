@@ -4,7 +4,8 @@ extends PanelContainer
 ## Den) or a scrap field. Hostiles: name, status, hull and shield bars, the
 ## bounties posted on them (with cancel) and the "Post bounty" form with a
 ## reward stepper. Scrap fields: scrap amount and time left, the salvage
-## contracts on it and the "Post salvage contract" form (pay per load).
+## contracts on it and the "Post salvage contract" form (a per-load bonus on
+## top of the yard's pay; salvagers also work fields without one).
 
 @export var panel_width: float = 380.0
 @export var reward_min: int = 50
@@ -14,7 +15,7 @@ extends PanelContainer
 @export var ship_reward: int = 150
 @export var den_reward: int = 800
 ## Salvage pay per load: default and stepper range.
-@export var salvage_reward: int = 40
+@export var salvage_reward: int = 20
 @export var salvage_min: int = 10
 @export var salvage_max: int = 200
 @export var salvage_step: int = 5
@@ -141,7 +142,7 @@ func show_target(t: Node3D) -> void:
 	if changed:
 		reward = den_reward if t is ScavengerDen else (salvage_reward if t is ScrapField else ship_reward)
 	_contracts_header.text = "SALVAGE CONTRACTS" if t is ScrapField else "BOUNTIES"
-	_reward_title.text = "Pay per load" if t is ScrapField else "Reward"
+	_reward_title.text = "Bonus per load" if t is ScrapField else "Reward"
 	_post.text = "Post salvage contract" if t is ScrapField else "Post bounty"
 	if t is ScavengerDen:
 		var d := t as ScavengerDen
@@ -154,8 +155,8 @@ func show_target(t: Node3D) -> void:
 	elif t is ScrapField:
 		_header.text = "SCRAP FIELD"
 		var sf := t as ScrapField
-		_info.text = "Wreckage drifting apart. Salvagers from a Salvage Yard strip it on contract: %d scrap is about %d loads of %d scrap metal (mostly iron, some titanium). It stops fading while a contract is open. Danger here: %d of 5." % [
-				sf.amount, ceili(float(sf.amount) / SalvageContract.LOAD_SCRAP), roundi(SalvageContract.LOAD_SCRAP * SalvageContract.MATERIALS_PER_SCRAP), SalvageContract.danger_at(get_tree(), sf.global_position)]
+		_info.text = "Wreckage drifting apart. Salvagers from a Salvage Yard strip it on their own: %d scrap is about %d loads, which the yard reprocesses into ore (mostly iron, some titanium, a little crystal) and sells to you. It stops fading while salvagers work it or a contract is open. Danger here: %d of 5." % [
+				sf.amount, ceili(float(sf.amount) / SalvageContract.LOAD_SCRAP), SalvageContract.danger_at(get_tree(), sf.global_position)]
 	_title.text = String(t.call(&"get_display_name"))
 	_title.add_theme_color_override("font_color", Color(1.0, 0.6, 0.5) if hostile else Color(0.95, 0.9, 0.78))
 	_rebuild_bounties()
@@ -193,7 +194,7 @@ func _refresh() -> void:
 		var sf := target as ScrapField
 		_post.disabled = sf.amount <= 0
 		var yard := hud.manager.find_active(&"salvage_yard") if hud and hud.manager else null
-		_post_hint.text = "Paid on delivery, %d cr per load (fair is about %d). %s" % [reward, SalvageContract.FAIR_REWARD,
+		_post_hint.text = "Optional bonus, paid by you on delivery: %d cr per load on top of the yard's %d. It draws salvagers here first and makes dangerous wrecks worth it. %s" % [reward, SalvageContract.FAIR_REWARD,
 				"Salvagers decide by pay, distance, danger and field size." if yard else "Build a Salvage Yard and hire salvagers to work it."]
 	else:
 		var alive := (target is ScavengerDen or target is ScavengerShip) and Combat.is_live(target)
@@ -217,7 +218,7 @@ func _rebuild_bounties() -> void:
 		return
 	var list := ContractBoard.get_for_target(target)
 	if list.is_empty():
-		_bounties.add_child(UIUtil.label("None posted. Salvagers only work fields with a contract." if target is ScrapField else "None posted. Mercenaries only hunt it for a bounty, or when it comes near home.", &"DimLabel"))
+		_bounties.add_child(UIUtil.label("None posted. Salvagers work it anyway when it is worth the trip; a contract adds a bonus." if target is ScrapField else "None posted. Mercenaries only hunt it for a bounty, or when it comes near home.", &"DimLabel"))
 		(_bounties.get_child(0) as Label).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		(_bounties.get_child(0) as Label).custom_minimum_size.x = panel_width - 24.0
 	for c in list:

@@ -50,7 +50,22 @@ func get_display_name() -> String:
 
 
 func get_status_text() -> String:
+	var warp := warp_status_text()
+	if not warp.is_empty():
+		return warp
 	return ai.get_status_text() if ai else "Idle"
+
+
+func can_warp() -> bool:
+	return ai != null and ai.can_warp()
+
+
+func warp_drop_distance() -> float:
+	return ai.warp_drop() if ai else SpaceNav.WARP_DROP
+
+
+func warp_destination() -> String:
+	return ai.destination_name() if ai else ""
 
 
 func _on_damaged(_amount: float, attacker: Node3D) -> void:

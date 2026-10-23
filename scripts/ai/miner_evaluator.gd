@@ -2,11 +2,12 @@ class_name MinerEvaluator
 extends RoleEvaluator
 ## Miner scoring for mining contracts.
 ##   pay      = pay_weight * reward / PAY_SCALE
-##   distance = distance_weight * one-way km from the home outpost / DIST_SCALE_KM
+##   distance = distance_weight * one-way travel time from the home outpost
+##              (warp hop plus flight, RoleEvaluator.travel_of) / TRAVEL_SCALE_S
 ##   danger   = danger_weight * (danger - 1)^2 / 4
 ##   utility  = pay - distance - danger + noise(+-profile.noise)
 ## Hard rules before the threshold: the station must afford one load, the trip
-## must be within max_trip_km, and from premium_danger up the reward must be
+## must be within max_trip_km (as travel time), and from premium_danger up the reward must be
 ## premium_factor times the fair reward (MiningRules.default_reward).
 ## Attributes: Greed scales the pay term, Nerve the danger term, Loyalty adds
 ## a small bonus. An escorted mining contract (linked EscortContract) counts
@@ -21,7 +22,6 @@ extends RoleEvaluator
 ## -[constant UNION_SULK] and says so.
 
 const PAY_SCALE := 50.0
-const DIST_SCALE_KM := 5.0
 const ESCORT_DANGER_RELIEF := 2
 const CRYSTAL_HOUND_BONUS := 0.3
 const LONE_WOLF_BONUS := 0.1
@@ -55,6 +55,7 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 	e.contract = contract
 	var km := SpaceNav.distance_to_belt(mc.belt, brain.home_position()) / 1000.0
 	var danger := mc.get_danger()
+	var base_danger := danger
 	var cap := brain.captain
 	var escorted := ContractBoard.escort_for_mining(mc) != null
 	var lone := cap != null and cap.has_trait(CaptainTraits.LONE_WOLF)
@@ -64,7 +65,8 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 	danger = maxi(danger - gear, 1)
 	var fair := ContractBoard.mining_rules.default_reward(mc.belt)
 	var pay := prof.pay_weight * float(mc.reward) / PAY_SCALE * (cap.pay_scale() if cap else 1.0)
-	var dist := prof.distance_weight * km / DIST_SCALE_KM
+	var trip := travel_of(brain, km)
+	var dist := prof.distance_weight * (trip.x + trip.y) / TRAVEL_SCALE_S
 	var dang := prof.danger_weight * pow(float(maxi(danger - 1, 0)), 2.0) / 4.0 * (cap.danger_scale() if cap else 1.0)
 	var loyal := cap.loyalty_bonus() if cap else 0.0
 	var traits := 0.0
@@ -77,11 +79,14 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 		if cap.has_trait(CaptainTraits.UNION_REP) and mc.reward < fair:
 			traits -= UNION_SULK
 			sulking = true
-	e.utility = pay - dist - dang + loyal + traits + brain.rng.randf_range(-prof.noise, prof.noise)
-	e.terms = {"pay": pay, "distance": dist, "danger": dang, "km": km, "fair": fair, "escorted": escorted, "traits": traits, "gear": gear}
+	var noise := brain.rng.randf_range(-prof.noise, prof.noise)
+	e.utility = pay - dist - dang + loyal + traits + noise
+	e.terms = {"pay": pay, "distance": dist, "danger": dang, "km": km, "fair": fair, "escorted": escorted and not lone, "traits": traits, "gear": gear,
+			"reward": mc.reward, "danger_level": danger, "base_danger": base_danger, "loyal": loyal, "noise": noise,
+			"warp_s": trip.x, "flight_s": trip.y, "pay_div": PAY_SCALE, "time_div": TRAVEL_SCALE_S}
 	if Economy.credits < mc.reward:
 		e.reason = CANT_PAY
-	elif prof.max_trip_km > 0.0 and km > prof.max_trip_km:
+	elif too_long(prof, trip):
 		e.reason = TOO_FAR
 	elif prof.premium_danger > 0 and danger >= prof.premium_danger and float(mc.reward) < float(fair) * prof.premium_factor:
 		e.reason = TOO_DANGEROUS

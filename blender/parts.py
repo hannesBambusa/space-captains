@@ -280,7 +280,7 @@ def script_args(argv):
     return argv[argv.index("--") + 1:] if "--" in argv else []
 
 
-# --- Added for the merc concept sheet (gen_merc_concepts.py). Existing methods untouched.
+# --- Extra shape helpers (part_hull etc). Existing methods untouched.
 
 def part_hull(part, points, mat):
     """Convex hull of `points` added to Part `part` (faceted crystals, blunt shards)."""

@@ -18,10 +18,15 @@ extends RefCounted
 ##
 ## Stage 3: deliveries earn reputation (ore and danger raise it) and count
 ## toward traits (Crystal Hound, Lone Wolf); back in the berth the ship
-## counts the trip's damage (Ship.on_docked_home). Salvage contracts run the
-## same trip (SalvagerShip does the work, the board pays per load).
+## counts the trip's damage (Ship.on_docked_home). Salvage runs the same
+## trip (SalvagerShip does the work, the Salvage Yard pays per load, a posted
+## contract adds a bonus).
 ## Repairs: a badly damaged captain who can pay waits in the berth for the
 ## (paid, RepairBay) repairs before the next trip.
+## Warp hops (ShipMover): allowed on the way out and home while nothing
+## threatens the ship; a fleeing captain may make a panic hop only with no
+## hostile within [constant PANIC_WARP_CLEAR] and no hit for
+## [constant WARP_HIT_CALM] (scavengers in a belt still catch slow miners).
 
 signal state_changed(brain: CaptainBrain)
 ## A decision on a contract: accepted, or refused with a reason.
@@ -51,6 +56,9 @@ const COVER_RADIUS := 600.0
 const THREAT_INTERVAL := 0.4
 ## A fleeing captain runs to a mercenary closer than this instead of home.
 const RUN_TO_MERC_RANGE := 2500.0
+## Warp hops: no hostile this close for a panic hop, metres; no hit this long, sim seconds.
+const PANIC_WARP_CLEAR := 1500.0
+const WARP_HIT_CALM := 5.0
 
 
 class Trip:
@@ -130,6 +138,44 @@ func get_status_text() -> String:
 
 func is_on_trip() -> bool:
 	return trip != null
+
+
+# --- Warp ---------------------------------------------------------------------
+
+## May the ship warp now (see ShipMover)?
+func can_warp() -> bool:
+	match state:
+		State.TRAVELING_TO_JOB, State.RETURNING:
+			return _threat < 0.05 and _calm()
+		State.FLEEING:
+			return _calm() and Combat.nearest_hostile(ship.get_tree(), ship.global_position, PANIC_WARP_CLEAR, ship.faction) == null
+	return false
+
+
+## Drop-out distance before the destination, metres.
+func warp_drop() -> float:
+	return SpaceNav.WARP_DROP
+
+
+## The mover whose hops this ship follows, or null.
+func warp_lead() -> ShipMover:
+	return null
+
+
+## Where the ship is heading, for status lines ("Cinder Belt", "home").
+func destination_name() -> String:
+	match state:
+		State.TRAVELING_TO_JOB, State.MINING:
+			return _trip_target_name()
+		State.RETURNING, State.DOCKING:
+			return ship.home.display_name if is_instance_valid(ship.home) else "home"
+		State.FLEEING:
+			return _flee_to.get_display_name() if is_instance_valid(_flee_to) else (ship.home.display_name if is_instance_valid(ship.home) else "home")
+	return ""
+
+
+func _calm() -> bool:
+	return ship.durability.seconds_since_hit() > WARP_HIT_CALM
 
 
 ## World position of the home outpost (or the ship when homeless).
@@ -225,12 +271,14 @@ func score_contracts(contracts: Array[Contract] = []) -> RoleEvaluator.Evaluatio
 func _decide() -> void:
 	if ship.hull_fraction() < MercenaryEvaluator.MIN_HULL and RepairBay.can_afford(ship):
 		last_decision = "Repairing first (hull %d%%)" % roundi(ship.hull_fraction() * 100.0)
+		note_repairs_first()
 		_back_to_docked()
 		return
 	var contracts := ContractBoard.get_available()
 	var e := evaluator.pick(self, contracts)
 	if e == null:
 		last_decision = "No contracts posted"
+		note_idle()
 		_back_to_docked()
 		return
 	if break_chance() > 0.0 and rng.randf() < break_chance():
@@ -238,21 +286,73 @@ func _decide() -> void:
 		_resting_on_break = true
 		_set_state(State.RESTING)
 		_timer = rng.randf_range(profile.break_time.x, profile.break_time.y)
+		if captain:
+			note(CaptainLog.Kind.REST, CaptainLog.Outcome.DID, "Took a break instead of working",
+					"%s, Diligence %d: break chance %d%% per look at the board (profile %d%%)" % [captain.get_personality_name(), captain.diligence,
+					roundi(break_chance() * 100.0), roundi(profile.break_chance * 100.0)],
+					"Break of %s (profile %s to %s, sim time)" % [UIUtil.clock(_timer), UIUtil.clock(profile.break_time.x), UIUtil.clock(profile.break_time.y)], "break")
 		return
-	if e.accept and _take(e.contract):
+	if e.accept and _take(e.contract, e):
 		return
 	var target := e.contract.get_target_name()
 	var changed := e.reason != last_refusal or target != last_refusal_target
 	last_refusal = e.reason
 	last_refusal_target = target
 	last_decision = "Refused %s: %s" % [target, e.reason.to_lower()]
+	note_refusal(e, changed)
 	if changed:
 		decided.emit(self, false, "%s: %s" % [target, e.reason])
 	_back_to_docked()
 
 
+# --- Decision log -------------------------------------------------------------
+
+## Writes a line to the captain's decision log (CaptainLog).
+func note(kind: CaptainLog.Kind, outcome: CaptainLog.Outcome, headline: String, why: String = "", detail: String = "", key: String = "") -> void:
+	if captain:
+		captain.flight_log.note(kind, outcome, headline, why, detail, key)
+
+
+## Logs a refusal. Unchanged repeats only count up (no text is built).
+func note_refusal(e: RoleEvaluator.Evaluation, changed: bool) -> void:
+	if captain == null or e == null or e.contract == null:
+		return
+	var bounty := e.contract as BountyContract
+	if e.reason == MercenaryEvaluator.DECLINED and bounty and bounty.fleet:
+		# Same line as the answer to the fleet's call (MercenaryBrain.decline_fleet).
+		var dkey := DecisionNotes.key_for("decline", e.contract, e.reason)
+		if not captain.flight_log.bump(dkey):
+			note(CaptainLog.Kind.FLEET, CaptainLog.Outcome.REFUSED, "Declined %s's fleet for %s: %s" % [bounty.fleet.leader_name, DecisionNotes.job_name(e.contract), e.reason.to_lower()],
+					DecisionNotes.why(self, e), DecisionNotes.detail(self, e), dkey)
+		return
+	var key := DecisionNotes.key_for("no", e.contract, e.reason)
+	if not changed and captain.flight_log.bump(key):
+		return
+	var kind := CaptainLog.Kind.FLEET if e.terms.has("join_fleet") or e.reason == MercenaryEvaluator.FLEET_FULL else CaptainLog.Kind.CONTRACT
+	note(kind, CaptainLog.Outcome.REFUSED, "Refused %s: %s" % [DecisionNotes.job_name(e.contract), e.reason.to_lower()],
+			DecisionNotes.why(self, e), DecisionNotes.detail(self, e), key)
+
+
+## Logs a taken contract with [param headline].
+func note_accept(e: RoleEvaluator.Evaluation, headline: String, kind: CaptainLog.Kind = CaptainLog.Kind.CONTRACT) -> void:
+	if captain == null or e == null:
+		return
+	note(kind, CaptainLog.Outcome.ACCEPTED, headline, DecisionNotes.why(self, e), DecisionNotes.detail(self, e), DecisionNotes.key_for("yes", e.contract))
+
+
+func note_repairs_first() -> void:
+	note(CaptainLog.Kind.REPAIR, CaptainLog.Outcome.DID, "Stayed in the berth for repairs",
+			"Hull %d%%, below %d%%, and the wallet (%s cr) can pay the %s cr bill" % [roundi(ship.hull_fraction() * 100.0), roundi(MercenaryEvaluator.MIN_HULL * 100.0),
+			UIUtil.amount(captain.wallet if captain else 0), UIUtil.amount(RepairBay.cost_to_repair(ship))], "", "repairs_first")
+
+
+func note_idle() -> void:
+	note(CaptainLog.Kind.CONTRACT, CaptainLog.Outcome.DID, "Waited: no contracts for a %s" % (captain.role.to_lower() if captain else "ship"),
+			"Nothing on the board this role can work", "", "idle")
+
+
 ## Starts a trip on [param contract]. False when it filled up meanwhile.
-func _take(contract: Contract) -> bool:
+func _take(contract: Contract, e: RoleEvaluator.Evaluation = null) -> bool:
 	if not contract.add_taker(ship):
 		return false
 	trip = Trip.new()
@@ -261,6 +361,7 @@ func _take(contract: Contract) -> bool:
 	last_refusal = ""
 	last_refusal_target = ""
 	last_decision = "Took %s, %s" % [contract.get_target_name(), contract.get_reward_text()]
+	note_accept(e, "Accepted %s, %s" % [DecisionNotes.job_name(contract), contract.get_reward_text()])
 	decided.emit(self, true, "Took %s, %s" % [contract.get_target_name(), contract.get_reward_text()])
 	ship.start_undock()
 	_set_state(State.UNDOCKING)
@@ -333,21 +434,21 @@ func _deliver() -> void:
 			if trip.ore == AsteroidBelt.OreType.CRYSTAL:
 				captain.crystal_loads += 1
 				if captain.crystal_loads >= CaptainTraits.CRYSTAL_LOADS:
-					captain.add_trait(CaptainTraits.CRYSTAL_HOUND)
+					captain.add_trait(CaptainTraits.CRYSTAL_HOUND, "%d crystal loads delivered" % captain.crystal_loads)
 			captain.note_job(bool(res.get("escorted", false)))
 		ship.on_cargo_delivered()
 		ship.show_toast("+%d %s" % [mats, Economy.ORE_NAMES[Economy.ore_of_belt(trip.ore)].to_lower()], Color(0.55, 1.0, 0.65))
 	elif trip.loaded and c is SalvageContract:
 		var scrap := roundi(float(trip.meta.get("scrap", 0)) * trip.cargo)
 		var res := ContractBoard.deliver_salvage_load(c as SalvageContract, ship, scrap)
-		var mats: int = res["materials"]
 		if captain:
 			captain.salvage_loads += 1
 			captain.credits_earned += int(res["credits"])
 			captain.add_reputation(Reputation.SALVAGE_LOAD * clampf(float(scrap) / float(SalvageContract.LOAD_SCRAP), 0.3, 1.5))
 			captain.note_job(bool(res.get("escorted", false)))
 		ship.on_cargo_delivered()
-		ship.show_toast("+%d scrap metal" % mats, Color(0.55, 1.0, 0.65))
+		var owed: int = res["owed"]
+		ship.show_toast("+%d cr, %d scrap to the yard%s" % [int(res["credits"]), int(res["scrap"]), ", %d cr owed" % owed if owed > 0 else ""], Color(0.55, 1.0, 0.65))
 	else:
 		_release(c)
 	trip = null
@@ -418,6 +519,12 @@ func flee() -> void:
 	_calm_time = 0.0
 	if state != State.FLEEING and captain:
 		EventLog.post("%s is fleeing" % captain.captain_name, EventLog.Kind.COMBAT, ship)
+		var threat := current_threat()
+		var why := "Threat %.2f reached their flee level %.2f (%s %.2f, Nerve %+.2f)" % [threat, flee_level(), captain.get_personality_name(), profile.flee_threat, captain.nerve_offset()]
+		if threat < flee_level():
+			why = "Under fire with the shields down" if ship.durability.shields <= 0.0 else "Under fire, hull %d%%: a Nerve %d captain runs early" % [roundi(ship.hull_fraction() * 100.0), captain.nerve]
+		note(CaptainLog.Kind.RETREAT, CaptainLog.Outcome.DID, "Fled to %s" % (_flee_to.get_display_name() if is_instance_valid(_flee_to) else "home") + (", dropping the job" if trip == null else ", cargo aboard"),
+				why, "Hull %d%%, shields %d%%" % [roundi(ship.hull_fraction() * 100.0), roundi(ship.shield_fraction() * 100.0)])
 	_set_state(State.FLEEING)
 
 

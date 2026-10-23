@@ -1,14 +1,15 @@
-[gd_resource type="Resource" script_class="BuildingDef" load_steps=3 format=3]
+[gd_resource type="Resource" script_class="BuildingDef" load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/building_def.gd" id="1_bdef"]
 [ext_resource type="Script" path="res://scripts/salvager_ship.gd" id="2_salv"]
+[ext_resource type="Script" path="res://scripts/buildings/salvage_yard.gd" id="3_yard"]
 
 [resource]
 script = ExtResource("1_bdef")
 id = &"salvage_yard"
 display_name = "Salvage Yard"
 short_label = "Salvage Yard"
-description = "Scrap sorting yard for salvagers. Hire salvage captains here; they strip scrap fields on salvage contracts and bring back materials, now and then a rare part."
+description = "Scrap yard run as a small business. Salvagers hired here strip wrecks on their own, no contract needed; the yard pays them per load, reprocesses the scrap into iron, titanium and a little crystal, and sells it to you below the Factory's price. Now and then a load holds a rare part."
 model_path = "res://assets/models/buildings/salvage_yard.glb"
 cost_credits = 500
 cost_iron = 80
@@ -22,3 +23,4 @@ hire_role = "Salvager"
 hire_ship_path = "res://assets/models/ships/salvager.glb"
 hire_ship_script = ExtResource("2_salv")
 ship_cost = 450
+service_script = ExtResource("3_yard")

@@ -56,6 +56,8 @@ static func step(ship: Ship, dt: float) -> float:
 		if ship.repair_credit < cost:
 			var need := ceili(cost - ship.repair_credit)
 			var paid := mini(need, maxi(cap.wallet, 0))
+			if ship.repair_session_paid <= 0:
+				ship.repair_from = d.fraction()
 			cap.wallet -= paid
 			cap.credits_spent += paid
 			ship.repair_credit += float(paid)
@@ -84,6 +86,13 @@ static func end_session(ship: Ship) -> void:
 	var who := ship.captain.captain_name if ship.captain else ship.get_display_name()
 	var note := "" if not needs_repair(ship) else ", %d%% hull (wallet empty)" % roundi(ship.hull_fraction() * 100.0)
 	EventLog.post("%s paid %d cr for repairs%s. Repairs: +%d cr" % [who, paid, note, share], EventLog.Kind.REWARD, ship, Vector3.INF, "repairs:" + who)
+	if ship.captain:
+		var partial := needs_repair(ship)
+		ship.captain.flight_log.note(CaptainLog.Kind.REPAIR, CaptainLog.Outcome.FAILED if partial else CaptainLog.Outcome.DID,
+				"Paid %d cr for repairs%s" % [paid, ", only part of the job" if partial else ""],
+				"Hull %d%% to %d%% at %.2f cr per hull point%s" % [roundi(ship.repair_from * 100.0), roundi(ship.hull_fraction() * 100.0), COST_PER_HULL,
+				": the wallet ran dry, %d cr still to go" % cost_to_repair(ship) if partial else ""],
+				"Wallet now %s cr. The station keeps %d%% (%d cr)." % [UIUtil.amount(ship.captain.wallet), roundi(PLAYER_SHARE * 100.0), share])
 
 
 static func _pays(ship: Ship) -> bool:

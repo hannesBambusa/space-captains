@@ -33,6 +33,14 @@ extends Node3D
 ## traffic), and comes back down after the band. Near a goal that has its own
 ## height (a miner beside its rock) it takes that height; caught low inside
 ## a band it climbs straight out, riding with the rocks.
+##
+## Warp hops (ShipMover): the ship tells its mover every step whether it may
+## warp ([method can_warp], from the brain: never in combat), how far short
+## to drop out ([method warp_drop_distance]) and whose hop to follow
+## ([method warp_lead]: fleets, escorts). While spooling the hull shakes and
+## the engines run hot; in the hop a stretched streak trails it and a flash
+## marks the entry and the exit. The lane height of any belt band on the hop
+## is held throughout.
 
 signal status_changed(ship: Ship)
 signal damaged(ship: Ship, amount: float, attacker: Node3D)
@@ -101,6 +109,8 @@ var repairing: bool = false
 ## Repair credits paid but not used yet, and paid this docking (RepairBay).
 var repair_credit: float = 0.0
 var repair_session_paid: int = 0
+## Hull share when this repair session started paying (decision log).
+var repair_from: float = 1.0
 
 var _model: Node3D
 var _model_path := ""
@@ -118,6 +128,7 @@ var _visit_timer := 0.0
 var _trait_timer := 0.0
 var _lane := 1.0
 var _at_goal_height := false
+var _streak: MeshInstance3D
 
 
 ## Call before adding to the tree.
@@ -153,6 +164,7 @@ func _ready() -> void:
 	mover.turn_rate_deg = turn_rate_deg
 	mover.bank_max_deg = bank_max_deg
 	mover.yaw = rotation.y
+	mover.warp_changed.connect(_on_warp_changed)
 	_model = ModelLoader.instantiate(_model_path, _fallback_model)
 	_model.name = "Model"
 	add_child(_model)
@@ -214,6 +226,7 @@ func sim_step(dt: float) -> void:
 	if _sep_timer <= 0.0:
 		_sep_timer = SEPARATION_INTERVAL
 		_update_separation()
+	_update_warp_policy()
 	_update_altitude()
 	mover.step(dt)
 	# Keep the heading current for aiming and formations during fast-forward
@@ -226,6 +239,9 @@ func get_display_name() -> String:
 
 
 func get_status_text() -> String:
+	var warp := warp_status_text()
+	if not warp.is_empty():
+		return warp
 	var text := brain.get_status_text() if brain else "Idle"
 	if is_docked() and not repairing and RepairBay.needs_repair(self) and not RepairBay.can_afford(self):
 		text += ", needs repairs"
@@ -250,6 +266,87 @@ func shield_fraction() -> float:
 
 func is_hostile() -> bool:
 	return faction != Combat.Faction.PLAYER
+
+
+# --- Warp ---------------------------------------------------------------------
+
+## May the mover start (or follow) a warp hop now? Brains decide.
+func can_warp() -> bool:
+	return brain != null and brain.can_warp()
+
+
+## Drop-out distance before the destination, metres.
+func warp_drop_distance() -> float:
+	return brain.warp_drop() if brain else SpaceNav.WARP_DROP
+
+
+## The mover whose hops this ship follows (formation), or null.
+func warp_lead() -> ShipMover:
+	return brain.warp_lead() if brain else null
+
+
+## Where the ship is warping to, for the status line ("" = unknown).
+func warp_destination() -> String:
+	return brain.destination_name() if brain else ""
+
+
+## "Spooling warp to Cinder Belt", "Warping to home"; "" when not warping.
+func warp_status_text() -> String:
+	if mover == null or mover.warp_state == ShipMover.Warp.IDLE:
+		return ""
+	var dest := warp_destination()
+	var to := " to " + dest if not dest.is_empty() else ""
+	return ("Warping" if mover.warp_state == ShipMover.Warp.WARP else "Spooling warp") + to
+
+
+func _update_warp_policy() -> void:
+	if not mover.avoid_enabled:
+		mover.warp_allowed = false
+		mover.warp_lead = null
+		return
+	mover.warp_allowed = can_warp()
+	mover.warp_drop = warp_drop_distance()
+	var lead := warp_lead()
+	mover.warp_lead = lead if lead != mover else null
+
+
+func _on_warp_changed(_m: ShipMover, state: ShipMover.Warp) -> void:
+	if state == ShipMover.Warp.WARP or (state == ShipMover.Warp.IDLE and _streak and _streak.visible):
+		WarpFx.flash(get_tree(), global_position, 18.0 + hit_radius * 2.0)
+	status_changed.emit(self)
+
+
+func _update_streak() -> void:
+	var on := mover.warp_state == ShipMover.Warp.WARP
+	if not on:
+		if _streak:
+			_streak.visible = false
+		return
+	if _streak == null:
+		_streak = MeshInstance3D.new()
+		_streak.name = "WarpStreak"
+		var m := CylinderMesh.new()
+		m.top_radius = 0.6
+		m.bottom_radius = 3.2
+		m.height = 1.0
+		m.radial_segments = 10
+		m.rings = 1
+		_streak.mesh = m
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		mat.albedo_color = Color(0.55, 0.8, 1.0, 0.55)
+		_streak.material_override = mat
+		_streak.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_streak.layers = RENDER_LAYER
+		# Lying along +Z (behind the nose), the wide end at the ship.
+		_streak.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
+		add_child(_streak)
+	var length := clampf(mover.warp_speed * 0.12, 40.0, 320.0)
+	_streak.visible = true
+	_streak.scale = Vector3(1.0 + hit_radius * 0.08, length, 1.0 + hit_radius * 0.08)
+	_streak.position = Vector3(0.0, 0.0, length * 0.5 + hit_radius * 0.6)
 
 
 # --- Combatant API (see Combat) ---------------------------------------------
@@ -371,6 +468,12 @@ func retire() -> void:
 	queue_free()
 
 
+## Walk to the station services on the next sim step while docked (or on
+## the next docking): a Factory order is ready for pickup.
+func request_visit() -> void:
+	_visit_pending = true
+
+
 ## Docked captains go shopping or change careers only when not mid-job.
 func _can_visit() -> bool:
 	if brain == null or faction != Combat.Faction.PLAYER:
@@ -444,6 +547,12 @@ func _update_altitude() -> void:
 	mover.hold_climb = false
 	if not mover.avoid_enabled:
 		_at_goal_height = false
+		return
+	if mover.warp_state != ShipMover.Warp.IDLE:
+		# Hold the hop's lane height; never cross back through the rocks.
+		var y := position.y
+		_at_goal_height = false
+		mover.cruise_y = (signf(y) if absf(y) > 1.0 else _lane) * mover.warp_altitude
 		return
 	var parent := get_parent() as Node3D
 	var pos := global_position
@@ -625,6 +734,11 @@ func _on_destroyed(killer: Node3D) -> void:
 		var by := ""
 		if is_instance_valid(killer) and killer.has_method(&"get_display_name"):
 			by = " (%s)" % String(killer.call(&"get_display_name"))
+		var odds := "eject chance %d%% (Piloting %d%s%s)" % [roundi(eject_chance() * 100.0), captain.piloting,
+				", escape gear +%d%%" % roundi(stats.eject_bonus * 100.0) if stats and stats.eject_bonus > 0.0 else "", ", Survivor +10%" if captain.has_trait(CaptainTraits.SURVIVOR) else ""]
+		captain.flight_log.note(CaptainLog.Kind.LOSS, CaptainLog.Outcome.DID if ejected else CaptainLog.Outcome.FAILED,
+				("Ejected from the destroyed ship%s" if ejected else "Lost with the ship%s") % by,
+				("The pod made it out: " if ejected else "No way out: ") + odds, "Destroyed at %s" % SpaceNav.place_name(get_tree(), global_position))
 		if ejected:
 			EventLog.post("%s ejected from a destroyed ship%s" % [captain.captain_name, by], EventLog.Kind.LOSS, null, global_position)
 			_launch_pod()
@@ -637,7 +751,7 @@ func _on_destroyed(killer: Node3D) -> void:
 func _launch_pod() -> void:
 	captain.ejections += 1
 	captain.add_reputation(Reputation.EJECTED)
-	captain.add_trait(CaptainTraits.SURVIVOR)
+	captain.add_trait(CaptainTraits.SURVIVOR, "Ejected from a destroyed ship and lived")
 	captain.add_history("Ejected from a destroyed %s" % ROLE_NAMES[role].to_lower())
 	var pod := EscapePod.new()
 	pod.setup_pod(captain, home if is_instance_valid(home) else null)
@@ -657,7 +771,7 @@ func _spread_grudge() -> void:
 		if s == null or s == self or s.dead or s.faction != Combat.Faction.PLAYER or s.captain == null or s is EscapePod:
 			continue
 		if (is_instance_valid(home) and s.home == home) or Combat.flat_distance(pos, s.global_position) < CaptainTraits.GRUDGE_RADIUS:
-			s.captain.add_trait(CaptainTraits.GRUDGE)
+			s.captain.add_trait(CaptainTraits.GRUDGE, "Scavengers destroyed %s nearby" % get_display_name())
 
 
 ## Ships with the same non-zero key skip separation from each other
@@ -702,12 +816,21 @@ func _apply_visuals(_dt: float) -> void:
 	rotation = Vector3(0.0, mover.yaw, 0.0)
 	if _model:
 		var sway := 1.0 if parked else 0.3
-		_model.position.y = sin(w) * bob_height * sway
+		_model.position = Vector3(0.0, sin(w) * bob_height * sway, 0.0)
 		_model.rotation = Vector3(mover.pitch + sin(w * 0.5) * 0.02 * sway, sin(w * 0.37) * 0.03 * sway, mover.bank + sin(w) * 0.03 * sway)
 	var speed_part := clampf(mover.relative_speed() / maxf(max_speed, 1.0), 0.0, 1.0)
 	var want := 0.12 if parked else maxf(mover.thrust, speed_part * 0.45) + 0.15
+	if mover.warp_state != ShipMover.Warp.IDLE:
+		want = 1.0
+		if mover.warp_state == ShipMover.Warp.SPOOL and _model:
+			# Spool shake, growing as the drive charges.
+			var k := 1.0 - clampf(mover.warp_timer / SpaceNav.WARP_SPOOL, 0.0, 1.0)
+			var amp := 0.35 * (0.3 + k)
+			_model.position.x = sin(t * 97.0 + _phase) * amp
+			_model.position.z = cos(t * 91.0) * amp
 	_glow_level = lerpf(_glow_level, clampf(want, 0.0, 1.0), 0.15)
 	_pulse_glow()
+	_update_streak()
 	if _toast and _toast.visible:
 		var left := _toast_until - t
 		var cam := get_viewport().get_camera_3d()

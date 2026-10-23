@@ -83,6 +83,8 @@ var loads_delivered: int = 0
 var credits_earned: int = 0
 ## Credits kept after station spending (stage 3: buys modules).
 var wallet: int = 0
+## Savings a new hire arrives with (min, max): enough for a first Mk I part.
+const SIGNING_FUNDS := Vector2i(100, 180)
 ## Credits spent at the station (fees and services).
 var credits_spent: int = 0
 var kills: int = 0
@@ -108,6 +110,8 @@ var team_jobs: int = 0
 var fights_survived: int = 0
 var ejections: int = 0
 var modules_bought: int = 0
+## What they decided and why (the captain panel's Log tab).
+var flight_log := CaptainLog.new()
 ## The ship flown now (null while stranded or dead).
 var ship: Ship
 ## True while waiting at the home outpost without a ship (after ejecting).
@@ -154,6 +158,8 @@ func add_reputation(amount: float) -> bool:
 	if is_instance_valid(ship) and ship.loadout:
 		ship.loadout.unlocked_slots = Reputation.slots_for(rank)
 	var tier_up := Reputation.max_tier_for(rank) > Reputation.max_tier_for(rank - 1)
+	flight_log.note(CaptainLog.Kind.RANK, CaptainLog.Outcome.DID, "Promoted to %s" % get_rank_name(),
+			"Reputation %d reached the %s mark: %d module slots, up to %s modules" % [roundi(reputation), get_rank_name(), Reputation.slots_for(rank), ShipModule.TIER_NAMES[Reputation.max_tier_for(rank)]])
 	EventLog.post("%s is now %s (%d slots%s)" % [captain_name, get_rank_name(), Reputation.slots_for(rank), ", " + ShipModule.TIER_NAMES[Reputation.max_tier_for(rank)] if tier_up else ""],
 			EventLog.Kind.REWARD, ship if is_instance_valid(ship) else null)
 	rank_changed.emit(self, rank)
@@ -178,7 +184,8 @@ func trait_ids() -> Array[StringName]:
 
 ## Gains [param id] (a fading one is refreshed). With 3 traits already the
 ## oldest fading one makes room; when none fades, the new one is not taken.
-func add_trait(id: StringName) -> bool:
+## [param why] says what earned it, for the decision log.
+func add_trait(id: StringName, why: String = "") -> bool:
 	if not alive:
 		return false
 	var fade := CaptainTraits.fade_time(id)
@@ -195,17 +202,20 @@ func add_trait(id: StringName) -> bool:
 				break
 		if drop < 0:
 			return false
-		remove_trait(traits[drop]["id"] as StringName)
+		remove_trait(traits[drop]["id"] as StringName, "Made room for %s (3 traits at most)" % CaptainTraits.trait_name(id))
 	traits.append({"id": id, "since": SimClock.time, "until": until})
+	flight_log.note(CaptainLog.Kind.TRAIT, CaptainLog.Outcome.DID, "Gained the %s trait" % CaptainTraits.trait_name(id),
+			why if not why.is_empty() else CaptainTraits.tip(id), CaptainTraits.tip(id) + ("" if fade <= 0.0 else " Fades in %s." % UIUtil.clock(fade)))
 	EventLog.post("%s gained the %s trait" % [captain_name, CaptainTraits.trait_name(id)], EventLog.Kind.INFO, ship if is_instance_valid(ship) else null)
 	traits_changed.emit(self)
 	return true
 
 
-func remove_trait(id: StringName) -> void:
+func remove_trait(id: StringName, why: String = "Faded with time") -> void:
 	for i in traits.size():
 		if traits[i]["id"] == id:
 			traits.remove_at(i)
+			flight_log.note(CaptainLog.Kind.TRAIT, CaptainLog.Outcome.DID, "Lost the %s trait" % CaptainTraits.trait_name(id), why)
 			EventLog.post("%s is no longer %s" % [captain_name, CaptainTraits.trait_name(id)], EventLog.Kind.INFO, ship if is_instance_valid(ship) else null)
 			traits_changed.emit(self)
 			return
@@ -230,7 +240,7 @@ func update_traits() -> void:
 		i -= 1
 	if not has_trait(CaptainTraits.UNION_REP) and loyalty >= CaptainTraits.UNION_LOYALTY \
 			and now - hired_at >= CaptainTraits.UNION_SERVICE and rank >= Reputation.Rank.LICENSED:
-		add_trait(CaptainTraits.UNION_REP)
+		add_trait(CaptainTraits.UNION_REP, "Loyalty %d, %s of service at %s rank" % [loyalty, UIUtil.clock(now - hired_at), get_rank_name()])
 
 
 ## Counts one finished job, alone or with escorts (Lone Wolf).
@@ -241,7 +251,7 @@ func note_job(escorted: bool) -> void:
 		solo_jobs += 1
 	var total := solo_jobs + team_jobs
 	if solo_jobs >= CaptainTraits.LONE_WOLF_JOBS and float(team_jobs) <= float(total) * CaptainTraits.LONE_WOLF_TEAM_SHARE:
-		add_trait(CaptainTraits.LONE_WOLF)
+		add_trait(CaptainTraits.LONE_WOLF, "%d of %d jobs flown without escorts" % [solo_jobs, total])
 
 
 ## Back home after a trip whose hull fell to [param lowest] (share of max).
@@ -251,9 +261,9 @@ func note_survived(lowest: float, was_hit: bool) -> void:
 	fights_survived += 1
 	add_reputation(Reputation.SURVIVED_FIGHT)
 	if lowest < CaptainTraits.SURVIVOR_HULL:
-		add_trait(CaptainTraits.SURVIVOR)
+		add_trait(CaptainTraits.SURVIVOR, "Made it home with the hull down to %d%%" % roundi(lowest * 100.0))
 	if lowest < CaptainTraits.SHAKEN_HULL:
-		add_trait(CaptainTraits.SHAKEN)
+		add_trait(CaptainTraits.SHAKEN, "The hull fell to %d%% on that trip" % roundi(lowest * 100.0))
 
 
 func add_history(line: String) -> void:
@@ -394,6 +404,7 @@ static func generate(rng: RandomNumberGenerator, role_name: String, personality_
 	c.role = role_name
 	c.specialty = specialty_for(role_name)
 	c.roll_attributes(rng)
+	c.wallet = rng.randi_range(SIGNING_FUNDS.x, SIGNING_FUNDS.y)
 	c.hired_at = SimClock.time
 	c.career_since = c.hired_at
 	return c

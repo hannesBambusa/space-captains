@@ -4,9 +4,10 @@ extends Node3D
 ## chunks (one MultiMesh, shaders/scrap.gdshader) holding [member amount]
 ## scrap. Fades out and frees itself after [member lifetime] sim seconds.
 ## Selectable and focusable; listed in the overview.
-## Stage 3: salvagers on Salvage contracts call [method take]. While a
-## salvage contract is open on it the field does not age; a stripped field
-## fades out quickly. Den ruins also hold the den's stash ([method add_scrap]).
+## Stage 3: salvagers call [method take] (free salvage, or a posted salvage
+## contract). While a salvage contract is open on it, or a salvager is on a
+## trip to it, the field does not age; a stripped field fades out quickly.
+## Den ruins also hold the den's stash ([method add_scrap]).
 
 signal depleted(field: ScrapField)
 
@@ -16,7 +17,7 @@ const SHADER: Shader = preload("res://shaders/scrap.gdshader")
 const FADE_TIME := 25.0
 ## Fresh wrecks glow for this long, seconds.
 const HOT_TIME := 25.0
-## Sim seconds between checks for an open salvage contract.
+## Sim seconds between checks for an open salvage contract or salvager.
 const CLAIM_CHECK := 1.0
 
 var amount: int = 0
@@ -71,7 +72,7 @@ func sim_step(dt: float) -> void:
 	_claim_timer -= dt
 	if _claim_timer <= 0.0:
 		_claim_timer = CLAIM_CHECK
-		_claimed = amount > 0 and not ContractBoard.get_for_target(self).is_empty()
+		_claimed = amount > 0 and (not ContractBoard.get_for_target(self).is_empty() or SalvageContract.free_in_use(self))
 	if not _claimed:
 		_age += dt
 	var spread := 0.35 + 0.65 * (1.0 - exp(-_age * 1.6))
@@ -94,7 +95,7 @@ func get_display_name() -> String:
 
 func get_status_text() -> String:
 	if _claimed:
-		return "%d scrap, salvage contract" % amount
+		return "%d scrap, being salvaged" % amount
 	return "%d scrap, fades in %s" % [amount, _clock(remaining_time())]
 
 

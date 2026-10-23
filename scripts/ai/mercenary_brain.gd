@@ -23,6 +23,10 @@ extends CaptainBrain
 ## fleet (or by a lone wolf alone, [member solo_brave], who also holds on
 ## longer: [constant SOLO_RETREAT_SCALE]). Members fly the fleet's rally,
 ## formation and focus target instead of their own bounty steering.
+## Warp hops: bounty runs and trips home warp (dropping out
+## [constant HUNT_WARP_DROP] short of a target, outside its guns); fleet
+## wingmen and escorts in formation hop with their leader or ward, never
+## on their own; patrols, fights and defence never warp.
 
 enum Mode { NONE, PATROL, DEFEND, BOUNTY, ESCORT }
 
@@ -48,6 +52,10 @@ const REPAIRED := RepairBay.DONE_AT
 const REPAIR_CALM := 6.0
 ## Lone wolves on a run above their weight retreat this much later.
 const SOLO_RETREAT_SCALE := 0.6
+## Warp drop-out short of a bounty target, metres (outside den guns).
+const HUNT_WARP_DROP := 2200.0
+## Escorts and wingmen hop with their lead within this distance, metres.
+const FORMATION_WARP_RANGE := 600.0
 
 var mode: Mode = Mode.NONE
 var combat_target: Node3D
@@ -116,6 +124,48 @@ func _ward() -> Ship:
 	return ec.miner_of(ship) if ec else null
 
 
+func can_warp() -> bool:
+	var calm := _calm()
+	match state:
+		State.HUNTING:
+			if fleet:
+				return calm and (fleet.state == MercFleet.State.EN_ROUTE or fleet.state == MercFleet.State.FORMING)
+			return calm
+		State.ESCORTING:
+			return calm
+		State.RETURNING:
+			return calm and Combat.nearest_hostile(ship.get_tree(), ship.global_position, PANIC_WARP_CLEAR, ship.faction) == null
+	return false
+
+
+func warp_drop() -> float:
+	return HUNT_WARP_DROP if state == State.HUNTING else SpaceNav.WARP_DROP
+
+
+## Wingmen follow the fleet leader's hops, escorts their miner's.
+func warp_lead() -> ShipMover:
+	var lead: Ship = null
+	if state == State.HUNTING and fleet and fleet.state == MercFleet.State.EN_ROUTE and fleet.leader != ship:
+		lead = fleet.leader
+	elif state == State.ESCORTING:
+		lead = _ward()
+	if lead == null or not is_instance_valid(lead) or lead.dead or lead.mover == null or not lead.mover.avoid_enabled:
+		return null
+	if Combat.flat_distance(lead.global_position, ship.global_position) > FORMATION_WARP_RANGE:
+		return null
+	return lead.mover
+
+
+func destination_name() -> String:
+	match state:
+		State.HUNTING:
+			return trip.contract.get_target_name() if trip and trip.contract else ""
+		State.ESCORTING:
+			var w := _ward()
+			return w.brain.destination_name() if w and w.brain else ""
+	return super.destination_name()
+
+
 func on_attacked(attacker: Node3D) -> void:
 	if is_instance_valid(attacker):
 		_last_attacker = weakref(attacker)
@@ -140,6 +190,7 @@ func update(dt: float) -> void:
 				_timer = 1.0
 				if _can_scramble() and not home_threats().is_empty():
 					last_decision = "Scrambling to defend home"
+					_note_scramble(true)
 					_launch(Mode.DEFEND, null)
 					return
 			if ship.hull_fraction() >= REPAIRED:
@@ -147,6 +198,8 @@ func update(dt: float) -> void:
 				_timer = rest_duration() * 0.5
 			elif not RepairBay.can_afford(ship):
 				last_decision = "Out of credits for repairs (hull %d%%)" % roundi(ship.hull_fraction() * 100.0)
+				note(CaptainLog.Kind.REPAIR, CaptainLog.Outcome.FAILED, "Stopped repairs at %d%% hull: out of credits" % roundi(ship.hull_fraction() * 100.0),
+						"Wallet %s cr, %s cr more would finish the job; flies on damaged" % [UIUtil.amount(captain.wallet if captain else 0), UIUtil.amount(RepairBay.cost_to_repair(ship))], "", "repairs_broke")
 				_set_state(State.RESTING)
 				_timer = rest_duration() * 0.5
 		State.UNDOCKING:
@@ -185,10 +238,14 @@ func update(dt: float) -> void:
 func _decide_merc() -> void:
 	if _can_scramble() and not home_threats().is_empty():
 		last_decision = "Scrambling to defend home"
+		_note_scramble(false)
 		_launch(Mode.DEFEND, null)
 		return
 	if ship.hull_fraction() < REPAIRED and RepairBay.can_afford(ship):
 		last_decision = "Repairing"
+		note(CaptainLog.Kind.REPAIR, CaptainLog.Outcome.DID, "Stayed in the berth for repairs",
+				"Hull %d%%, repairs run to %d%%; the bill is %s cr, the wallet has %s cr" % [roundi(ship.hull_fraction() * 100.0), roundi(REPAIRED * 100.0),
+				UIUtil.amount(RepairBay.cost_to_repair(ship)), UIUtil.amount(captain.wallet if captain else 0)], "", "repairs_first")
 		_set_state(State.REPAIRING)
 		_timer = 1.0
 		return
@@ -200,6 +257,7 @@ func _decide_merc() -> void:
 		var changed := e.reason != last_refusal or target != last_refusal_target
 		last_refusal = e.reason
 		last_refusal_target = target
+		note_refusal(e, changed)
 		if changed:
 			decided.emit(self, false, "%s: %s" % [target, e.reason])
 	var chance := profile.patrol_chance + 0.25 * (Captain.factor(captain.diligence) if captain else 0.0)
@@ -207,10 +265,15 @@ func _decide_merc() -> void:
 		chance += 0.15
 	if rng.randf() < clampf(chance, 0.05, 0.95):
 		last_decision = "Flying a patrol"
+		if captain:
+			note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Flew a patrol around the station",
+					"Patrol chance %d%% per idle look (%s %d%%, Diligence %d%s)" % [roundi(clampf(chance, 0.05, 0.95) * 100.0), captain.get_personality_name(),
+					roundi(profile.patrol_chance * 100.0), captain.diligence, ", Grudge +15%" if captain.has_trait(CaptainTraits.GRUDGE) else ""], "", "patrol")
 		_launch(Mode.PATROL, null)
 		return
 	if e == null:
 		last_decision = "No contracts posted"
+		note_idle()
 	elif not e.accept:
 		last_decision = "Refused %s: %s" % [e.contract.get_target_name(), e.reason.to_lower()]
 	_back_to_docked()
@@ -242,6 +305,12 @@ func _take(contract: Contract, e: RoleEvaluator.Evaluation = null) -> bool:
 		last_decision = "Called a fleet for %s, %s" % [contract.get_target_name(), contract.get_reward_text()]
 	elif bounty and terms.has("solo_brave"):
 		last_decision = "Took on %s alone, %s" % [contract.get_target_name(), contract.get_reward_text()]
+	if bounty and terms.has("call_fleet"):
+		note_accept(e, "Called a fleet of %d for %s, %s" % [int(terms["call_fleet"]), DecisionNotes.job_name(contract), contract.get_reward_text()], CaptainLog.Kind.FLEET)
+	elif bounty and terms.has("solo_brave"):
+		note_accept(e, "Took on %s alone, %s" % [DecisionNotes.job_name(contract), contract.get_reward_text()], CaptainLog.Kind.FLEET)
+	else:
+		note_accept(e, "Accepted %s, %s" % [DecisionNotes.job_name(contract), contract.get_reward_text()])
 	decided.emit(self, true, last_decision)
 	_launch(m, t)
 	if bounty and terms.has("call_fleet"):
@@ -268,7 +337,7 @@ func can_answer_fleet() -> bool:
 
 
 ## Joins [param f] and flies out to its rally point.
-func join_fleet(f: MercFleet, _e: RoleEvaluator.Evaluation = null) -> void:
+func join_fleet(f: MercFleet, e: RoleEvaluator.Evaluation = null) -> void:
 	var c := f.contract
 	if not f.is_recruiting() or not c.add_taker(ship):
 		return
@@ -278,18 +347,27 @@ func join_fleet(f: MercFleet, _e: RoleEvaluator.Evaluation = null) -> void:
 	last_refusal = ""
 	last_refusal_target = ""
 	last_decision = "Joined %s's fleet for %s" % [f.leader_name, c.get_target_name()]
+	note_accept(e, "Joined %s's fleet for %s, %s" % [f.leader_name, DecisionNotes.job_name(c), c.get_reward_text()], CaptainLog.Kind.FLEET)
 	decided.emit(self, true, last_decision)
 	_launch(Mode.BOUNTY, t)
 	f.join(ship)
 
 
-## Said no to [param f]'s call.
-func decline_fleet(f: MercFleet, reason: String) -> void:
+## Said no to [param f]'s call ([param e]: the join evaluation).
+func decline_fleet(f: MercFleet, reason: String, e: RoleEvaluator.Evaluation = null) -> void:
 	last_decision = "Declined %s's fleet: %s" % [f.leader_name, reason.to_lower()]
+	if captain == null:
+		return
+	var why := DecisionNotes.why(self, e) if e else reason
+	note(CaptainLog.Kind.FLEET, CaptainLog.Outcome.REFUSED, "Declined %s's fleet for %s: %s" % [f.leader_name, DecisionNotes.job_name(f.contract), reason.to_lower()],
+			why, DecisionNotes.detail(self, e) if e else "", DecisionNotes.key_for("decline", f.contract, reason))
 
 
 ## The fleet fell apart around this merc and it goes on alone.
 func go_solo() -> void:
+	if captain and trip and trip.contract:
+		note(CaptainLog.Kind.FLEET, CaptainLog.Outcome.DID, "Fought on alone against %s" % trip.contract.get_target_name(),
+				"Last one left in the fleet: the target is nearly down or daring %.2f is high enough (from %.2f)" % [captain.daring(), MercenaryEvaluator.LONE_WOLF_DARING])
 	fleet = null
 	solo_brave = true
 	if trip and trip.contract is BountyContract:
@@ -373,11 +451,19 @@ func _space_update(dt: float) -> void:
 	if _ai_timer <= 0.0:
 		_ai_timer = AI_INTERVAL * rng.randf_range(0.8, 1.2)
 		if ship.hull_fraction() < retreat_level():
+			if captain and not retreating:
+				var job := _job_label()
+				note(CaptainLog.Kind.RETREAT, CaptainLog.Outcome.DID, "Broke off and went home for repairs" + (" (left %s)" % job if not job.is_empty() else ""),
+						"Hull %d%% fell below their retreat level %d%% (%s %d%%, Nerve %+d%%%s)" % [roundi(ship.hull_fraction() * 100.0), roundi(retreat_level() * 100.0),
+						captain.get_personality_name(), roundi(profile.retreat_hull * 100.0), -roundi(captain.nerve_offset() * 100.0), ", solo run x%.1f" % SOLO_RETREAT_SCALE if solo_brave else ""])
 			return_home(true)
 			return
 		if _wants_repairs():
 			if captain:
 				EventLog.post("%s heads home for repairs (hull %d%%)" % [captain.captain_name, roundi(ship.hull_fraction() * 100.0)], EventLog.Kind.INFO, ship)
+				note(CaptainLog.Kind.REPAIR, CaptainLog.Outcome.DID, "Ended the %s for repairs" % ("patrol" if mode == Mode.PATROL else "defence"),
+						"Hull %d%% after the fight, below their repair level %d%% (%s %d%%), no hostile near, the wallet can pay" % [roundi(ship.hull_fraction() * 100.0),
+						roundi(repair_level() * 100.0), captain.get_personality_name(), roundi(profile.repair_hull * 100.0)])
 			retreating = true
 			_end_trip()
 			combat_target = null
@@ -417,6 +503,22 @@ func _space_update(dt: float) -> void:
 ## above their retreat level.
 func _can_scramble() -> bool:
 	return ship.hull_fraction() >= maxf(retreat_level() + 0.25, 0.5)
+
+
+func _note_scramble(repairing: bool) -> void:
+	if captain == null:
+		return
+	var n := home_threats().size()
+	note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Scrambled to defend the station" + (", repairs cut short" if repairing else ""),
+			"%d hostile ship%s inside the defence radius (%.1f km at Loyalty %d); hull %d%% is enough to fight" % [n, "" if n == 1 else "s",
+			DEFENSE_RADIUS * (1.0 + 0.2 * Captain.factor(captain.loyalty)) / 1000.0, captain.loyalty, roundi(ship.hull_fraction() * 100.0)], "", "scramble")
+
+
+## "the Scavenger Den bounty", "" when not on a job.
+func _job_label() -> String:
+	if trip == null or trip.contract == null:
+		return ""
+	return "the " + DecisionNotes.job_name(trip.contract)
 
 
 ## On patrol: now and then look at the board and take a contract straight
@@ -465,6 +567,9 @@ func _check_job() -> bool:
 				return false
 		Mode.BOUNTY:
 			if trip == null or trip.contract.is_finished() or not Combat.is_live(trip.contract.target):
+				if trip and trip.contract:
+					note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Bounty on %s is over, heading home" % trip.contract.get_target_name(),
+							"The target is destroyed" if not Combat.is_live(trip.contract.target) else "The contract closed")
 				return_home(false)
 				return false
 		Mode.ESCORT:

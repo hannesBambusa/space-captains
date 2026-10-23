@@ -1,11 +1,13 @@
 class_name SalvagerShip
 extends MinerShip
-## A hired salvager. Works salvage contracts on scrap fields: flies to the
+## A hired salvager. Works scrap fields on its own (free salvage, paid by its
+## Salvage Yard) or on a player's salvage contract (bonus): flies to the
 ## field, holds off a chunk and cuts it free with the claw beam
 ## ([constant WORK_TIME] scaled by the tool, the Salvage skill and the hold),
 ## takes one load of scrap ([constant SalvageContract.LOAD_SCRAP] times the
-## hold) from the field and brings it home. Everything else (flight, flee,
-## scavengers stealing part of the load, the trip) is the miner's.
+## hold) from the field and brings it home to the yard. Everything else
+## (flight, flee, scavengers stealing part of the load, the trip) is the
+## miner's.
 ## Fields keep the height their wreck died at. One down among a belt's rocks
 ## is cut from the salvager's lane above (below) it, so the ship never sits
 ## in the turning rocks; elsewhere the salvager holds at the field's height.

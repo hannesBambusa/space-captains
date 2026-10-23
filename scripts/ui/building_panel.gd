@@ -4,9 +4,10 @@ extends PanelContainer
 ## and, for buildings with hire options, the hire button and hired captains.
 ## Stage 3: captains without a ship (ejected, waiting here or still in their
 ## pod) with a "Buy ship" button (the player pays), and for the Outfitter the
-## Factory warehouse stock it sells from, what the Factory is making, open
-## backorders and recent sales. The Factory has its own panel (FactoryPanel).
-## Defense Turrets and the Shield Generator get a DefenseSection.
+## Factory warehouse stock it sells from, what the Factory is making,
+## open buy orders and recent sales. The Factory has its own panel (FactoryPanel).
+## Defense Turrets and the Shield Generator get a DefenseSection, the
+## Salvage Yard a SalvageYardSection (its scrap, ore for sale, auto-buy).
 
 const PERSONALITY_COLORS: Array[Color] = [
 	Color(1.0, 0.55, 0.35), Color(0.5, 0.8, 1.0), Color(1.0, 0.82, 0.3), Color(0.7, 0.7, 0.78),
@@ -40,6 +41,7 @@ var _sales: VBoxContainer
 var _outfitter: Outfitter
 var _factory: Factory
 var _defense: DefenseSection
+var _salvage: SalvageYardSection
 ## Sibling panel for Factory selections (made in [method setup]).
 var factory_panel: FactoryPanel
 
@@ -124,6 +126,11 @@ func _ready() -> void:
 	_defense.visible = false
 	v.add_child(_defense)
 
+	_salvage = SalvageYardSection.new()
+	_salvage.width = panel_width - 24.0
+	_salvage.visible = false
+	v.add_child(_salvage)
+
 
 func setup(owner_hud: HUD) -> void:
 	hud = owner_hud
@@ -165,6 +172,7 @@ func show_building(b: Building) -> void:
 	visible = b != null
 	_outfitter = null
 	_defense.show_structure(b.get_service() as DefenseStructure if b else null)
+	_salvage.show_yard(b.get_service() as SalvageYard if b else null)
 	if b == null:
 		return
 	b.state_changed.connect(_on_building_event)
@@ -237,7 +245,7 @@ func _refresh_outfitter() -> void:
 	else:
 		_outfit_stock.text = "%d parts in stock  (%s)" % [f.warehouse_total(), stock_summary(f)]
 		var orders := f.backorders.size()
-		_outfit_making.text = "Factory: %s.%s" % [f.status_text(), "  %d backorder%s." % [orders, "" if orders == 1 else "s"] if orders > 0 else ""]
+		_outfit_making.text = "Factory: %s.%s" % [f.status_text(), "  %d open order%s." % [orders, "" if orders == 1 else "s"] if orders > 0 else ""]
 	_outfit_tier.text = "Factory tooled to %s. Captains also need the rank: Mk II from Veteran, Mk III from Ace. You get %d%% of each sale (%s cr so far)." % [
 			ShipModule.TIER_NAMES[o.supplied_tier()] if f else "none", roundi(o.sale_share * 100.0), UIUtil.amount(o.total_income)]
 	var rare: PackedStringArray = []

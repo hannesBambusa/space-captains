@@ -1,9 +1,14 @@
 class_name SpaceNav
 extends RefCounted
 ## Shared navigation helpers for every ship: world velocity of orbiting nodes,
-## velocity of points on a rotating belt, the bodies ships steer around, belt
-## lanes (the height that clears a belt's rocks), and the world-space
-## container ships fly in while undocked.
+## velocity of points on a rotating belt, the bodies ships steer around (and
+## where they will be, [method predict_position]), belt lanes (the height
+## that clears a belt's rocks), warp hops (no-warp zones, travel time
+## estimates) and the world-space container ships fly in while undocked.
+##
+## Bodies ([method obstacles]): each has a hard radius (the visible body:
+## surface, atmosphere shell or rings, plus [constant SHIP_MARGIN]) no ship
+## may ever cross, and a larger planning radius routes keep to (NavRoute).
 ##
 ## The orbit chain (planet -> moon/station -> structures frame -> building) never
 ## rotates, so a node's world velocity is the sum of its Orbiter ancestors'
@@ -16,7 +21,31 @@ const LANE_LEAD_TIME := 2.5
 ## Rock band slack for "caught low inside a band", metres.
 const ROCK_BAND_SLACK := 4.0
 
-## Cached obstacle list: Array of {node: Node3D, radius: float}.
+## Kept between a ship and a body's visible edge, metres.
+const SHIP_MARGIN := 30.0
+## Planning radius beyond the hard radius: this share of it, clamped
+## (metres), plus [constant PLAN_PAD_SPEED] sim seconds of the body's speed
+## (fast moons get a wider berth).
+const PLAN_PAD_SHARE := 0.2
+const PLAN_PAD := Vector2(90.0, 450.0)
+const PLAN_PAD_SPEED := 2.0
+## Warp hops (ShipMover): legs longer than this warp, metres.
+const WARP_MIN_LEG := 3000.0
+const WARP_SPOOL := 2.5
+const WARP_SPEED := 2600.0
+## Sim seconds from drop-in speed to full warp speed.
+const WARP_RAMP := 1.2
+## Default drop-out distance before the destination, metres.
+const WARP_DROP := 650.0
+## No warping this close to the Home Station (the complex, the shield
+## bubble), or to any structure, metres.
+const NO_WARP_STATION := 1200.0
+const NO_WARP_BUILDING := 260.0
+## Reference cruise speed for trip limits in km (PersonalityProfile.max_trip_km), m/s.
+const REF_SPEED := 150.0
+
+## Cached obstacle list: Array of {node: Node3D, radius: float (hard),
+## plan: float (planning radius)}.
 static var _obstacles: Array[Dictionary] = []
 static var _obstacle_source: SolarSystem
 
@@ -146,16 +175,103 @@ static func obstacles(tree: SceneTree) -> Array[Dictionary]:
 	if sys == null:
 		return _obstacles
 	if sys.star:
-		_obstacles.append({"node": sys.star, "radius": sys.star.radius * 1.25})
+		_add_obstacle(sys.star, sys.star.radius * 1.25 + SHIP_MARGIN)
 	for p in sys.planets:
-		var reach := p.def.radius * (p.def.ring_outer if p.def.has_rings else 1.0)
-		_obstacles.append({"node": p, "radius": reach + 60.0})
+		_add_obstacle(p, body_reach(p.def) + SHIP_MARGIN)
 		for c in p.get_children():
 			if c is PlanetBody:
-				_obstacles.append({"node": c, "radius": (c as PlanetBody).def.radius + 40.0})
+				_add_obstacle(c as PlanetBody, body_reach((c as PlanetBody).def) + SHIP_MARGIN)
 	if sys.home_station:
-		_obstacles.append({"node": sys.home_station, "radius": 70.0})
+		_obstacles.append({"node": sys.home_station, "radius": 70.0, "plan": 110.0})
 	return _obstacles
+
+
+static func _add_obstacle(node: Node3D, hard: float) -> void:
+	var pad := clampf(hard * PLAN_PAD_SHARE, PLAN_PAD.x, PLAN_PAD.y) + PLAN_PAD_SPEED * world_velocity(node).length()
+	_obstacles.append({"node": node, "radius": hard, "plan": hard + pad})
+
+
+## Visible reach of a planet or moon from its centre: the surface, the
+## atmosphere shell or the rings, whichever is widest, metres.
+static func body_reach(def: PlanetDef) -> float:
+	var r := def.radius
+	if def.atmosphere_color.a > 0.0:
+		r = def.radius / PlanetBody.ATMO_INNER_RATIO
+	if def.has_rings:
+		r = maxf(r, def.radius * def.ring_outer)
+	return r
+
+
+## World position of [param node] [param ahead] sim seconds from now, from
+## the orbit chain (Orbiters never rotate, so offsets just add up).
+static func predict_position(node: Node3D, ahead: float) -> Vector3:
+	if ahead <= 0.0:
+		return node.global_position
+	var t := SimClock.time + ahead
+	var offset := Vector3.ZERO
+	var n: Node = node
+	while n is Node3D:
+		if n is Orbiter:
+			var o := n as Orbiter
+			var a := o.orbit_angle(t)
+			offset += Vector3(cos(a), 0.0, sin(a)) * o.orbit_radius
+			n = n.get_parent()
+		else:
+			return (n as Node3D).global_position + offset
+	return offset
+
+
+## Lane height (unsigned) for a straight warp from [param a] to [param b]:
+## the highest lane altitude of the belt bands the segment crosses, 0 when
+## none (a warp never crosses rocks at plane height).
+static func segment_lane_altitude(tree: SceneTree, a: Vector3, b: Vector3) -> float:
+	var need := 0.0
+	for belt in belts(tree):
+		if belt.def == null:
+			continue
+		var c := Vector2(belt.global_position.x, belt.global_position.z)
+		var hw := belt.rock_half_width() + belt.def.max_scale + SystemBelt.LANE_MARGIN
+		if _segment_meets_ring(Vector2(a.x, a.z), Vector2(b.x, b.z), c, belt.def.orbit_radius - hw, belt.def.orbit_radius + hw):
+			need = maxf(need, belt.lane_altitude())
+	return need
+
+
+## Places no warp starts or ends: [{center: Vector3, radius: float}] (the
+## Home Station complex and shield bubble, every structure).
+static func no_warp_zones(tree: SceneTree) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var sys := tree.get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	if sys and sys.home_station:
+		var r := NO_WARP_STATION
+		var bubble := StationShield.find(tree)
+		if bubble:
+			r = maxf(r, bubble.radius + 200.0)
+		out.append({"center": sys.home_station.global_position, "radius": r})
+	var mgr := tree.get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	if mgr:
+		for b in mgr.buildings:
+			if is_instance_valid(b):
+				out.append({"center": b.global_position, "radius": NO_WARP_BUILDING + b.def.footprint_radius})
+	return out
+
+
+## Sim seconds of a trip of [param distance] metres at [param speed]:
+## x = the warp part (spool, ramp, the hop), y = normal flight (leaving
+## home, the drop-out approach). Short trips are all flight.
+static func travel_estimate(distance: float, speed: float) -> Vector2:
+	var cruise := maxf(speed, 30.0) * 0.85
+	if distance <= WARP_MIN_LEG + WARP_DROP:
+		return Vector2(0.0, distance / cruise)
+	var flown := WARP_DROP + NO_WARP_BUILDING + 200.0
+	var hop := maxf(distance - flown, 0.0)
+	return Vector2(WARP_SPOOL + WARP_RAMP * 0.5 + 1.5 + hop / WARP_SPEED, flown / cruise)
+
+
+## "12 s warp + 9 s flight" (or "40 s flight").
+static func travel_text(t: Vector2) -> String:
+	if t.x <= 0.0:
+		return "%d s flight" % roundi(t.y)
+	return "%d s warp + %d s flight" % [roundi(t.x), roundi(t.y)]
 
 
 ## "at Talon Reach", "near home", "near Verda": where [param pos] is, for

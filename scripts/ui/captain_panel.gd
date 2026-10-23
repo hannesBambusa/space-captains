@@ -13,6 +13,11 @@ extends PanelContainer
 ## Fleets: the fleet the merc flies in and its role (leader or wingman), or
 ## a solo run. Repairs: the bill for the missing hull, and whether the wallet
 ## covers it (RepairBay). Teamwork is the seventh attribute.
+## Tabs: "Details" (all of the above, with the latest decision under the
+## status) and "Log" (CaptainLogView: every decision and why). The Log tab
+## takes the height the Details tab had, so the panel keeps its size.
+## An open Factory buy order shows as one line under the wallet: the part,
+## the deposit and its state ("waiting for titanium", "ready for pickup").
 
 const ATTR_COLOR := Color(0.55, 0.85, 1.0)
 const HULL_COLOR := Color(0.45, 0.95, 0.55)
@@ -66,6 +71,8 @@ var _rank_text: Label
 var _traits: HFlowContainer
 var _traits_key := ""
 var _wallet: Label
+var _order: Label
+var _order_title: Label
 var _fleet: Label
 var _fleet_title: Label
 var _repairs: Label
@@ -79,6 +86,12 @@ var _transfer_row: HBoxContainer
 var _transfer_buttons: Dictionary = {}
 var _transfer_answer: Label
 var _loadout_key := ""
+var _details: VBoxContainer
+var _log_view: CaptainLogView
+var _tab_buttons: Array[Button] = []
+## 0 = Details, 1 = Log.
+var _tab: int = 0
+var _details_height: float = 0.0
 
 
 func _ready() -> void:
@@ -90,6 +103,18 @@ func _ready() -> void:
 	var top := HBoxContainer.new()
 	v.add_child(top)
 	top.add_child(UIUtil.label("CAPTAIN", &"HeaderLabel"))
+	top.add_child(UIUtil.spacer(6.0))
+	var tabs := ButtonGroup.new()
+	for i in 2:
+		var tb := UIUtil.button("Details" if i == 0 else "Log", &"IconButton")
+		tb.toggle_mode = true
+		tb.button_group = tabs
+		tb.button_pressed = i == 0
+		tb.custom_minimum_size = Vector2(70.0, 22.0)
+		tb.tooltip_text = "Captain details" if i == 0 else "Every decision this captain made, and why"
+		tb.pressed.connect(set_tab.bind(i))
+		top.add_child(tb)
+		_tab_buttons.append(tb)
 	top.add_child(UIUtil.spacer())
 	var close := UIUtil.button("x", &"IconButton")
 	close.custom_minimum_size = Vector2(26.0, 22.0)
@@ -102,6 +127,15 @@ func _ready() -> void:
 	v.add_child(_title)
 	_role = UIUtil.label("", &"ValueLabel")
 	v.add_child(_role)
+	var root := v
+	_log_view = CaptainLogView.new()
+	_log_view.row_width = panel_width - 40.0
+	_log_view.visible = false
+	_details = VBoxContainer.new()
+	_details.add_theme_constant_override("separation", 5)
+	root.add_child(_details)
+	root.add_child(_log_view)
+	v = _details
 	_hint = UIUtil.label("", &"DimLabel")
 	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_hint.custom_minimum_size.x = panel_width - 24.0
@@ -157,6 +191,12 @@ func _ready() -> void:
 	_progress.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_progress.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	sh.add_child(_progress)
+	_decision = UIUtil.label("", &"DimLabel")
+	_decision.clip_text = true
+	_decision.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_decision.custom_minimum_size.x = panel_width - 24.0
+	_decision.mouse_filter = Control.MOUSE_FILTER_PASS
+	v.add_child(_decision)
 	var grid := GridContainer.new()
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 14)
@@ -169,6 +209,8 @@ func _ready() -> void:
 	_earned = _add_stat(grid, "Credits earned")
 	_spent = _add_stat(grid, "Spent at station")
 	_wallet = _add_stat(grid, "Wallet")
+	_order = _add_stat(grid, "Order")
+	_order_title = grid.get_child(grid.get_child_count() - 2) as Label
 	_repairs = _add_stat(grid, "Repairs")
 	_fleet = _add_stat(grid, "Fleet")
 	_fleet_title = grid.get_child(grid.get_child_count() - 2) as Label
@@ -277,11 +319,6 @@ func _ready() -> void:
 	_request.pressed.connect(_on_request)
 	_escort_box.add_child(_request)
 
-	_decision = UIUtil.label("", &"WarnLabel")
-	_decision.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_decision.custom_minimum_size.x = panel_width - 24.0
-	v.add_child(_decision)
-
 
 func setup(owner_hud: HUD) -> void:
 	hud = owner_hud
@@ -320,6 +357,7 @@ func show_ship(s: Ship) -> void:
 	_refresh_modules()
 	_loads_title.text = ("Salvage loads" if s is SalvagerShip else "Loads delivered") if s is MinerShip else "Kills / escorts"
 	_escort_box.visible = s is MinerShip
+	_log_view.show_captain(cap)
 	_rebuild_escorts()
 	_refresh_form()
 	_refresh()
@@ -327,6 +365,28 @@ func show_ship(s: Ship) -> void:
 
 func get_request_button() -> Button:
 	return _request
+
+
+## 0 = Details, 1 = Log. The Log tab keeps the Details tab's height.
+func set_tab(index: int) -> void:
+	if _tab == 0 and _details.visible and _details.size.y > 0.0:
+		_details_height = _details.size.y
+	_tab = index
+	_tab_buttons[index].set_pressed_no_signal(true)
+	_tab_buttons[1 - index].set_pressed_no_signal(false)
+	_details.visible = index == 0
+	_log_view.visible = index == 1
+	_log_view.custom_minimum_size.y = maxf(_details_height, 320.0)
+	if index == 0:
+		_refresh()
+
+
+func get_tab() -> int:
+	return _tab
+
+
+func get_log_view() -> CaptainLogView:
+	return _log_view
 
 
 func _process(delta: float) -> void:
@@ -339,7 +399,7 @@ func _process(delta: float) -> void:
 
 
 func _refresh() -> void:
-	if not is_instance_valid(ship) or ship.dead:
+	if not is_instance_valid(ship) or ship.dead or _tab != 0:
 		return
 	var brain := ship.brain
 	_status.text = ship.get_status_text()
@@ -373,22 +433,29 @@ func _refresh() -> void:
 		_earned.text = "%s cr" % UIUtil.amount(cap.credits_earned)
 		_spent.text = "%s cr" % UIUtil.amount(cap.credits_spent)
 		_wallet.text = "%s cr" % UIUtil.amount(cap.wallet)
+		_refresh_order(cap)
 		_refresh_fleet_and_repairs(cap)
 		_refresh_career(cap)
 	_refresh_modules()
+	_refresh_last(brain)
+
+
+## "Last: refused Talon Reach mining, too dangerous for that pay" under the status.
+func _refresh_last(brain: CaptainBrain) -> void:
+	var e := ship.captain.flight_log.latest() if ship.captain else null
 	var text := ""
-	if brain:
-		if not brain.last_refusal.is_empty():
-			text = "Refused %s: %s" % [brain.last_refusal_target, brain.last_refusal]
-		elif not brain.last_decision.is_empty():
-			text = brain.last_decision
-	_decision.text = text
+	var refused := false
+	if e:
+		text = e.headline.replace(": ", ", ")
+		text = text.left(1).to_lower() + text.substr(1)
+		refused = e.outcome == CaptainLog.Outcome.REFUSED or e.outcome == CaptainLog.Outcome.FAILED
+		_decision.tooltip_text = e.why
+	elif brain and not brain.last_decision.is_empty():
+		text = brain.last_decision.left(1).to_lower() + brain.last_decision.substr(1)
+		_decision.tooltip_text = ""
+	_decision.text = "Last: " + text
 	_decision.visible = not text.is_empty()
-	var refused := brain != null and not brain.last_refusal.is_empty()
-	if refused:
-		_decision.remove_theme_color_override("font_color")
-	else:
-		_decision.add_theme_color_override("font_color", Color(0.58, 0.64, 0.72))
+	_decision.add_theme_color_override("font_color", Color(1.0, 0.55, 0.45) if refused else Color(0.58, 0.64, 0.72))
 
 
 # --- Escort request -------------------------------------------------------------
@@ -467,6 +534,19 @@ func _stepper_row(parent: Container, title: String, step: Callable) -> Label:
 	plus.pressed.connect(step.bind(1))
 	row.add_child(plus)
 	return value
+
+
+## "Ore Hold Mk II, paid 400 cr, waiting for titanium"; hidden without an order.
+func _refresh_order(cap: Captain) -> void:
+	var f := Factory.find(get_tree())
+	var o := f.order_of(cap) if f else {}
+	_order.visible = not o.is_empty()
+	_order_title.visible = not o.is_empty()
+	if o.is_empty():
+		return
+	var state := f.order_state(o)
+	_order.text = "%s, paid %s cr, %s" % [(o["module"] as ShipModule).display_name, UIUtil.amount(int(o.get("paid", 0))), f.order_state_text(o)]
+	_order.add_theme_color_override("font_color", PipMeter.GOOD if state == "ready" else (PipMeter.MID if state == "ore" or state == "tooling" else Color(0.85, 0.9, 1.0)))
 
 
 func _refresh_fleet_and_repairs(cap: Captain) -> void:

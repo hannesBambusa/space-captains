@@ -3,7 +3,8 @@ extends Control
 ## Always-on screen overlay for ships and Scavenger Dens: one constant-size
 ## icon per ship (shape by role, colour by faction), turned to the screen
 ## heading of its velocity, with a status glyph (mining, cargo, fighting,
-## fleeing, escorting), a hull pip when damaged and a short name label.
+## fleeing, escorting, spooling or in a warp hop), a hull pip when damaged
+## and a short name label.
 ## Labels fade with zoom and are decluttered; the selected, followed and
 ## hovered ship always keep theirs. Icons fade out once the real model is
 ## big on screen. Parked ships are hidden and counted in a "n docked" badge
@@ -21,7 +22,7 @@ signal mode_changed(mode: Mode)
 
 enum Mode { ALL, HOSTILES, OFF }
 enum Shape { MINER, MERCENARY, SALVAGER, POD, SCAVENGER, DEN }
-enum Glyph { NONE, MINING, CARGO, FIGHT, FLEE, ESCORT }
+enum Glyph { NONE, MINING, CARGO, FIGHT, FLEE, ESCORT, WARP }
 
 const MODE_NAMES: PackedStringArray = ["All", "Hostiles", "Off"]
 const MINER_COLOR := Color(0.45, 0.9, 1.0)
@@ -36,6 +37,7 @@ const SHADOW := Color(0.0, 0.0, 0.0, 0.6)
 const FLEET_COLOR := Color(1.0, 0.85, 0.42)
 const GLYPH_COLORS: Array[Color] = [
 	Color.WHITE, Color(0.85, 0.92, 1.0), Color(1.0, 0.84, 0.42), Color(1.0, 0.5, 0.36), Color(1.0, 0.86, 0.25), Color(0.5, 0.95, 1.0),
+	Color(0.7, 0.88, 1.0),
 ]
 
 ## Session memory of the density mode (survives scene reloads).
@@ -371,6 +373,8 @@ func _shape_for(s: Ship) -> Shape:
 
 
 func _glyph_for(s: Ship) -> Glyph:
+	if s.mover and s.mover.warp_state != ShipMover.Warp.IDLE:
+		return Glyph.WARP
 	if s is ScavengerShip:
 		var sc := s as ScavengerShip
 		if sc.ai == null:
@@ -753,6 +757,10 @@ func _draw_glyph(g: Glyph, c: Vector2, a: float) -> void:
 			draw_circle(c + Vector2(0.0, 3.9), 1.3, col)
 		Glyph.ESCORT:
 			draw_colored_polygon(PackedVector2Array([c + Vector2(-4.0, -4.5), c + Vector2(4.0, -4.5), c + Vector2(4.0, 0.0), c + Vector2(0.0, 5.0), c + Vector2(-4.0, 0.0)]), col)
+		Glyph.WARP:
+			for k in 2:
+				var x := -3.5 + 4.0 * float(k)
+				draw_polyline(PackedVector2Array([c + Vector2(x, -4.0), c + Vector2(x + 3.0, 0.0), c + Vector2(x, 4.0)]), col, 1.6, true)
 
 
 func _draw_badge(b: Dictionary) -> void:

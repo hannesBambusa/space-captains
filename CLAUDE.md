@@ -16,7 +16,7 @@ Design: docs/DESIGN.md (agreed design and stages, read it first). Reference: ../
 - Planets move slowly on orbits (pausable sim time). Home station orbits a planet.
 - Station hub radius ~40 m. Asteroids 2 to 25 m. Ships (later) 5 to 20 m.
 - Camera is a tilted top-down RTS camera, zooms from ~80 m (station) to the whole system.
-- scenes/sector.tscn is the first prototype (one local area), kept as reference. Main scene is scenes/system.tscn.
+- Main scene is scenes/system.tscn.
 
 ## Layout
 - scenes/      .tscn (main: scenes/system.tscn)

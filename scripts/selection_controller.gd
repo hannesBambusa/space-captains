@@ -195,35 +195,32 @@ func _unhandled_input(event: InputEvent) -> void:
 		if mb.button_index != MOUSE_BUTTON_LEFT:
 			return
 		var cam := get_tree().get_first_node_in_group("rts_camera") as RTSCamera
-		# Select on release, so a left drag can orbit the camera instead.
+		# Select on release, so a left drag can orbit the camera instead. A
+		# single click only selects; a double click also centres the camera.
 		if mb.pressed:
 			_press_pos = mb.position if not mb.double_click and not mb.alt_pressed else Vector2.INF
+			if mb.double_click and not mb.alt_pressed:
+				var target := _pick_selectable(mb.position)
+				if target:
+					select(target)
+					if cam:
+						cam.focus_on(target, cam.get_distance())
+					get_viewport().set_input_as_handled()
 			return
 		var was_click := _press_pos != Vector2.INF and mb.position.distance_to(_press_pos) <= click_slop_px
 		_press_pos = Vector2.INF
 		if not was_click or (cam and cam.is_orbiting()):
 			return
-		# Ships first: their pick radius is tight, and parked ones sit inside
-		# their outpost's footprint.
-		var hit: Node3D = pick_ship(mb.position)
-		if hit == null:
-			hit = pick_building(mb.position)
-		if hit == null:
-			hit = pick_group(mb.position, ScavengerDen.GROUP)
-		if hit == null:
-			hit = pick_group(mb.position, ScrapField.GROUP)
+		var hit := _pick_selectable(mb.position)
 		if hit:
 			select(hit)
-			if cam:
-				cam.focus_on(hit, cam.get_distance())
 			get_viewport().set_input_as_handled()
 			return
-		# Planets, moons, gates, belt anchors: a single click follows them.
+		# Planets, moons, gates, belt anchors: a click selects the belt; a
+		# double click follows the body (RTSCamera).
 		var body := cam.pick_focusable(mb.position) if cam else null
 		if body:
-			var anchor_belt := body.get_meta(&"belt", null) as SystemBelt
-			select(anchor_belt)
-			cam.focus_on(body, cam.get_distance())
+			select(body.get_meta(&"belt", null) as SystemBelt)
 			get_viewport().set_input_as_handled()
 			return
 		var belt := pick_belt(mb.position)
@@ -233,6 +230,20 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif selected and event.is_action_pressed("ui_cancel"):
 		deselect()
 		get_viewport().set_input_as_handled()
+
+
+## Ship, structure, hideout or scrap field under [param screen_pos], or null.
+## Ships first: their pick radius is tight, and parked ones sit inside
+## their outpost's footprint.
+func _pick_selectable(screen_pos: Vector2) -> Node3D:
+	var hit: Node3D = pick_ship(screen_pos)
+	if hit == null:
+		hit = pick_building(screen_pos)
+	if hit == null:
+		hit = pick_group(screen_pos, ScavengerDen.GROUP)
+	if hit == null:
+		hit = pick_group(screen_pos, ScrapField.GROUP)
+	return hit
 
 
 func _px_per_rad(cam: Camera3D) -> float:

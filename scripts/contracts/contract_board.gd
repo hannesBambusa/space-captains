@@ -18,9 +18,10 @@ extends Node
 ## miner's delivery). Every payment to a captain also collects the station's
 ## share of it back (Economy.collect_fees).
 ##
-## Stage 3: salvage contracts on scrap fields (paid per delivered load, the
-## scrap turns into iron plus a little titanium ([constant SALVAGE_TITANIUM]),
-## sometimes a rare part for the Factory), and
+## Stage 3: salvage. Salvagers work scrap fields on their own (free salvage,
+## paid by their Salvage Yard, which reprocesses the scrap and sells the ore
+## to the player); a posted salvage contract adds a per-load bonus from the
+## player. Sometimes a load holds a rare part for the Factory. Also
 ## reputation for escort trips. Bigger holds deliver bigger loads (more pay
 ## and materials); prospecting scanners add materials only.
 
@@ -83,8 +84,8 @@ func post_bounty(on_target: Node3D, credits: int, max_takers: int = 3) -> Bounty
 	return c
 
 
-## Salvage on a scrap field, paid per delivered load. Completes when the
-## field is stripped or gone.
+## Salvage bonus on a scrap field, paid per delivered load on top of the
+## yard's pay. Completes when the field is stripped or gone.
 func post_salvage(field: ScrapField, credits_per_load: int, max_takers: int = 3) -> SalvageContract:
 	if field == null or not is_instance_valid(field) or field.amount <= 0:
 		return null
@@ -206,34 +207,45 @@ func deliver_mining_load(contract: MiningContract, ship: Node, ore: int, fractio
 	return {"credits": pay, "materials": mat, "partial": pay < full_pay, "escorted": escorted}
 
 
-## Pays for one delivered salvage load of [param scrap]. Returns {credits,
-## materials, escorted, rare (module name or "")}. Partial pay as for mining.
+## One delivered salvage load of [param scrap]: the scrap goes to the
+## salvager's Salvage Yard, which pays the captain (SalvageYard.accept_load);
+## a posted contract also pays its bonus from the player's credits (partial
+## when short). Without a yard the scrap turns into ore for the player
+## straight away (iron plus [constant SALVAGE_TITANIUM] titanium). Returns
+## {credits (total paid now), bonus, yard, owed, scrap, materials (ore to the
+## player), escorted, rare (module name or "")}.
 func deliver_salvage_load(contract: SalvageContract, ship: Node, scrap: int) -> Dictionary:
 	var s := ship as Ship
 	var fraction := clampf(float(scrap) / float(SalvageContract.LOAD_SCRAP), 0.0, 2.0)
 	var yield_mult := s.stats.yield_mult if s and s.stats else 1.0
-	var full_pay := roundi(float(contract.reward) * fraction)
-	var full_mat := roundi(float(scrap) * SalvageContract.MATERIALS_PER_SCRAP * yield_mult)
-	var pay := mini(full_pay, maxi(Economy.credits, 0))
-	var mat := full_mat
-	if pay < full_pay:
-		mat = floori(float(full_mat) * float(pay) / maxf(float(full_pay), 1.0))
-	if pay > 0:
-		Economy.spend(pay)
-	if mat > 0:
-		var ti := roundi(float(mat) * SALVAGE_TITANIUM)
-		Economy.add(0, Economy.cost(mat - ti, ti))
-	contract.credits_paid += pay
-	contract.materials_delivered += mat
-	if s and s.captain and pay > 0:
-		Economy.collect_fees(s.captain, pay)
+	var sorted := roundi(float(scrap) * SalvageContract.MATERIALS_PER_SCRAP * yield_mult)
+	var full_bonus := roundi(float(contract.reward) * fraction)
+	var bonus := mini(full_bonus, maxi(Economy.credits, 0))
+	if bonus > 0:
+		Economy.spend(bonus)
+		if s and s.captain:
+			Economy.collect_fees(s.captain, bonus)
+	contract.credits_paid += bonus
 	var rare := ""
 	if scrap > 0 and s and SalvageContract.rng.randf() < contract.rare_chance:
 		rare = _find_rare_part(s)
+	var yard := SalvageYard.of(s)
+	var yard_pay := 0
+	var owed := 0
+	var mat := 0
+	if yard:
+		var before := yard.owed_total()
+		yard_pay = yard.accept_load(s, sorted, fraction, bool(contract.field.get_meta(&"den_ruins", false)) if is_instance_valid(contract.field) else false, rare)
+		owed = yard.owed_total() - before
+	elif sorted > 0:
+		mat = sorted
+		var ti := roundi(float(mat) * SALVAGE_TITANIUM)
+		Economy.add(0, Economy.cost(mat - ti, ti))
+	contract.materials_delivered += sorted
 	contract.finish_trip(ship, true)
-	delivery_made.emit(contract, ship, pay, mat, -1)
+	delivery_made.emit(contract, ship, bonus, mat, -1)
 	var escorted := _pay_escorts(s, contract) > 0 if s else false
-	return {"credits": pay, "materials": mat, "escorted": escorted, "rare": rare}
+	return {"credits": bonus + yard_pay, "bonus": bonus, "yard": yard_pay, "owed": owed, "scrap": sorted, "materials": mat, "escorted": escorted, "rare": rare}
 
 
 ## A rare Mk II/III part in the haul: it goes into the Factory warehouse and

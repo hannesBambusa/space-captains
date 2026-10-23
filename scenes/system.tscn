@@ -11,20 +11,14 @@
 [ext_resource type="Script" path="res://scripts/selection_controller.gd" id="9_sel"]
 [ext_resource type="Script" path="res://scripts/placement_controller.gd" id="10_place"]
 [ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="11_hud"]
-[ext_resource type="Script" path="res://scripts/ui_demo.gd" id="12_demo"]
 [ext_resource type="Script" path="res://scripts/contracts/contract_markers.gd" id="13_markers"]
-[ext_resource type="Script" path="res://scripts/mining_demo.gd" id="14_mdemo"]
 [ext_resource type="Resource" path="res://data/buildings/mercenary_outpost.tres" id="15_merc"]
 [ext_resource type="Script" path="res://scripts/combat/combat_world.gd" id="16_combat"]
-[ext_resource type="Script" path="res://scripts/combat_demo.gd" id="17_cdemo"]
 [ext_resource type="Resource" path="res://data/buildings/outfitter.tres" id="18_outf"]
 [ext_resource type="Resource" path="res://data/buildings/salvage_yard.tres" id="19_salv"]
-[ext_resource type="Script" path="res://scripts/progress_demo.gd" id="20_pdemo"]
-[ext_resource type="Script" path="res://scripts/station_demo.gd" id="21_sdemo"]
 [ext_resource type="Resource" path="res://data/buildings/factory.tres" id="22_fact"]
 [ext_resource type="Resource" path="res://data/buildings/defense_turret.tres" id="30_turr"]
 [ext_resource type="Resource" path="res://data/buildings/shield_generator.tres" id="31_shld"]
-[ext_resource type="Script" path="res://scripts/factory_demo.gd" id="23_fdemo"]
 
 [sub_resource type="ShaderMaterial" id="sky_mat"]
 shader = ExtResource("1_sky")
@@ -110,20 +104,3 @@ script = ExtResource("13_markers")
 
 [node name="HUD" parent="." instance=ExtResource("11_hud")]
 
-[node name="UIDemo" type="Node" parent="."]
-script = ExtResource("12_demo")
-
-[node name="MiningDemo" type="Node" parent="."]
-script = ExtResource("14_mdemo")
-
-[node name="CombatDemo" type="Node" parent="."]
-script = ExtResource("17_cdemo")
-
-[node name="ProgressDemo" type="Node" parent="."]
-script = ExtResource("20_pdemo")
-
-[node name="StationDemo" type="Node" parent="."]
-script = ExtResource("21_sdemo")
-
-[node name="FactoryDemo" type="Node" parent="."]
-script = ExtResource("23_fdemo")

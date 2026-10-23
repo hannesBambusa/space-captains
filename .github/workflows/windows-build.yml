@@ -21,7 +21,7 @@ concurrency:
 env:
   GODOT_VERSION: 4.7.2
   GODOT_RELEASE: 4.7.2-stable
-  ZIP_NAME: SpaceMajesty-windows.zip
+  ZIP_NAME: SpaceCaptains-windows.zip
 
 jobs:
   build:
@@ -69,9 +69,9 @@ jobs:
         run: |
           set -e
           mkdir -p build/windows
-          ~/godot/godot --headless --path . --export-release "Windows Desktop" build/windows/SpaceMajesty.exe
-          test -f build/windows/SpaceMajesty.exe
-          test -f build/windows/SpaceMajesty.pck
+          ~/godot/godot --headless --path . --export-release "Windows Desktop" build/windows/SpaceCaptains.exe
+          test -f build/windows/SpaceCaptains.exe
+          test -f build/windows/SpaceCaptains.pck
           cd build/windows
           zip -qr "../${ZIP_NAME}" .
           ls -la ..
@@ -80,10 +80,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: Build ${{ github.run_number }}
+          name: Space Captains build ${{ github.run_number }}
           body: |
             Windows build from commit ${{ github.sha }}.
-            Download ${{ env.ZIP_NAME }}, unzip it and run SpaceMajesty.exe.
+            Download ${{ env.ZIP_NAME }}, unzip it and run SpaceCaptains.exe.
           make_latest: true
           files: build/${{ env.ZIP_NAME }}
 
