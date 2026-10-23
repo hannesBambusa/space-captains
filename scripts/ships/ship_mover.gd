@@ -13,17 +13,22 @@ extends RefCounted
 ## next route point, when the owner allows it ([member warp_allowed]: not in
 ## combat, not fleeing under fire) and neither end is in a no-warp zone
 ## (the station complex, the shield bubble, structures): the ship spools for
-## SpaceNav.WARP_SPOOL (turning onto the line and climbing to the lane height
-## of any belt band on it, [member warp_altitude]), jumps at up to
+## SpaceNav.WARP_SPOOL (turning onto the line, levelling off, or climbing to
+## the lane height of any belt band on it, [member warp_altitude]; without a
+## band the hop flies the straight 3D line to [member warp_exit_y]), jumps at up to
 ## SpaceNav.WARP_SPEED and drops out [member warp_drop] before the point,
 ## then flies on normally. A ship with a [member warp_lead] (fleet wingmen,
 ## escorts in formation) never starts its own hop: it spools and jumps with
 ## the lead, at the lead's velocity, so the formation holds.
+## Bodies are spheres (inclined orbits put planets above or below the
+## plane): routing, the push and the push-out use the circle each sphere
+## cuts at the ship's height.
 ## Height: in a building frame the ship eases to the goal's height at
 ## [member climb_speed]. In the world frame the owner sets [member cruise_y]
-## every step (belt lanes, see Ship) and the ship climbs or dives toward it
+## every step (cruise arcs and belt lanes, see Ship) and the ship climbs or dives toward it
 ## with limited vertical acceleration, at most [member climb_angle_deg] steep,
-## pitching the nose into the climb ([member pitch], visual only).
+## pitching the nose into the climb ([member pitch], visual only); in
+## combat ([member agile]) steeper and faster.
 ##
 ## Goals come in two forms:
 ## - [method set_goal]: one target, refreshed every step by the owner for
@@ -80,6 +85,13 @@ var min_climb_rate: float = 14.0
 var max_climb_rate: float = 40.0
 var vertical_accel: float = 9.0
 var pitch_max_deg: float = 14.0
+## Combat flying (attack runs, evasive dives; the owner sets [member agile]
+## every step): steeper, faster climbs and dives, more nose pitch.
+var agile: bool = false
+var agile_climb_angle_deg: float = 32.0
+var agile_max_climb_rate: float = 70.0
+var agile_vertical_accel: float = 24.0
+var agile_pitch_max_deg: float = 28.0
 
 ## Velocity in the parent frame, m/s.
 var velocity := Vector3.ZERO
@@ -96,6 +108,9 @@ var separation := Vector3.ZERO
 ## [member cruise_active]. Off: ease to the goal's height (building frames).
 var cruise_y: float = 0.0
 var cruise_active: bool = false
+## Vertical speed of [member cruise_y] itself (a formation slot on a
+## climbing lead), m/s: fed forward so followers do not lag behind.
+var cruise_vy: float = 0.0
 ## Vertical speed, m/s (world-frame climbs only; [member velocity] stays flat).
 var climb_rate: float = 0.0
 ## Nose pitch from the climb, radians (+ = nose up).
@@ -122,8 +137,14 @@ var warp_allowed: bool = false
 var warp_drop: float = SpaceNav.WARP_DROP
 var warp_lead: ShipMover
 var warp_state: Warp = Warp.IDLE
-## Lane height held through the hop (unsigned; 0 = the plane).
+## Lane height held through the hop (unsigned; 0 = no belt band on it).
 var warp_altitude: float = 0.0
+## Hops without a band: height at the drop-out point (set by the owner
+## every step, NAN = none). The hop flies the straight 3D line to it.
+var warp_exit_y: float = NAN
+## Highest (or lowest) point of the owner's cruise arc on this leg, for
+## the route's height span (NAN = none).
+var y_peak: float = NAN
 var warp_dir := Vector3.ZERO
 var warp_speed: float = 0.0
 ## Sim seconds of spool left.
@@ -131,6 +152,9 @@ var warp_timer: float = 0.0
 ## Where the current hop drops out (flat, world).
 var warp_end := Vector3.ZERO
 var _warp_cooldown: float = 0.0
+## Hop start height and the flat distance flown in the hop so far.
+var _warp_y0: float = 0.0
+var _warp_flown: float = 0.0
 
 var _yaw_rate: float = 0.0
 var _has_goal: bool = false
@@ -145,7 +169,9 @@ func _init(owner_ship: Node3D) -> void:
 func set_goal(pos: Vector3, vel: Vector3 = Vector3.ZERO, speed: float = -1.0, stop: bool = true, face: Vector3 = Vector3.ZERO, radius: float = 8.0) -> void:
 	path.clear()
 	goal_pos = pos
-	goal_vel = vel
+	# Flight is flat; height follows through cruise_y / goal_y (an inclined
+	# orbit's slow rise or sink is not matched as velocity).
+	goal_vel = Vector3(vel.x, 0.0, vel.z)
 	goal_speed = speed
 	goal_stop = stop
 	goal_face = face
@@ -228,13 +254,19 @@ func step(dt: float) -> void:
 	if avoid_enabled and _has_goal and not hold_climb:
 		var tree := ship.get_tree()
 		var flat := Vector3(pos.x, 0.0, pos.z)
-		var g := _outside_bodies(Vector3(goal_pos.x, 0.0, goal_pos.z))
+		var g := _outside_bodies(Vector3(goal_pos.x, 0.0, goal_pos.z), goal_pos.y)
 		if g.x != goal_pos.x or g.z != goal_pos.z:
 			# A goal inside a body (a patrol point behind a planet): aim at its edge.
 			rel = Vector3(g.x - pos.x, 0.0, g.z - pos.z)
 			d = rel.length()
 		var plan_speed := maxf(Vector2(velocity.x, velocity.z).length(), max_speed * 0.5)
 		# Spooling or in a hop, the leg is flown at warp speed: plan for it.
+		var y_lo := minf(pos.y, minf(goal_pos.y, cruise_y if cruise_active else pos.y))
+		var y_hi := maxf(pos.y, maxf(goal_pos.y, cruise_y if cruise_active else pos.y))
+		if cruise_active and not is_nan(y_peak):
+			y_lo = minf(y_lo, y_peak)
+			y_hi = maxf(y_hi, y_peak)
+		route.y_span = Vector2(y_lo, y_hi)
 		route.update(tree, flat, g, WARP_SPEED_PLAN if warp_state != Warp.IDLE else maxf(plan_speed, 30.0), dt)
 		if route.has_waypoint():
 			var w := route.waypoint()
@@ -260,7 +292,7 @@ func step(dt: float) -> void:
 		desired += dir * s
 	desired.y = 0.0
 	if avoid_enabled and not hold_climb:
-		desired += _body_push(pos, _outside_bodies(Vector3(goal_pos.x, 0.0, goal_pos.z)))
+		desired += _body_push(pos, _outside_bodies(Vector3(goal_pos.x, 0.0, goal_pos.z), goal_pos.y))
 		desired += separation
 	if desired.length() > max_speed:
 		desired = desired.normalized() * max_speed
@@ -296,14 +328,21 @@ func _step_height(y: float, dt: float) -> float:
 		y = move_toward(y, goal_y, climb_speed * dt)
 	else:
 		var err := cruise_y - y
-		var vmax := clampf(hs * tan(deg_to_rad(climb_angle_deg)), min_climb_rate, max_climb_rate)
-		var want := signf(err) * minf(vmax, sqrt(1.6 * vertical_accel * absf(err)))
-		climb_rate = move_toward(climb_rate, want, vertical_accel * dt)
+		# Hovering (a miner over its rock, a ship waiting at a goal above or
+		# below) climbs at the full vertical rate; moving, no steeper than
+		# the climb angle.
+		var top := agile_max_climb_rate if agile else max_climb_rate
+		var accel := agile_vertical_accel if agile else vertical_accel
+		var hover := lerpf(top, min_climb_rate, smoothstep(0.0, 40.0, hs))
+		var vmax := clampf(maxf(hs * tan(deg_to_rad(agile_climb_angle_deg if agile else climb_angle_deg)), hover), min_climb_rate, top)
+		var want := clampf(cruise_vy + signf(err) * minf(vmax, sqrt(1.6 * accel * absf(err))), -top * 1.25, top * 1.25)
+		# Holding a slot on a climbing lead: twice the vertical authority.
+		climb_rate = move_toward(climb_rate, want, accel * (2.0 if absf(cruise_vy) > 0.5 else 1.0) * dt)
 		y += climb_rate * dt
 		if absf(cruise_y - y) < 0.05 and absf(climb_rate) < 0.3:
 			y = cruise_y
 			climb_rate = 0.0
-	var pitch_max := deg_to_rad(pitch_max_deg)
+	var pitch_max := deg_to_rad(agile_pitch_max_deg if agile else pitch_max_deg)
 	var pitch_target := clampf(atan2(climb_rate, maxf(hs, 30.0)), -pitch_max, pitch_max)
 	pitch = lerpf(pitch, pitch_target, 1.0 - exp(-3.0 * dt))
 	return y
@@ -374,9 +413,9 @@ func _load_waypoint(w: Waypoint) -> void:
 
 # --- Bodies -------------------------------------------------------------------
 
-## [param p] (flat, world), moved out to the planning radius of any body
-## whose hard radius holds it.
-func _outside_bodies(p: Vector3) -> Vector3:
+## [param p] (flat, world) at height [param y], moved out to the planning
+## circle of any body whose hard sphere holds it (circles cut at that height).
+func _outside_bodies(p: Vector3, y: float) -> Vector3:
 	for o in SpaceNav.obstacles(ship.get_tree()):
 		var node := o["node"] as Node3D
 		if not is_instance_valid(node):
@@ -384,13 +423,15 @@ func _outside_bodies(p: Vector3) -> Vector3:
 		var c := node.global_position
 		var to := Vector3(p.x - c.x, 0.0, p.z - c.z)
 		var dist := to.length()
-		if dist < float(o["radius"]):
+		var dy := y - c.y
+		if dist < SpaceNav.slice_radius(o["radius"], dy):
 			var n := to / dist if dist > 0.5 else Vector3.RIGHT
-			return Vector3(c.x, 0.0, c.z) + n * float(o["plan"]) * 1.06
+			return Vector3(c.x, 0.0, c.z) + n * SpaceNav.slice_radius(o["plan"], dy) * 1.06
 	return p
 
 ## Outward velocity inside a body's planning radius (stronger toward the
-## hard radius), unless the goal itself lies in there.
+## hard radius), unless the goal itself lies in there. Radii are the circles
+## the spheres cut at the ship's height (goal: at its height).
 func _body_push(pos: Vector3, goal: Vector3) -> Vector3:
 	var push := Vector3.ZERO
 	for o in SpaceNav.obstacles(ship.get_tree()):
@@ -400,11 +441,12 @@ func _body_push(pos: Vector3, goal: Vector3) -> Vector3:
 		var c := node.global_position
 		var to := Vector3(pos.x - c.x, 0.0, pos.z - c.z)
 		var dist := to.length()
-		var hard: float = o["radius"]
-		var r: float = o["plan"]
+		var dy := pos.y - c.y
+		var hard := SpaceNav.slice_radius(o["radius"], dy)
+		var r := SpaceNav.slice_radius(o["plan"], dy)
 		if dist >= r or dist < 1.0:
 			continue
-		if Vector2(goal.x - c.x, goal.z - c.z).length() < r:
+		if Vector2(goal.x - c.x, goal.z - c.z).length() < SpaceNav.slice_radius(o["plan"], goal_pos.y - c.y):
 			r = hard + 15.0
 			if dist >= r:
 				continue
@@ -413,14 +455,15 @@ func _body_push(pos: Vector3, goal: Vector3) -> Vector3:
 
 
 ## Hard rule: never inside a body. Moves [param pos] back onto the hard
-## radius and drops the inward part of the velocity (relative to the body).
+## sphere (sideways, onto the circle it cuts at the ship's height) and drops
+## the inward part of the velocity (relative to the body).
 func _push_out(pos: Vector3) -> Vector3:
 	for o in SpaceNav.obstacles(ship.get_tree()):
 		var node := o["node"] as Node3D
 		if not is_instance_valid(node):
 			continue
-		var hard: float = o["radius"]
 		var c := node.global_position
+		var hard := SpaceNav.slice_radius(o["radius"], pos.y - c.y)
 		var to := Vector3(pos.x - c.x, 0.0, pos.z - c.z)
 		var dist := to.length()
 		if dist >= hard:
@@ -478,9 +521,12 @@ func _warp_step(dt: float, target: Vector3, _via: bool) -> bool:
 			warp_dir = (end - flat).normalized()
 			warp_altitude = SpaceNav.segment_lane_altitude(ship.get_tree(), flat, end)
 			warp_timer -= dt
-			var level := absf(pos.y - cruise_y) < 4.0 or not cruise_active
+			# Level: at the lane height (or holding height) and no longer climbing.
+			var level := (absf(pos.y - cruise_y) < 4.0 and absf(climb_rate) < 4.0) or not cruise_active
 			if warp_timer <= 0.0 and level and forward().dot(warp_dir) >= WARP_ALIGN:
 				warp_speed = maxf(Vector2(velocity.x, velocity.z).length(), max_speed)
+				_warp_y0 = pos.y
+				_warp_flown = 0.0
 				_set_warp(Warp.WARP)
 			return false
 		Warp.WARP:
@@ -511,7 +557,16 @@ func _warp_step(dt: float, target: Vector3, _via: bool) -> bool:
 			velocity = warp_dir * warp_speed
 			pos.x += warp_dir.x * stride
 			pos.z += warp_dir.z * stride
-			pos.y = _step_height(pos.y, dt)
+			warp_end = flat + warp_dir * left
+			_warp_flown += stride
+			if warp_altitude <= 0.0 and cruise_active and not is_nan(warp_exit_y):
+				# No band on the hop: the straight 3D line to the drop-out height.
+				var y0 := pos.y
+				pos.y = lerpf(_warp_y0, warp_exit_y, clampf(_warp_flown / maxf(_warp_flown + left - stride, 1.0), 0.0, 1.0))
+				climb_rate = (pos.y - y0) / dt
+				pitch = lerpf(pitch, 0.0, 1.0 - exp(-3.0 * dt))
+			else:
+				pos.y = _step_height(pos.y, dt)
 			ship.position = _push_out(pos)
 			yaw = yaw_for(warp_dir)
 			_yaw_rate = 0.0
@@ -567,7 +622,13 @@ func _follow_warp(dt: float, lead: ShipMover) -> bool:
 				_end_warp()
 				return false
 			pos += Vector3(velocity.x, 0.0, velocity.z) * dt
-			pos.y = _step_height(pos.y, dt)
+			if warp_altitude <= 0.0:
+				# The lead flies a 3D line: ride its climb, keep easing onto the slot height.
+				pos.y += lead.climb_rate * dt
+				pos.y = move_toward(pos.y, cruise_y, max_climb_rate * dt)
+				climb_rate = lead.climb_rate
+			else:
+				pos.y = _step_height(pos.y, dt)
 			ship.position = _push_out(pos)
 			yaw = yaw_for(warp_dir)
 			_yaw_rate = 0.0
@@ -587,7 +648,8 @@ func _warp_end_for(from: Vector3, target: Vector3) -> Vector3:
 	var reach := length - warp_drop
 	for o in SpaceNav.obstacles(ship.get_tree()):
 		var node := o["node"] as Node3D
-		if is_instance_valid(node) and Vector2(from.x - node.global_position.x, from.z - node.global_position.z).length() < float(o["plan"]):
+		if is_instance_valid(node) and Vector2(from.x - node.global_position.x, from.z - node.global_position.z).length() \
+				< SpaceNav.slice_radius(o["plan"], ship.position.y - node.global_position.y):
 			return Vector3.INF
 	for z in SpaceNav.no_warp_zones(ship.get_tree()):
 		var c: Vector3 = z["center"]
@@ -614,10 +676,13 @@ func _warp_blocked(flat: Vector3, stride: float) -> bool:
 		if not is_instance_valid(node):
 			continue
 		var c := node.global_position
+		var hard := SpaceNav.slice_radius(float(o["radius"]) + 40.0, ship.position.y - c.y)
+		if hard <= 0.0:
+			continue
 		c.y = 0.0
 		var ab := ahead - flat
 		var t := clampf((c - flat).dot(ab) / maxf(ab.length_squared(), 1e-6), 0.0, 1.0)
-		if (flat + ab * t).distance_to(c) < float(o["radius"]) + 40.0 and (c - flat).dot(warp_dir) > 0.0:
+		if (flat + ab * t).distance_to(c) < hard and (c - flat).dot(warp_dir) > 0.0:
 			return true
 	return false
 
@@ -629,6 +694,8 @@ func _end_warp() -> void:
 	if was == Warp.WARP:
 		velocity = warp_dir * max_speed * 0.9
 		_warp_cooldown = WARP_COOLDOWN
+		# Out of the hop's 3D line: carry on with a normal climb rate.
+		climb_rate = clampf(climb_rate, -max_climb_rate, max_climb_rate)
 	warp_speed = 0.0
 	warp_altitude = 0.0
 	_set_warp(Warp.IDLE)

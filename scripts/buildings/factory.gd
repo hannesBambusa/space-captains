@@ -1,7 +1,7 @@
 class_name Factory
 extends Node
 ## Service node of the Factory (see BuildingDef.service_script), the
-## structure the station starts with (BuildingManager.factory_def). It buys
+## station addon the station starts with in bay 1 (BuildingManager.factory_def). It buys
 ## the player's ore ([member market], FactoryMarket) and turns its ore stock
 ## into ship modules from the ModuleCatalog, one at a time, into a parts
 ## warehouse of [member warehouse_cap] units. The Outfitter sells from this

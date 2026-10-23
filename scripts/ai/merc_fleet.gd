@@ -18,8 +18,9 @@ extends RefCounted
 ##   contract may join too. It leaves when everyone wanted is at the rally
 ##   point, or after [constant FORM_WAIT] with at least two; alone, it falls
 ##   apart. The leader is picked at departure by rank, then Nerve.
-## - EN_ROUTE: the leader flies at the slowest member's pace, wingmen hold
-##   offset slots behind it ([method slot_offset]).
+## - EN_ROUTE: the leader flies at the slowest member's pace (on its own
+##   cruise arc, Ship.cruise_band), wingmen hold 3D offset slots behind it
+##   ([method slot_offset]: left wing above, right wing below).
 ## - ENGAGING: inside [constant ENGAGE_RANGE] everyone shoots the fleet's
 ##   focus target (whoever is shooting at the fleet, else the bounty).
 ## - RETREATING: the leader breaks it off when the fleet's hull runs low
@@ -58,6 +59,8 @@ const ENGAGE_RANGE := 1800.0
 ## Formation slots: side and back offsets per row, metres.
 const SLOT_SIDE := 45.0
 const SLOT_BACK := 38.0
+## Formation slots: height per row (left above the leader, right below), metres.
+const SLOT_RISE := 18.0
 ## Wingmen farther than this from their slot slow the leader down, metres.
 const STRAGGLE_DISTANCE := 260.0
 ## Hostiles shooting at the fleet this close to the leader are focused first.
@@ -228,7 +231,7 @@ func update() -> void:
 			var all_in := members.size() >= wanted
 			if all_in:
 				for m in members:
-					if m.is_docked() or Combat.flat_distance(m.global_position, rally_point()) > RALLY_RADIUS:
+					if m.is_docked() or m.global_position.distance_to(rally_point()) > RALLY_RADIUS:
 						all_in = false
 						break
 			if all_in or now - called_at > FORM_WAIT:
@@ -237,7 +240,7 @@ func update() -> void:
 				else:
 					disband("No one answered %s's call for %s" % [leader_name, contract.get_target_name()])
 		State.EN_ROUTE:
-			if is_instance_valid(leader) and Combat.flat_distance(leader.global_position, contract.target.global_position) < ENGAGE_RANGE:
+			if is_instance_valid(leader) and leader.global_position.distance_to(contract.target.global_position) < ENGAGE_RANGE:
 				_set_state(State.ENGAGING)
 				EventLog.post("%s's fleet (%d) engages %s" % [leader_name, members.size(), contract.get_target_name()], EventLog.Kind.COMBAT, leader)
 		State.ENGAGING:
@@ -435,8 +438,7 @@ func rally_point() -> Vector3:
 	var home := sys.home_station.global_position
 	var to := contract.target.global_position - home
 	to.y = 0.0
-	var p := home + to.normalized() * RALLY_DISTANCE
-	return Vector3(p.x, 0.0, p.z)
+	return home + to.normalized() * RALLY_DISTANCE
 
 
 ## Formation offset of slot [param index] (0 = the leader, in front).
@@ -446,7 +448,7 @@ static func slot_offset(index: int, fwd: Vector3) -> Vector3:
 	var right := fwd.cross(Vector3.UP)
 	var side := 1.0 if index % 2 == 1 else -1.0
 	var row := ceilf(index / 2.0)
-	return right * side * SLOT_SIDE * row - fwd * SLOT_BACK * row
+	return right * side * SLOT_SIDE * row - fwd * SLOT_BACK * row - Vector3.UP * side * SLOT_RISE * row
 
 
 ## Steers [param ship] while forming up or flying to the target (not while
@@ -459,7 +461,7 @@ func steer(ship: Ship) -> void:
 			var rp := rally_point()
 			var fwd := Vector3(tp.x - rp.x, 0.0, tp.z - rp.z).normalized()
 			var spot := rp + slot_offset(idx, fwd)
-			var face := fwd if Combat.flat_distance(ship.global_position, spot) < 120.0 else Vector3.ZERO
+			var face := fwd if ship.global_position.distance_to(spot) < 120.0 else Vector3.ZERO
 			ship.set_world_goal(spot, Vector3.ZERO, face, 20.0)
 		State.EN_ROUTE, State.ENGAGING:
 			if ship == leader:
@@ -473,8 +475,7 @@ func steer(ship: Ship) -> void:
 			fwd.y = 0.0
 			fwd = fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
 			var spot := leader.global_position + slot_offset(idx, fwd)
-			spot.y = 0.0
-			var face := fwd if Combat.flat_distance(ship.global_position, spot) < 120.0 else Vector3.ZERO
+			var face := fwd if ship.global_position.distance_to(spot) < 120.0 else Vector3.ZERO
 			ship.set_world_goal(spot, leader.get_world_velocity(), face, 10.0)
 
 
@@ -488,7 +489,7 @@ func _fleet_speed() -> float:
 	for i in members.size():
 		var m := members[i]
 		speed = minf(speed, m.max_speed)
-		if i > 0 and Combat.flat_distance(m.global_position, leader.global_position + slot_offset(i, fwd)) > STRAGGLE_DISTANCE:
+		if i > 0 and m.global_position.distance_to(leader.global_position + slot_offset(i, fwd)) > STRAGGLE_DISTANCE:
 			straggling = true
 	speed *= 0.85
 	return speed * (0.55 if straggling else 1.0)

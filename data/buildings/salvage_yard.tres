@@ -22,5 +22,7 @@ hire_cost_credits = 250
 hire_role = "Salvager"
 hire_ship_path = "res://assets/models/ships/salvager.glb"
 hire_ship_script = ExtResource("2_salv")
+max_shuttles = 3
+shuttle_capacity = 60
 ship_cost = 450
 service_script = ExtResource("3_yard")

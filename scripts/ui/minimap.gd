@@ -215,7 +215,13 @@ func _draw_map() -> void:
 		var w := maxf(belt.def.width / sc, 2.0)
 		c.draw_arc(bc, belt.def.orbit_radius / sc, 0.0, TAU, 96, BELT_COLOR, w, true)
 	for p in sys.planets:
-		c.draw_arc(origin, p.def.orbit_radius / sc, 0.0, TAU, 96, ORBIT_COLOR, 1.0, true)
+		# Top-down projection of the inclined orbit (a slight ellipse).
+		var pts := PackedVector2Array()
+		pts.resize(97)
+		for i in 97:
+			var a := TAU * float(i) / 96.0
+			pts[i] = _to_map(p.orbit_basis * Vector3(cos(a), 0.0, sin(a)) * p.def.orbit_radius)
+		c.draw_polyline(pts, ORBIT_COLOR, 1.0, true)
 	for p in sys.planets:
 		var pm := _to_map(p.global_position)
 		c.draw_circle(pm, clampf(p.def.radius / sc, 2.0, 6.0), PLANET_COLOR.darkened(0.25))

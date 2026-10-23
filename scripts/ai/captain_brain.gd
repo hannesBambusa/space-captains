@@ -48,6 +48,8 @@ const UNLOAD_TIME := 4.0
 ## Distance to the outpost's approach point at which the ship matches its
 ## frame and starts the docking path, metres.
 const DOCK_HANDOFF_DISTANCE := 120.0
+## Height gap to the approach point at which the home frame takes over, metres.
+const DOCK_HANDOFF_HEIGHT := 25.0
 ## Hostiles within this distance raise the threat level, metres.
 const THREAT_RADIUS := 1300.0
 ## Friendly mercenaries within this distance lower it (escort cover), metres.
@@ -152,9 +154,25 @@ func can_warp() -> bool:
 	return false
 
 
+## May the ship fly its own cruise arc (Ship.cruise_band, CruiseLeg)? On
+## the way out and home; fleeing, working and docking fly straight.
+func cruise_free() -> bool:
+	return state == State.TRAVELING_TO_JOB or state == State.RETURNING
+
+
 ## Drop-out distance before the destination, metres.
 func warp_drop() -> float:
 	return SpaceNav.WARP_DROP
+
+
+## Running for safety (Ship.is_fleeing: evasive dives under fire).
+func is_fleeing() -> bool:
+	return state == State.FLEEING
+
+
+## (slot, size) in the ship's attack group (Ship.attack_slot); alone by default.
+func attack_slot() -> Vector2i:
+	return Vector2i(0, 1)
 
 
 ## The mover whose hops this ship follows, or null.
@@ -408,12 +426,13 @@ func _steer_home() -> void:
 	if home == null or not is_instance_valid(home):
 		_set_state(State.IDLE)
 		return
+	# At the complex's height (the station rides its planet's inclined orbit).
 	var approach := home.to_global(home.approach_point())
-	approach.y = 0.0
-	ship.mover.set_goal(approach, SpaceNav.world_velocity(home), -1.0, true, Vector3.ZERO, 20.0)
+	ship.set_world_goal(approach, SpaceNav.world_velocity(home), Vector3.ZERO, 20.0)
 	var rel := approach - ship.global_position
+	var dy := absf(rel.y)
 	rel.y = 0.0
-	if rel.length() < DOCK_HANDOFF_DISTANCE and ship.mover.relative_speed() < 45.0:
+	if rel.length() < DOCK_HANDOFF_DISTANCE and dy < DOCK_HANDOFF_HEIGHT and ship.mover.relative_speed() < 45.0:
 		ship.enter_home_frame()
 		ship.start_dock()
 		_set_state(State.DOCKING)
@@ -535,7 +554,7 @@ func _update_flee(dt: float) -> void:
 	else:
 		_calm_time = 0.0
 	if is_instance_valid(_flee_to) and not _flee_to.dead and _flee_to.is_targetable():
-		var d := Combat.flat_distance(ship.global_position, _flee_to.global_position)
+		var d := ship.global_position.distance_to(_flee_to.global_position)
 		if d > 160.0 and _calm_time < 3.0:
 			var p := ship.get_parent() as Node3D
 			var goal := _flee_to.global_position

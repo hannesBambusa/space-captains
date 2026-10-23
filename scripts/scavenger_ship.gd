@@ -60,6 +60,28 @@ func can_warp() -> bool:
 	return ai != null and ai.can_warp()
 
 
+func cruise_free() -> bool:
+	return ai != null and ai.cruise_free()
+
+
+## Fleeing to the den (evasive dives under fire).
+func is_fleeing() -> bool:
+	return ai != null and ai.state == ScavengerBrain.State.FLEEING
+
+
+## Raiders swoop on miners, salvagers and pods: short orbits, steep passes
+## from above and below. Against guns they fly the default runs.
+func attack_style(target: Node3D) -> AttackRun.Style:
+	var st := AttackRun.Style.new()
+	if target is MinerShip or target is EscapePod or target is SalvagerShip:
+		st.tilt_deg = Vector2(30.0, 45.0)
+		st.pass_height = 230.0
+		st.pass_close = 0.3
+		st.orbit_time = Vector2(3.0, 6.0)
+		st.pass_chance = 0.85
+	return st
+
+
 func warp_drop_distance() -> float:
 	return ai.warp_drop() if ai else SpaceNav.WARP_DROP
 

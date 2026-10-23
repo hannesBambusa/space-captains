@@ -64,18 +64,18 @@ func sim_step(dt: float) -> void:
 	# The outpost orbits at ~100 m/s: the pod's top speed is relative to it.
 	mover.max_speed = SPEED + (goal["vel"] as Vector3).length()
 	set_world_goal(goal["pos"], goal["vel"], Vector3.ZERO, 30.0)
-	if Combat.flat_distance(global_position, goal["pos"]) < ARRIVE_DISTANCE:
+	if global_position.distance_to(goal["pos"]) < ARRIVE_DISTANCE:
 		_arrive()
 
 
 func _goal() -> Dictionary:
 	if is_instance_valid(home):
 		var p := home.to_global(home.approach_point())
-		return {"pos": Vector3(p.x, 0.0, p.z), "vel": SpaceNav.world_velocity(home)}
+		return {"pos": p, "vel": SpaceNav.world_velocity(home)}
 	var sys := get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
 	if sys and sys.home_station:
 		var st := sys.home_station
-		return {"pos": Vector3(st.global_position.x, 0.0, st.global_position.z), "vel": SpaceNav.world_velocity(st)}
+		return {"pos": st.global_position, "vel": SpaceNav.world_velocity(st)}
 	return {"pos": global_position, "vel": Vector3.ZERO}
 
 

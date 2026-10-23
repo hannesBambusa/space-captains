@@ -11,6 +11,8 @@ extends RefCounted
 ## frame (around where it is now, the ship's motion relative to it), and the
 ## waypoint rides with the body; the mover adds the body's velocity when
 ## flying to it. Clear: no waypoint, fly straight.
+## Bodies are spheres: a leg whose heights ([member y_span]) pass above or
+## below a body only keeps to the circle its sphere cuts there.
 ## A goal inside a body's planning radius (an outpost near its planet, a
 ## formation slot beside a moon) only keeps the hard radius for that body.
 
@@ -25,6 +27,10 @@ const HUG_STEP := 0.35
 var body: Node3D
 ## Which way round (+1 / -1), kept while the same body blocks.
 var side: float = 1.0
+## Heights (world, x = low, y = high) the ship covers on the way: set by the
+## mover before [method update]. Bodies are spheres; one whose sphere this
+## band clears does not block.
+var y_span := Vector2.ZERO
 var replans: int = 0
 
 ## Waypoint offset from the body's centre (flat).
@@ -104,15 +110,22 @@ func first_block(obs: Array[Dictionary], a: Vector3, b: Vector3, speed: float, g
 		return {}
 	var dir := ab / length
 	var spd := maxf(speed, 20.0)
+	var spd_leg := length / spd
 	var best: Dictionary = {}
 	var best_along := INF
 	for o in obs:
 		var node := o["node"] as Node3D
 		if not is_instance_valid(node) or skip.has(node):
 			continue
-		var hard: float = o["radius"]
-		var r: float = o["plan"]
+		var vb := SpaceNav.world_velocity(node)
 		var c0 := node.global_position
+		# Spheres: only the circle cut at the leg's heights counts (bodies on
+		# inclined orbits drift up or down meanwhile).
+		var dy := maxf(SpaceNav.height_gap(c0.y, y_span) - absf(vb.y) * spd_leg, 0.0)
+		var hard := SpaceNav.slice_radius(o["radius"], dy)
+		var r := SpaceNav.slice_radius(o["plan"], dy)
+		if r <= 0.0:
+			continue
 		c0.y = 0.0
 		var gd := Vector2(goal.x - c0.x, goal.z - c0.z).length()
 		if gd < r:
@@ -126,9 +139,8 @@ func first_block(obs: Array[Dictionary], a: Vector3, b: Vector3, speed: float, g
 			r = maxf(hard, ad - 15.0)
 		# Closest approach in the body's frame (it may come at the ship), then
 		# checked against where its orbit really puts it.
-		var vb := SpaceNav.world_velocity(node)
 		vb.y = 0.0
-		var leg_t := length / spd
+		var leg_t := spd_leg
 		var rel_p := a - c0
 		var rel_v := dir * spd - vb
 		var vv := rel_v.length_squared()

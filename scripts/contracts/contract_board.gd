@@ -180,7 +180,9 @@ func get_for_target(target: Node) -> Array[Contract]:
 	return out
 
 
-## Pays for one delivered mining load. Returns {credits, materials}.
+## Pays for one delivered mining load. Returns {credits, materials}. The
+## ore goes into the miner's outpost stock (CargoDepot) and reaches the
+## player by cargo shuttle; without a depot straight into Economy.
 ## Partial payment when credits run short (see the class notes).
 ## [param fraction] < 1 when scavengers took part of the load.
 func deliver_mining_load(contract: MiningContract, ship: Node, ore: int, fraction: float = 1.0) -> Dictionary:
@@ -196,7 +198,12 @@ func deliver_mining_load(contract: MiningContract, ship: Node, ore: int, fractio
 	if pay > 0:
 		Economy.spend(pay)
 	if mat > 0:
-		Economy.add_ore_of(Economy.ore_of_belt(ore), mat)
+		# Into the outpost's stock; a cargo shuttle brings it to the station.
+		var depot := CargoDepot.of_ship(ship)
+		if depot:
+			depot.add_stock(Economy.ore_of_belt(ore), mat)
+		else:
+			Economy.add_ore_of(Economy.ore_of_belt(ore), mat)
 	contract.credits_paid += pay
 	contract.materials_delivered += mat
 	if s and s.captain and pay > 0:
@@ -281,7 +288,7 @@ func _pay_escorts(miner: Ship, contract: Contract) -> int:
 			continue
 		var paid_any := false
 		for escort in e.escorts_of(miner):
-			if escort.dead or Combat.flat_distance(escort.global_position, miner.global_position) > EscortContract.PAY_DISTANCE:
+			if escort.dead or escort.global_position.distance_to(miner.global_position) > EscortContract.PAY_DISTANCE:
 				continue
 			var pay := pay_captain(escort, e.reward, e)
 			paid_any = true

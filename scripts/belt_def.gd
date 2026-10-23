@@ -11,8 +11,9 @@ extends Resource
 @export var orbit_radius: float = 6000.0
 ## Full radial width in metres. Asteroids cluster toward the middle.
 @export var width: float = 900.0
-## Max distance above/below the play plane.
-@export var vertical_spread: float = 30.0
+## Max rock centre height above/below the plane (half the band's
+## thickness), metres. Heights are gaussian, densest at the midplane.
+@export var vertical_spread: float = 400.0
 @export var count: int = 12000
 @export var min_scale: float = 2.0
 @export var max_scale: float = 25.0

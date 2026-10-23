@@ -1,6 +1,6 @@
 class_name RTSCamera
 extends Node3D
-## Tilted top-down RTS camera. This node is the pivot on the y = 0 plane; the
+## Tilted top-down RTS camera. This node is the pivot; the
 ## Camera3D child orbits it at [member distance] with a pitch that flattens up
 ## close and goes steeper (more top-down) far out. Inputs move targets; the view
 ## eases toward them (zoom eases in log space, so it feels exponential).
@@ -10,7 +10,9 @@ extends Node3D
 ## Focus/follow: double-click a node in the "focusable" group (planet, moon,
 ## station, gate, star) to fly to it and follow it. Any manual pan breaks the
 ## follow. Home flies to [member home_target] (or [member home_position]),
-## F fits the whole system.
+## F fits the whole system. The pivot sits at the followed node's height
+## (planets and the station ride inclined orbits); panning keeps the height
+## and drags on the level plane through the pivot.
 ##
 ## Focusable nodes may carry metas "focus_radius" (m, picking size) and
 ## "focus_distance" (m, camera distance after the fly).
@@ -181,7 +183,7 @@ func focus_on(target: Node3D, dist: float = -1.0, snap: bool = false) -> void:
 	_follow_anchor = Vector3.ZERO
 	_fly_rate = fly_smoothing
 	_target_dist = clampf(dist, min_distance, max_distance)
-	var tp := _ground(target.global_position)
+	var tp := target.global_position
 	_follow_offset = Vector3.ZERO if snap else _pos - tp
 	if snap:
 		_pos = tp
@@ -205,7 +207,7 @@ func frame_area(target: Node3D, center_offset: Vector3, radius: float, pitch_deg
 		distance_slack: Vector2 = Vector2(0.75, 1.6), pitch_range: Vector2 = Vector2(48.0, 80.0)) -> void:
 	if not is_instance_valid(target):
 		return
-	var center := _ground(target.global_position) + _ground(center_offset)
+	var center := target.global_position + _ground(center_offset)
 	var need := fit_distance_for(radius)
 	var dist := need
 	if keep_good and _target_dist >= need * distance_slack.x and _target_dist <= need * distance_slack.y:
@@ -216,13 +218,13 @@ func frame_area(target: Node3D, center_offset: Vector3, radius: float, pitch_deg
 		pitch = now
 	var anchor := _ground(center_offset)
 	if keep_good and _pos.distance_to(center) < radius * 0.25:
-		anchor = _pos - _ground(target.global_position)
+		anchor = _pos - target.global_position
 	var had := _follow
 	_follow = target
 	_follow_anchor = anchor
 	_fly_rate = frame_smoothing
 	_target_dist = clampf(dist, min_distance, max_distance)
-	var tp := _ground(target.global_position) + anchor
+	var tp := target.global_position + anchor
 	if snap:
 		_follow_offset = Vector3.ZERO
 		_pos = tp
@@ -267,14 +269,15 @@ func fit_system() -> void:
 	_target_dist = fit_distance if fit_distance > 0.0 else max_distance
 
 
-## Ray from the camera through a screen point, hit on the y = 0 plane.
-## Returns Vector3.INF when the ray does not reach the plane.
-func screen_to_ground(screen_pos: Vector2) -> Vector3:
+## Ray from the camera through a screen point, hit on the level plane at
+## [param height] (default the system plane y = 0; placement uses the
+## station's height). Returns Vector3.INF when the ray does not reach it.
+func screen_to_ground(screen_pos: Vector2, height: float = 0.0) -> Vector3:
 	var origin := camera.project_ray_origin(screen_pos)
 	var dir := camera.project_ray_normal(screen_pos)
 	if absf(dir.y) < 1e-5:
 		return Vector3.INF
-	var t := -origin.y / dir.y
+	var t := (height - origin.y) / dir.y
 	if t <= 0.0:
 		return Vector3.INF
 	return origin + dir * t
@@ -404,7 +407,7 @@ func _process(delta: float) -> void:
 	var k := 1.0 - exp(-smoothing * delta)
 	if is_instance_valid(_follow):
 		_follow_offset *= exp(-_fly_rate * delta)
-		_target_pos = _ground(_follow.global_position) + _follow_anchor
+		_target_pos = _follow.global_position + _follow_anchor
 		_pos = _target_pos + _follow_offset
 	else:
 		_follow = null
@@ -479,8 +482,8 @@ func _orbit(rel: Vector2) -> void:
 ## Grab-and-drag: the ground point under the cursor stays under the cursor.
 func _drag_pan(from_px: Vector2, to_px: Vector2) -> void:
 	stop_follow()
-	var a := screen_to_ground(from_px)
-	var b := screen_to_ground(to_px)
+	var a := screen_to_ground(from_px, _pos.y)
+	var b := screen_to_ground(to_px, _pos.y)
 	var delta := Vector3.ZERO
 	var max_jump := _dist * 4.0
 	if a != Vector3.INF and b != Vector3.INF and a.distance_to(b) < max_jump \
@@ -540,9 +543,9 @@ static func _ground(p: Vector3) -> Vector3:
 
 func _clamp_to_bounds(p: Vector3) -> Vector3:
 	if bounds_radius > 0.0:
-		var g := _ground(p)
-		return g.limit_length(bounds_radius)
+		var g := _ground(p).limit_length(bounds_radius)
+		return Vector3(g.x, p.y, g.z)
 	return Vector3(
 			clampf(p.x, bounds.position.x, bounds.end.x),
-			0.0,
+			p.y,
 			clampf(p.z, bounds.position.y, bounds.end.y))

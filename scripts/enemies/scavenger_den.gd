@@ -177,7 +177,7 @@ func spawn(raid: bool = false, out_already: bool = false) -> ScavengerShip:
 	var pos := mouth + out_dir * (_rng.randf_range(120.0, 400.0) if out_already else 6.0)
 	if out_already:
 		pos += out_dir.cross(Vector3.UP) * _rng.randf_range(-250.0, 250.0)
-	pos.y = 0.0
+	pos.y = mouth.y
 	var root := SpaceNav.space_root(get_tree())
 	root.add_child(s)
 	s.global_position = pos

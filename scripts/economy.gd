@@ -17,6 +17,8 @@ extends Node
 signal changed(credits: int, materials: int)
 ## Credits that came in (fees, grant). [param source] is a short reason.
 signal income(amount: int, source: String)
+## A cargo shuttle landed [param ore] (Ore order) at the station.
+signal cargo_received(ore: PackedInt32Array, source: String)
 
 enum Ore { IRON, TITANIUM, CRYSTAL }
 
@@ -160,6 +162,12 @@ func add(add_credits: int, add_ore: PackedInt32Array = PackedInt32Array()) -> vo
 	for i in mini(add_ore.size(), ore.size()):
 		ore[i] += add_ore[i]
 	changed.emit(credits, materials)
+
+
+## Ore a cargo shuttle brought to the station (CargoShuttle): into the stock.
+func receive_cargo(cargo_ore: PackedInt32Array, source: String) -> void:
+	add(0, cargo_ore)
+	cargo_received.emit(cargo_ore, source)
 
 
 func add_ore_of(type: Ore, amount: int) -> void:

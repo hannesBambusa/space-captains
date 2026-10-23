@@ -12,8 +12,12 @@ extends Node3D
 ## buys a new ship ([member BuildingDef.ship_cost]) or the player pays for one
 ## ([method buy_replacement]). [method adopt] gives an existing captain a ship
 ## here (career switch). Ship sales pay [constant SHIP_SALE_SHARE] back to the
-## player. Defs with a service script (the Outfitter) get that node as a
-## child ([method get_service]).
+## player. Station addons (BuildingDef.station_addon: Factory, Outfitter)
+## are Buildings too, placed on a station bay ([member bay]). Defs with a
+## service script (the Outfitter) get that node as a child
+## ([method get_service]). Defs with BuildingDef.max_shuttles get a
+## [CargoDepot] ([method get_cargo_depot]): deliveries wait there and cargo
+## shuttles fly them to the station.
 
 signal state_changed(building: Building)
 signal hires_changed(building: Building)
@@ -55,6 +59,8 @@ var ships: Array[Ship] = []
 var waiting: Array[Captain] = []
 ## Shared by all buildings unless the manager hands out its own.
 var captain_rng: RandomNumberGenerator
+## Station addon bay (1..BuildingManager.BAY_COUNT) this addon sits in, 0 = not an addon.
+var bay: int = 0
 
 var _model: Node3D
 var _construction_mat: ShaderMaterial
@@ -62,6 +68,7 @@ var _bar: MeshInstance3D
 var _bar_mat: ShaderMaterial
 var _model_box: AABB
 var _service: Node
+var _depot: CargoDepot
 var _unload_fx: OutpostUnloadFx
 var _wait_timer := 0.0
 
@@ -85,7 +92,7 @@ func setup(building_def: BuildingDef, label: String, start_time: float) -> void:
 
 func _ready() -> void:
 	add_to_group(SimStepper.GROUP)
-	_model = ModelLoader.instantiate(def.model_path, ModelLoader.building_placeholder.bind(def.footprint_radius, def.placeholder_tint))
+	_model = def.instantiate_model()
 	add_child(_model)
 	ModelLoader.dim_emission(_model)
 	MeshUtil.set_layers_recursive(_model, RENDER_LAYER)
@@ -98,6 +105,11 @@ func _ready() -> void:
 			add_child(_service)
 			if _service.has_method(&"setup"):
 				_service.call(&"setup", self)
+	if def.max_shuttles > 0:
+		_depot = CargoDepot.new()
+		_depot.name = "CargoDepot"
+		_depot.setup(self)
+		add_child(_depot)
 	if state == State.CONSTRUCTING:
 		_apply_construction_look(true)
 		_update_construction()
@@ -137,6 +149,11 @@ func get_unload_fx() -> OutpostUnloadFx:
 	return _unload_fx
 
 
+## The cargo depot (outposts with shuttles) or null.
+func get_cargo_depot() -> CargoDepot:
+	return _depot
+
+
 ## The service node (Outfitter) or null.
 func get_service() -> Node:
 	return _service
@@ -145,6 +162,21 @@ func get_service() -> Node:
 ## The instanced model (or its placeholder).
 func get_model() -> Node3D:
 	return _model
+
+
+## Centre of the model on its base plane, building space. Addons extend
+## outward from their attach point, so picking and the selection ring use
+## this instead of the origin.
+func local_center() -> Vector3:
+	if bay <= 0 or _model == null:
+		return Vector3.ZERO
+	var c := _model_box.get_center()
+	return Vector3(c.x, 0.0, c.z)
+
+
+## [method local_center] in world space.
+func pick_center() -> Vector3:
+	return global_transform * local_center()
 
 
 func get_progress() -> float:
@@ -389,6 +421,16 @@ func undock_path(index: int) -> Array[ShipMover.Waypoint]:
 	return pts
 
 
+## Direction ships leave the dock, building space (see [method _dock_outward]).
+func dock_outward() -> Vector3:
+	return _dock_outward()
+
+
+## Spawn point just outside the dock mouth, building space.
+func spawn_local() -> Vector3:
+	return _spawn()
+
+
 func _dock() -> Vector3:
 	return get_point("dock_point", Vector3(def.footprint_radius, 0.0, 0.0))
 
@@ -474,5 +516,5 @@ func _make_bar() -> void:
 	_bar_mat.set_shader_parameter("back_color", Color(0.03, 0.05, 0.08, 0.85))
 	_bar_mat.set_shader_parameter("border_color", Color(0.75, 0.82, 0.9, 0.7))
 	_bar.material_override = _bar_mat
-	_bar.position = Vector3(0.0, _model_box.end.y + 4.0, 0.0)
+	_bar.position = local_center() + Vector3(0.0, _model_box.end.y + 4.0, 0.0)
 	add_child(_bar)

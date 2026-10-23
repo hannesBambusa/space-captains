@@ -17,4 +17,6 @@ max_hires = 4
 hire_cost_credits = 200
 hire_role = "Miner"
 hire_ship_path = "res://assets/models/ships/miner.glb"
+max_shuttles = 3
+shuttle_capacity = 60
 ship_cost = 400

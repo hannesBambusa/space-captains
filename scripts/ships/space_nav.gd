@@ -9,6 +9,9 @@ extends RefCounted
 ## Bodies ([method obstacles]): each has a hard radius (the visible body:
 ## surface, atmosphere shell or rings, plus [constant SHIP_MARGIN]) no ship
 ## may ever cross, and a larger planning radius routes keep to (NavRoute).
+## Both are spheres: bodies on inclined orbits sit above or below the plane,
+## and a ship only steers round the circle the sphere cuts at its height
+## ([method slice_radius]).
 ##
 ## The orbit chain (planet -> moon/station -> structures frame -> building) never
 ## rotates, so a node's world velocity is the sum of its Orbiter ancestors'
@@ -23,6 +26,10 @@ const ROCK_BAND_SLACK := 4.0
 
 ## Kept between a ship and a body's visible edge, metres.
 const SHIP_MARGIN := 30.0
+## Home Station hard / planning radius, m: the hub plus the addons on its
+## bays (they reach ~92 m) and the solar wings (~87 m).
+const STATION_HARD_RADIUS := 100.0
+const STATION_PLAN_RADIUS := 140.0
 ## Planning radius beyond the hard radius: this share of it, clamped
 ## (metres), plus [constant PLAN_PAD_SPEED] sim seconds of the body's speed
 ## (fast moons get a wider berth).
@@ -61,13 +68,27 @@ static func world_velocity(node: Node) -> Vector3:
 	return v
 
 
-## Orbital velocity of one Orbiter relative to its parent.
+## Orbital velocity of one Orbiter relative to its parent (3D: inclined
+## orbits rise and sink).
 static func orbit_velocity(o: Orbiter) -> Vector3:
-	if o.orbit_period == 0.0 or o.orbit_radius == 0.0:
-		return Vector3.ZERO
-	var a := o.orbit_angle(SimClock.time)
-	var w := TAU / o.orbit_period
-	return Vector3(-sin(a), 0.0, cos(a)) * o.orbit_radius * w
+	return o.orbit_velocity_at(SimClock.time)
+
+
+## Radius of the circle a body's sphere of [param radius] cuts at
+## [param dy] metres above or below its centre; 0 = the height clears it.
+static func slice_radius(radius: float, dy: float) -> float:
+	var r2 := radius * radius - dy * dy
+	return sqrt(r2) if r2 > 0.0 else 0.0
+
+
+## Smallest height gap between [param y] and the band [param span] (x = low,
+## y = high), 0 inside it.
+static func height_gap(y: float, span: Vector2) -> float:
+	if y < span.x:
+		return span.x - y
+	if y > span.y:
+		return y - span.y
+	return 0.0
 
 
 ## Velocity of a point riding on a rotating belt (belt centred on the origin).
@@ -182,7 +203,7 @@ static func obstacles(tree: SceneTree) -> Array[Dictionary]:
 			if c is PlanetBody:
 				_add_obstacle(c as PlanetBody, body_reach((c as PlanetBody).def) + SHIP_MARGIN)
 	if sys.home_station:
-		_obstacles.append({"node": sys.home_station, "radius": 70.0, "plan": 110.0})
+		_obstacles.append({"node": sys.home_station, "radius": STATION_HARD_RADIUS, "plan": STATION_PLAN_RADIUS})
 	return _obstacles
 
 
@@ -212,9 +233,7 @@ static func predict_position(node: Node3D, ahead: float) -> Vector3:
 	var n: Node = node
 	while n is Node3D:
 		if n is Orbiter:
-			var o := n as Orbiter
-			var a := o.orbit_angle(t)
-			offset += Vector3(cos(a), 0.0, sin(a)) * o.orbit_radius
+			offset += (n as Orbiter).orbit_offset(t)
 			n = n.get_parent()
 		else:
 			return (n as Node3D).global_position + offset

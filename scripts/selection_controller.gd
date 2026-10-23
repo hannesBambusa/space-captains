@@ -73,7 +73,7 @@ func select(target: Node3D) -> void:
 	if target is Building:
 		var b := target as Building
 		_ring = RingUtil.make_ring(b.def.footprint_radius * ring_scale, RING_COLOR, 2.2, 96)
-		_ring.position.y = 0.5
+		_ring.position = b.local_center() + Vector3(0.0, 0.5, 0.0)
 		b.add_child(_ring)
 	elif target is Ship:
 		var hostile := (target as Ship).is_hostile()
@@ -104,7 +104,8 @@ func deselect() -> void:
 	select(null)
 
 
-## Building whose footprint covers [param screen_pos], or null.
+## Building whose footprint covers [param screen_pos], or null. Station
+## addons are picked around their body (Building.pick_center), not the bay.
 func pick_building(screen_pos: Vector2) -> Building:
 	var cam := get_viewport().get_camera_3d()
 	if cam == null or manager == null:
@@ -113,11 +114,14 @@ func pick_building(screen_pos: Vector2) -> Building:
 	var best: Building = null
 	var best_score := INF
 	for b in manager.buildings:
-		if not is_instance_valid(b) or cam.is_position_behind(b.global_position):
+		if not is_instance_valid(b):
 			continue
-		var d := cam.global_position.distance_to(b.global_position)
+		var at := b.pick_center()
+		if cam.is_position_behind(at):
+			continue
+		var d := cam.global_position.distance_to(at)
 		var r_px := maxf(b.def.footprint_radius / maxf(d, 1.0) * px_per_rad, min_pick_px)
-		var off := cam.unproject_position(b.global_position).distance_to(screen_pos)
+		var off := cam.unproject_position(at).distance_to(screen_pos)
 		if off <= r_px and off / r_px < best_score:
 			best_score = off / r_px
 			best = b

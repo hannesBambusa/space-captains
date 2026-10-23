@@ -448,7 +448,13 @@ func _rebuild_structures() -> void:
 	var sys := hud.solar_system
 	if sys.home_station:
 		var host := sys.home_station.get_parent() as PlanetBody
-		_structure_rows.append(_add_row(_structures, sys.home_station, "Home Station", "%s orbit" % host.def.name if host else ""))
+		var sub := "%s orbit" % host.def.name if host else ""
+		var station_row := _add_row(_structures, sys.home_station, "Home Station", sub)
+		if hud.manager:
+			var bays := "Addon bays: %d/%d used" % [hud.manager.used_bays(), BuildingManager.BAY_COUNT]
+			station_row.set_subtitle("%s, bays %d/%d" % [sub, hud.manager.used_bays(), BuildingManager.BAY_COUNT] if not sub.is_empty() else bays)
+			station_row.tooltip_text = bays
+		_structure_rows.append(station_row)
 	if hud.manager:
 		for b in hud.manager.buildings:
 			if not is_instance_valid(b):

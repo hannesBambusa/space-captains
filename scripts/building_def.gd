@@ -25,18 +25,38 @@ extends Resource
 ## Optional service node added to the building when placed (e.g. Outfitter).
 @export var service_script: Script
 
-@export_group("Link")
-## Stands on its own (defense turrets): no corridor, placed anywhere in the
-## build zone clear of other footprints, corridors and docking lanes; not a
-## link target for other structures, not part of the complex bounds.
+@export_group("Placement")
+## Stands on its own (defense turrets): placed anywhere in the build zone
+## clear of other footprints and docking lanes; not part of the complex
+## bounds (the shield bubble does not stretch for it).
 @export var standalone: bool = false
 ## Radius of a range ring shown around the placement ghost, m (0 = none).
 @export var preview_range: float = 0.0
-## Clear gap kept to other structures, m. -1 = CorridorNetwork.min_gap.
-## Small structures (turrets) sit closer to the complex on a short strut.
-@export var link_gap: float = -1.0
-## Longest corridor link, m. -1 = CorridorNetwork.max_link.
-@export var link_reach: float = -1.0
+## Clear gap kept to other structures, m. -1 = BuildingManager.min_gap.
+## Small structures (turrets) may sit closer.
+@export var min_gap: float = -1.0
+
+@export_group("Cargo shuttles")
+## Most cargo shuttles this structure runs to the station (CargoDepot). 0 =
+## none: deliveries go straight into the player's stock.
+@export var max_shuttles: int = 0
+## Units one shuttle carries per trip.
+@export var shuttle_capacity: int = 60
+## > 0: no cargo, the shuttle flies a cosmetic supply run this often, sim
+## seconds (the Mercenary Outpost).
+@export var shuttle_supply_interval: float = 0.0
+
+@export_group("Station addon")
+## Built onto one of the Home Station's addon bays (BuildingManager.BAY_COUNT)
+## instead of standing on the plane: no footprint or zone checks. The
+## model's origin is the attach point, its body along +Z (radially outward). The build menu lists addons in their own group.
+@export var station_addon: bool = false
+## Used while [member model_path] is missing (e.g. the old standalone model),
+## scaled by [member addon_fallback_scale] and moved by
+## [member addon_fallback_offset] so it sits outward of the bay.
+@export_file("*.glb", "*.tscn") var addon_fallback_model_path: String = ""
+@export var addon_fallback_scale: float = 1.0
+@export var addon_fallback_offset: Vector3 = Vector3.ZERO
 
 @export_group("Hiring")
 ## Max ships this building can hold. 0 = no hiring.
@@ -64,6 +84,21 @@ extends Resource
 ## Ore cost in Economy.Ore order.
 func cost_ore() -> PackedInt32Array:
 	return Economy.cost(cost_iron, cost_titanium)
+
+
+## The building's model: [member model_path], else (addons) the scaled
+## fallback model, else the procedural placeholder.
+func instantiate_model() -> Node3D:
+	var placeholder := ModelLoader.building_placeholder.bind(footprint_radius, placeholder_tint)
+	if not station_addon or (not model_path.is_empty() and ResourceLoader.exists(model_path)):
+		return ModelLoader.instantiate(model_path, placeholder)
+	var inner := ModelLoader.instantiate(addon_fallback_model_path, placeholder)
+	inner.scale = Vector3.ONE * addon_fallback_scale
+	inner.position = addon_fallback_offset
+	var root := Node3D.new()
+	root.name = "addon_fallback"
+	root.add_child(inner)
+	return root
 
 
 func can_hire() -> bool:

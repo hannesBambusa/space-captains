@@ -20,6 +20,12 @@ enum Type { ROCKY, OCEAN, DESERT, ICE, LAVA, GAS_GIANT }
 ## Seconds per orbit at 1x sim speed. 0 = fixed in place.
 @export var orbit_period: float = 600.0
 @export_range(0.0, 360.0, 0.1, "degrees") var start_angle_deg: float = 0.0
+## Tilt of the orbit plane against the parent's plane (the system plane for
+## a planet, the planet's orbit plane for a moon). Planets 2 to 8, moons 5 to 20.
+@export_range(0.0, 30.0, 0.1, "degrees") var inclination_deg: float = 3.0
+## Longitude of the ascending node: where the orbit crosses the parent's
+## plane going up (0 = +X, 90 = +Z).
+@export_range(0.0, 360.0, 0.1, "degrees") var ascending_node_deg: float = 0.0
 
 @export_group("Spin")
 ## Seconds per rotation at 1x sim speed. 0 = no spin. Negative = retrograde.
@@ -41,3 +47,8 @@ enum Type { ROCKY, OCEAN, DESERT, ICE, LAVA, GAS_GIANT }
 ## PlanetDef entries. Typed as Resource because a script that holds a typed
 ## array of itself leaks at exit (cyclic script reference).
 @export var moons: Array[Resource] = []
+
+
+## Orbit plane relative to the parent's plane (see Orbiter.inclined_basis).
+func orbit_plane() -> Basis:
+	return Orbiter.inclined_basis(inclination_deg, ascending_node_deg)

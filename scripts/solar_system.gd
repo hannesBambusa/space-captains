@@ -1,7 +1,9 @@
 class_name SolarSystem
 extends Node3D
 ## Builds a whole star system from a SystemDef and keeps it moving with the sim
-## clock (autoload SimClock). Star at the origin, everything on the y = 0 plane.
+## clock (autoload SimClock). Star at the origin. A thick disc: planets orbit
+## on inclined planes (moons more), belts are thick rock bands around y = 0,
+## gates sit on the plane and dens above or below it (DenDef.height).
 ##
 ## Children built at runtime: Star, one PlanetBody per planet (moons and the
 ## home station orbit inside their planet's node), SystemBelts, JumpGates,
@@ -125,11 +127,11 @@ func _build() -> void:
 
 	for pdef in def.planets:
 		var body := _add_planet(pdef, self)
-		_add_orbit_line(lines, pdef.orbit_radius, _orbit_mat, Color(0.55, 0.72, 1.0, 0.12))
+		_add_orbit_line(lines, pdef.orbit_radius, _orbit_mat, Color(0.55, 0.72, 1.0, 0.12), body.orbit_basis)
 		_add_label(body, pdef.name.to_upper(), pdef.radius * (pdef.ring_outer if pdef.has_rings else 1.0), 1.0)
 		for mdef: PlanetDef in pdef.moons:
-			_add_planet(mdef, body)
-			_add_orbit_line(body, mdef.orbit_radius, _moon_orbit_mat, Color(0.6, 0.7, 0.9, 0.12))
+			var moon := _add_planet(mdef, body)
+			_add_orbit_line(body, mdef.orbit_radius, _moon_orbit_mat, Color(0.6, 0.7, 0.9, 0.12), moon.orbit_basis)
 
 	if not def.station_planet.is_empty():
 		_add_station(def)
@@ -177,8 +179,8 @@ func _add_den(ddef: DenDef) -> void:
 	var a := deg_to_rad(ddef.angle_deg)
 	var den := ScavengerDen.new()
 	den.setup(ddef, belt)
-	den.position = Vector3(cos(a), 0.0, sin(a)) * r
-	var inward := -den.position * signf(ddef.radial_offset if ddef.radial_offset != 0.0 else 1.0)
+	den.position = Vector3(cos(a), 0.0, sin(a)) * r + Vector3.UP * ddef.height
+	var inward := -Vector3(den.position.x, 0.0, den.position.z) * signf(ddef.radial_offset if ddef.radial_offset != 0.0 else 1.0)
 	den.rotation.y = atan2(inward.x, inward.z)
 	add_child(den)
 	dens.append(den)
@@ -225,7 +227,8 @@ func _add_station(def: SystemDef) -> void:
 	home_station.add_child(core)
 	var dock := OmniLight3D.new()
 	dock.name = "DockLight"
-	dock.position = Vector3(45.0, 12.0, 45.0)
+	# Over the first docking pad (read from the station model when it has one).
+	dock.position = station.transform * station.dock_pad(0) + Vector3(0.0, 12.0, 0.0)
 	dock.light_color = Color(1.0, 0.7, 0.42)
 	dock.light_energy = 2.0
 	dock.omni_range = 90.0
@@ -242,9 +245,10 @@ func _make_orbit_material(px: float) -> ShaderMaterial:
 	return m
 
 
-func _add_orbit_line(parent: Node3D, radius: float, mat: ShaderMaterial, color: Color) -> void:
+func _add_orbit_line(parent: Node3D, radius: float, mat: ShaderMaterial, color: Color, plane: Basis = Basis.IDENTITY) -> void:
 	var mi := MeshInstance3D.new()
 	mi.name = "Orbit"
+	mi.basis = plane
 	mi.mesh = MeshUtil.make_orbit_strip(radius, clampi(int(radius / 25.0), 128, 1024))
 	mi.material_override = mat
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

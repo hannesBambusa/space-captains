@@ -24,4 +24,6 @@ inner_berths = 1
 berth_depth = 10.0
 outer_berth_side = 24.0
 outer_berth_step = 19.0
+max_shuttles = 1
+shuttle_supply_interval = 90.0
 ship_cost = 600

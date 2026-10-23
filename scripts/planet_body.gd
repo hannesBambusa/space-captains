@@ -4,6 +4,8 @@ extends Orbiter
 ## (shaders/planet.gdshader, look picked by type), an optional atmosphere shell
 ## and an optional ring. The node itself only orbits; children carry tilt/spin.
 ## Light comes from the star position, computed per fragment in the shaders.
+## The orbit is inclined (PlanetDef.inclination_deg); moons' planes stack on
+## their planet's.
 
 const PLANET_SHADER: Shader = preload("res://shaders/planet.gdshader")
 const ATMO_SHADER: Shader = preload("res://shaders/atmosphere.gdshader")
@@ -88,7 +90,12 @@ func build(planet_def: PlanetDef, star_position: Vector3, star_color: Color) -> 
 		_surface_mat.set_shader_parameter("ring_shadow", 0.8)
 		_surface_mat.set_shader_parameter("ring_inner", def.ring_inner)
 		_surface_mat.set_shader_parameter("ring_outer", def.ring_outer)
-	setup_orbit(def.orbit_radius, def.orbit_period, def.start_angle_deg)
+	# A moon's inclination is against its planet's orbit plane.
+	var plane := def.orbit_plane()
+	var parent_body := get_parent() as Orbiter
+	if parent_body:
+		plane = parent_body.orbit_basis * plane
+	setup_orbit(def.orbit_radius, def.orbit_period, def.start_angle_deg, plane)
 
 
 func update_sim(sim_time: float) -> void:

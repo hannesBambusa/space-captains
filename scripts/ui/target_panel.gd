@@ -5,7 +5,9 @@ extends PanelContainer
 ## bounties posted on them (with cancel) and the "Post bounty" form with a
 ## reward stepper. Scrap fields: scrap amount and time left, the salvage
 ## contracts on it and the "Post salvage contract" form (a per-load bonus on
-## top of the yard's pay; salvagers also work fields without one).
+## top of the yard's pay; salvagers also work fields without one). Cargo
+## shuttles: owner, what they carry where ("Cargo shuttle, Mining Outpost 1:
+## carrying 48 iron to the station") and the trip count, no contract form.
 
 @export var panel_width: float = 380.0
 @export var reward_min: int = 50
@@ -138,7 +140,7 @@ func show_target(t: Node3D) -> void:
 		return
 	var hostile := t is ScavengerDen or t is ScavengerShip
 	_bounty_box.visible = hostile or t is ScrapField
-	_bars.visible = hostile
+	_bars.visible = hostile or t is CargoShuttle
 	if changed:
 		reward = den_reward if t is ScavengerDen else (salvage_reward if t is ScrapField else ship_reward)
 	_contracts_header.text = "SALVAGE CONTRACTS" if t is ScrapField else "BOUNTIES"
@@ -152,6 +154,9 @@ func show_target(t: Node3D) -> void:
 		var sc := t as ScavengerShip
 		_header.text = "SCAVENGER"
 		_info.text = "Junk raider from %s. Hunts loaded miners and steals cargo." % (sc.den.get_display_name() if is_instance_valid(sc.den) else "a destroyed hideout")
+	elif t is CargoShuttle:
+		_header.text = "CARGO SHUTTLE"
+		_info.text = ""
 	elif t is ScrapField:
 		_header.text = "SCRAP FIELD"
 		var sf := t as ScrapField
@@ -164,7 +169,7 @@ func show_target(t: Node3D) -> void:
 
 
 func _on_selection(t: Node3D) -> void:
-	if t is ScavengerDen or t is ScavengerShip or t is ScrapField:
+	if t is ScavengerDen or t is ScavengerShip or t is ScrapField or t is CargoShuttle:
 		show_target(t)
 	else:
 		show_target(null)
@@ -183,6 +188,10 @@ func _refresh() -> void:
 	if not is_instance_valid(target):
 		return
 	_status.text = String(target.call(&"get_status_text"))
+	if target is CargoShuttle:
+		var cs := target as CargoShuttle
+		_info.text = "%s: %s. Flies the outpost's goods to the station; the ore counts as yours when it lands. %d units delivered so far." % [
+				cs.get_display_name(), cs.get_status_text().to_lower(), cs.total_delivered]
 	var d := target.get(&"durability") as Durability
 	if d and _bars.visible:
 		_hull.value = d.fraction()

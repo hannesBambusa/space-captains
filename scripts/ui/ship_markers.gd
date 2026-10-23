@@ -16,12 +16,16 @@ extends Control
 ## all, hostiles plus selected, off. The choice lasts for the session.
 ## Mercenary fleets: a thin gold link from each wingman to its leader and a
 ## small badge with the fleet size on the leader's marker.
+## Height hint: a faint drop line from the ship down (or up) to its
+## reference plane (the station's plane near home, else the main plane)
+## with a small ground dot, for the selected, followed and hovered ship,
+## and for every ship once zoomed out past [member drop_line_zoom].
 ## One _draw for everything; per frame it only unprojects positions.
 
 signal mode_changed(mode: Mode)
 
 enum Mode { ALL, HOSTILES, OFF }
-enum Shape { MINER, MERCENARY, SALVAGER, POD, SCAVENGER, DEN }
+enum Shape { MINER, MERCENARY, SALVAGER, POD, SCAVENGER, DEN, SHUTTLE }
 enum Glyph { NONE, MINING, CARGO, FIGHT, FLEE, ESCORT, WARP }
 
 const MODE_NAMES: PackedStringArray = ["All", "Hostiles", "Off"]
@@ -29,6 +33,8 @@ const MINER_COLOR := Color(0.45, 0.9, 1.0)
 const MERC_COLOR := Color(0.62, 0.74, 1.0)
 const SALVAGER_COLOR := Color(0.55, 1.0, 0.8)
 const POD_COLOR := Color(0.95, 0.97, 1.0)
+## Cargo shuttles: small and neutral, so they do not crowd the captains.
+const SHUTTLE_COLOR := Color(0.7, 0.73, 0.78)
 const SCAVENGER_COLOR := Color(1.0, 0.32, 0.24)
 const RAIDER_COLOR := Color(1.0, 0.55, 0.2)
 const DEN_COLOR := Color(1.0, 0.3, 0.24)
@@ -57,6 +63,13 @@ static var session_mode: Mode = Mode.ALL
 @export var edge_margin_px: float = 30.0
 @export var hover_px: float = 13.0
 @export var click_slop_px: float = 4.0
+## Drop lines for every ship beyond this camera distance, metres (closer:
+## only the selected, followed and hovered ship).
+@export var drop_line_zoom: float = 5000.0
+## Ships closer than this to their reference plane get no drop line, metres.
+@export var drop_line_min_height: float = 12.0
+## Near the station (flat distance) the reference plane is the station's, metres.
+@export var station_plane_radius: float = 3500.0
 
 var hud: HUD
 var mode: Mode = Mode.ALL
@@ -78,6 +91,7 @@ var _tooltip_label: Label
 var _tooltip_timer := 0.0
 var _font: Font
 var _px_per_rad := 1.0
+var _zoomed_out := false
 
 
 class Entry:
@@ -98,6 +112,8 @@ class Entry:
 	var hostile := false
 	var emphasis := false
 	var priority := 0
+	## Screen point of the drop line's foot (INF = no line).
+	var drop := Vector2.INF
 
 
 func _ready() -> void:
@@ -175,6 +191,8 @@ static func color_for(n: Node3D) -> Color:
 			return MERC_COLOR
 		Ship.Role.SALVAGER:
 			return SALVAGER_COLOR
+		Ship.Role.SHUTTLE:
+			return SHUTTLE_COLOR
 	return POD_COLOR
 
 
@@ -184,6 +202,8 @@ static func short_name(n: Node3D) -> String:
 		return (n as ScavengerShip).callsign
 	if n is EscapePod:
 		return "%s (pod)" % (n as Ship).get_display_name()
+	if n is CargoShuttle:
+		return "Shuttle"
 	if n.has_method(&"get_display_name"):
 		return String(n.call(&"get_display_name"))
 	return String(n.name)
@@ -250,6 +270,7 @@ func _process(delta: float) -> void:
 	var selected := hud.selection.selected if hud.selection else null
 	var followed := hud.camera.get_follow_target() if hud.camera else null
 	var home := _home_position()
+	_zoomed_out = dist > drop_line_zoom
 	var screen := vp.grow(20.0)
 	for n in get_tree().get_nodes_in_group(Ship.GROUP):
 		var s := n as Ship
@@ -272,6 +293,7 @@ func _process(delta: float) -> void:
 			continue
 		var e := _next_entry()
 		_fill_ship(e, s, cam, sp, emphasis)
+		_fill_drop(e, s, cam, p, home)
 	if hud.solar_system:
 		for d in hud.solar_system.dens:
 			if not is_instance_valid(d) or d.dead or not d.is_inside_tree():
@@ -339,6 +361,24 @@ func _fill_ship(e: Entry, s: Ship, cam: Camera3D, sp: Vector2, emphasis: bool) -
 		e.alpha *= 0.5
 	e.heading = _screen_heading(s, cam, sp, d)
 	e.priority = 0 if emphasis else (1 if e.hostile else 2)
+	if s is CargoShuttle and not emphasis:
+		e.priority = 3
+
+
+## Foot of the height hint, when this ship gets one this frame.
+func _fill_drop(e: Entry, s: Ship, cam: Camera3D, p: Vector3, home: Vector3) -> void:
+	e.drop = Vector2.INF
+	if not (e.emphasis or s == _hover_target or (_zoomed_out and not (s is CargoShuttle))) or s.is_docked():
+		return
+	var ref_y := 0.0
+	if home != Vector3.INF and Combat.flat_distance(p, home) < station_plane_radius:
+		ref_y = home.y
+	if absf(p.y - ref_y) < drop_line_min_height:
+		return
+	var foot := Vector3(p.x, ref_y, p.z)
+	if cam.is_position_behind(foot):
+		return
+	e.drop = cam.unproject_position(foot)
 
 
 func _fill_den(e: Entry, d: ScavengerDen, cam: Camera3D, sp: Vector2, emphasis: bool) -> void:
@@ -369,6 +409,8 @@ func _shape_for(s: Ship) -> Shape:
 			return Shape.SALVAGER
 		Ship.Role.POD:
 			return Shape.POD
+		Ship.Role.SHUTTLE:
+			return Shape.SHUTTLE
 	return Shape.MINER
 
 
@@ -387,6 +429,8 @@ func _glyph_for(s: Ship) -> Glyph:
 			ScavengerBrain.State.RETURNING:
 				return Glyph.CARGO if sc.loot > 0.0 else Glyph.NONE
 		return Glyph.NONE
+	if s is CargoShuttle:
+		return Glyph.CARGO if (s as CargoShuttle).cargo_total() > 0 else Glyph.NONE
 	var br := s.brain
 	if br == null:
 		return Glyph.FLEE if s is EscapePod else Glyph.NONE
@@ -646,6 +690,8 @@ func _draw() -> void:
 		var a := float(l["alpha"])
 		draw_line(l["from"] as Vector2, l["to"] as Vector2, Color(SHADOW, 0.5 * a), 3.0, true)
 		draw_dashed_line(l["from"] as Vector2, l["to"] as Vector2, Color(FLEET_COLOR, 0.7 * a), 1.3, 5.0, true, true)
+	for i in _count:
+		_draw_drop(_entries[i])
 	# Friendly first, hostiles over them, the emphasised ones on top.
 	for pass_i in 3:
 		for i in _count:
@@ -659,6 +705,23 @@ func _draw() -> void:
 		_draw_fleet_badge(fb)
 	for a in _arrows:
 		_draw_arrow(a)
+
+
+## Faint height line and ground dot (under the icons).
+func _draw_drop(e: Entry) -> void:
+	if e.drop == Vector2.INF:
+		return
+	var strong := e.emphasis or e == _hover
+	if not strong and not _zoomed_out:
+		return
+	var a := 0.55 if strong else 0.2
+	var col := Color(e.color, a)
+	draw_line(e.pos, e.drop, col, 1.0, true)
+	draw_circle(e.drop, 2.6 if strong else 1.8, Color(SHADOW, 0.5 * a))
+	draw_circle(e.drop, 1.6 if strong else 1.1, col)
+	if strong:
+		# A short tick across the foot reads as "on the plane".
+		draw_line(e.drop + Vector2(-4.0, 0.0), e.drop + Vector2(4.0, 0.0), Color(e.color, a * 0.7), 1.0, true)
 
 
 func _draw_entry(e: Entry) -> void:
@@ -724,6 +787,9 @@ static func _shape_points(shape: Shape) -> PackedVector2Array:
 			return PackedVector2Array([Vector2(0.0, -1.15), Vector2(0.8, 0.85), Vector2(0.0, 0.4), Vector2(-0.8, 0.85)])
 		Shape.SALVAGER:
 			return PackedVector2Array([Vector2(0.0, -1.1), Vector2(0.8, 0.0), Vector2(0.0, 1.0), Vector2(-0.8, 0.0)])
+		Shape.SHUTTLE:
+			# Small box with a blunt nose.
+			return PackedVector2Array([Vector2(0.0, -0.75), Vector2(0.5, -0.45), Vector2(0.5, 0.6), Vector2(-0.5, 0.6), Vector2(-0.5, -0.45)])
 		Shape.SCAVENGER:
 			return PackedVector2Array([Vector2(0.0, -1.15), Vector2(0.95, 0.9), Vector2(0.4, 0.55), Vector2(0.0, 0.95), Vector2(-0.4, 0.55), Vector2(-0.95, 0.9)])
 	# Miner: blunt hauler.

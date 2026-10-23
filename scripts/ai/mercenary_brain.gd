@@ -42,6 +42,8 @@ const ESCORT_GUARD_RADIUS := 1400.0
 ## Escort formation: side and back offsets from the miner, metres.
 const ESCORT_SIDE := 42.0
 const ESCORT_BACK := 26.0
+## Escort formation: height off the miner (left above, right below), metres.
+const ESCORT_RISE := 16.0
 ## A merc fights back against an attacker within this range, metres.
 const RETALIATE_RANGE := 1100.0
 ## Gives up waiting for a miner to launch after this long, sim seconds.
@@ -138,8 +140,31 @@ func can_warp() -> bool:
 	return false
 
 
+## Cruise arcs on bounty runs (solo, or leading a fleet en route), patrols
+## and trips home; fights, escorts and wingmen fly straight at their goal.
+func cruise_free() -> bool:
+	match state:
+		State.HUNTING:
+			return fleet == null or (fleet.leader == ship and fleet.state == MercFleet.State.EN_ROUTE)
+		State.PATROLLING, State.RETURNING:
+			return true
+	return false
+
+
 func warp_drop() -> float:
 	return HUNT_WARP_DROP if state == State.HUNTING else SpaceNav.WARP_DROP
+
+
+## Breaking off for repairs counts as fleeing (evasive dives under fire).
+func is_fleeing() -> bool:
+	return super.is_fleeing() or (state == State.RETURNING and retreating)
+
+
+## Fleet wingmen attack from their own plane, height and side (AttackRun).
+func attack_slot() -> Vector2i:
+	if fleet and fleet.members.has(ship):
+		return Vector2i(fleet.members.find(ship), fleet.members.size())
+	return Vector2i(0, 1)
 
 
 ## Wingmen follow the fleet leader's hops, escorts their miner's.
@@ -151,7 +176,7 @@ func warp_lead() -> ShipMover:
 		lead = _ward()
 	if lead == null or not is_instance_valid(lead) or lead.dead or lead.mover == null or not lead.mover.avoid_enabled:
 		return null
-	if Combat.flat_distance(lead.global_position, ship.global_position) > FORMATION_WARP_RANGE:
+	if lead.global_position.distance_to(ship.global_position) > FORMATION_WARP_RANGE:
 		return null
 	return lead.mover
 
@@ -600,7 +625,7 @@ func _pick_target() -> Node3D:
 	var pos := ship.global_position
 	# Fight back first.
 	var la := _last_attacker.get_ref() as Node3D if _last_attacker else null
-	if Combat.is_live_target(la) and ship.durability.seconds_since_hit() < 5.0 and Combat.flat_distance(pos, la.global_position) < RETALIATE_RANGE:
+	if Combat.is_live_target(la) and ship.durability.seconds_since_hit() < 5.0 and pos.distance_to(la.global_position) < RETALIATE_RANGE:
 		return la
 	match mode:
 		Mode.BOUNTY:
@@ -635,7 +660,7 @@ func _pick_target() -> Node3D:
 					best = h
 			return best
 	# Keep the current target while it stays close.
-	if Combat.is_live_target(combat_target) and Combat.flat_distance(pos, combat_target.global_position) < RETALIATE_RANGE:
+	if Combat.is_live_target(combat_target) and pos.distance_to(combat_target.global_position) < RETALIATE_RANGE:
 		return combat_target
 	return null
 
@@ -695,9 +720,11 @@ func _escort_step(dt: float) -> void:
 	fwd.y = 0.0
 	fwd = fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
 	var right := fwd.cross(Vector3.UP)
-	var pos := w.global_position + right * side * (ESCORT_SIDE + row * 26.0) - fwd * (ESCORT_BACK + row * 22.0)
+	# 3D slots: the left escort rides above the ward, the right one below.
+	var pos := w.global_position + right * side * (ESCORT_SIDE + row * 26.0) - fwd * (ESCORT_BACK + row * 22.0) \
+			- Vector3.UP * side * (ESCORT_RISE + row * 12.0)
 	var vel := w.get_world_velocity()
-	var face := fwd if Combat.flat_distance(ship.global_position, pos) < 120.0 else Vector3.ZERO
+	var face := fwd if ship.global_position.distance_to(pos) < 120.0 else Vector3.ZERO
 	ship.set_world_goal(pos, vel, face, 10.0)
 
 
@@ -720,7 +747,7 @@ func _waiting_spot(ec: EscortContract, w: Ship) -> Dictionary:
 	if b == null:
 		return {"pos": home_position(), "vel": Vector3.ZERO}
 	var p := b.to_global(b.approach_point() + Vector3(30.0, 0.0, 40.0))
-	return {"pos": Vector3(p.x, 0.0, p.z), "vel": SpaceNav.world_velocity(b)}
+	return {"pos": p, "vel": SpaceNav.world_velocity(b)}
 
 
 ## While flying home: shoot what crosses the nose, do not chase.

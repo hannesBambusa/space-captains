@@ -8,10 +8,19 @@ Textures are baked by station_textures.py (Cycles, a few minutes) into blender/t
 and embedded in the glb.
 
 Layout (Blender Z up, exported +Y up). Hub centre at origin, play plane z=0.
-  core drum r~13.5, habitation ring r 32..40, 4 spokes, 2 docking arms with pads
-  (45 and 225 deg), 2 solar wings (135 and 315 deg), comm dish on the tower.
-Hierarchy: station_home (empty root) -> station_core, station_ring, station_docks, station_solar.
+  core drum r~13.5, habitation ring r 32..40 (swept r <= 41.2), 4 spokes, comm dish on the
+  tower. Static outer frame ring r 43..45.6 (z +-1), carried by 6 struts under the
+  habitat ring from a lower spine collar on the underside cone (z ~-13).
+  6 addon bays on the frame at BAY_DEG (165 + k*60 deg), collar outer face at r BAY_R, z 0.
+  Each bay fits a module 30 wide x 25 tall x 45 long pointing radially out.
+  2 docking arms with pads (15 and 195 deg) and 2 solar wings (135 and 315 deg) sit in the
+  30 deg gaps between the bays.
+Hierarchy: station_home (empty root) -> station_core, station_ring, station_docks, station_solar,
+  station_bays, addon_bay_1..addon_bay_6 (empties).
 station_ring has its origin at the hub centre so Godot can spin it.
+addon_bay_N: Blender rot_z = angle + 90 deg, so its local -Y points radially out; after the
+glTF Y-up conversion that is the node's local +Z (Godot basis.z = outward, basis.y = up).
+Bay 1 (165 deg) faces Godot (-0.97, 0, -0.26), toward the old Factory site.
 """
 import math
 import os
@@ -27,6 +36,10 @@ import common  # noqa: E402
 import station_textures  # noqa: E402
 
 OUT = os.path.join(common.ROOT, "assets", "models", "station", "station_home.glb")
+BAY_R = 47.0                                   # collar outer face radius (attach point)
+BAY_DEG = [165.0 + 60.0 * k for k in range(6)]  # addon_bay_1 .. addon_bay_6
+DOCK_DEG = (15, 195)                           # docking arms, in the gaps between bays
+SOLAR_DEG = (135, 315)
 
 MATS = {}
 
@@ -345,19 +358,19 @@ def build_ring(rng):
 # ---------------------------------------------------------------- docks
 def build_docks(rng):
     p = Part("station_docks")
-    for a_deg in (45, 225):
+    for a_deg in DOCK_DEG:
         a = math.radians(a_deg)
         # Arm: dark truss + hull walkway with window strips + orange chevrons
-        p.box(polar(45.5, a, -0.4), (12.0, 3.2, 2.2), "dark", rot_z=a)
-        p.box(polar(45.0, a, 1.1), (11.0, 2.0, 1.2), "hull", rot_z=a)
+        p.box(polar(46.75, a, -0.4), (9.5, 3.2, 2.2), "dark", rot_z=a)
+        p.box(polar(46.75, a, 1.1), (8.5, 2.0, 1.2), "hull", rot_z=a)
         for side in (-1, 1):
             off = Vector((-math.sin(a), math.cos(a), 0)) * side * 1.02
-            p.box(polar(45.0, a, 1.1) + off, (9.0, 0.08, 0.35), "window", rot_z=a, bevel=0.0)
+            p.box(polar(46.75, a, 1.1) + off, (7.0, 0.08, 0.35), "window", rot_z=a, bevel=0.0)
         for k in range(3):
-            p.box(polar(42.5 + k * 2.4, a, 1.75), (0.6, 1.6, 0.1), "hazard", rot_z=a, bevel=0.0)
+            p.box(polar(44.5 + k * 2.2, a, 1.75), (0.6, 1.6, 0.1), "hazard", rot_z=a, bevel=0.0)
         # Truss cross braces under the arm
         for k in range(4):
-            p.box(polar(41.5 + k * 2.7, a, -1.7), (0.4, 3.6, 0.5), "dark", rot_z=a, bevel=0.0)
+            p.box(polar(43.0 + k * 2.4, a, -1.7), (0.4, 3.6, 0.5), "dark", rot_z=a, bevel=0.0)
         # Docking collar
         p.cyl(polar(51.0, a, 0.0), 2.2, 2.2, 3.6, "hull2", segs=12)
         # Pad: octagonal platform centred at r=57
@@ -391,16 +404,16 @@ def build_docks(rng):
 # ---------------------------------------------------------------- solar
 def build_solar(rng):
     p = Part("station_solar")
-    for a_deg in (135, 315):
+    for a_deg in SOLAR_DEG:
         a = math.radians(a_deg)
         side = Vector((-math.sin(a), math.cos(a), 0))
-        p.box(polar(58.0, a, 0.0), (37.0, 1.6, 1.6), "dark", rot_z=a, bevel=0.15)
-        p.box(polar(42.5, a, 0.0), (4.0, 3.6, 3.6), "hull2", rot_z=a)
-        p.box(polar(42.5, a, 1.85), (1.0, 3.7, 0.12), "orange", rot_z=a, bevel=0.0)
-        p.cyl(polar(77.0, a, 0.0), 1.2, 1.2, 2.0, "hull2", segs=10)
-        p.cyl(polar(77.0, a, 1.1), 0.4, 0.4, 0.3, "light", segs=6)
+        p.box(polar(65.0, a, 0.0), (42.0, 1.6, 1.6), "dark", rot_z=a, bevel=0.15)
+        p.box(polar(47.5, a, 0.0), (4.0, 3.6, 3.6), "hull2", rot_z=a)
+        p.box(polar(47.5, a, 1.85), (1.0, 3.7, 0.12), "orange", rot_z=a, bevel=0.0)
+        p.cyl(polar(86.0, a, 0.0), 1.2, 1.2, 2.0, "hull2", segs=10)
+        p.cyl(polar(86.0, a, 1.1), 0.4, 0.4, 0.3, "light", segs=6)
         for k in range(4):
-            r = 48.0 + k * 7.5
+            r = 57.0 + k * 7.5   # inner panel edge r 53.7 clears the bay modules
             for sgn in (-1, 1):
                 pc = polar(r, a, 0.15) + side * sgn * 6.4
                 p.box(polar(r, a, 0.0) + side * sgn * 1.5, (0.6, 1.8, 0.5), "dark", rot_z=a, bevel=0.0)
@@ -416,13 +429,92 @@ def build_solar(rng):
     return p
 
 
+# ---------------------------------------------------------------- addon bays
+def bay_frame(a, r=BAY_R, z=0.0):
+    """Frame at radius r on bearing a: local +Z radially out, local +X tangential, +Y up."""
+    return (Matrix.Translation(polar(r, a, z)) @ Matrix.Rotation(a, 4, "Z")
+            @ Matrix.Rotation(math.pi / 2, 4, "Y") @ Matrix.Rotation(math.pi / 2, 4, "Z"))
+
+
+def bay_collar(p, a):
+    """Station half of the docking collar; its outer face lies at r = BAY_R.
+    Same flange as gen_station_addons.mating_collar (r 5.4, hazard ring r 3.6..4.6)."""
+    side = Vector((-math.sin(a), math.cos(a), 0))
+    # adapter block between the frame ring and the flange
+    p.box(polar(44.6, a, 0.0), (3.2, 13.0, 11.0), "hull2", rot_z=a, bevel=0.06)
+    p.box(polar(44.6, a, 5.6), (3.4, 13.2, 0.3), "orange", rot_z=a, bevel=0.0)
+    p.box(polar(44.6, a, -5.6), (3.4, 13.2, 0.3), "dark", rot_z=a, bevel=0.0)
+    for sgn in (-1, 1):
+        p.box(polar(44.6, a, 0.0) + side * sgn * 6.55, (2.6, 0.12, 8.0), "dark", rot_z=a,
+              bevel=0.0)
+    # flange, closed hatch in the middle; outer face exactly at BAY_R
+    prof = [(0.0, -0.15), (3.4, -0.15), (3.6, 0.0), (4.6, 0.0), (5.4, 0.0), (5.4, -1.0),
+            (0.0, -1.0)]
+    fm = {0: "dark", 1: "dark", 2: "hazard", 3: "hull", 4: "hull2", 5: "dark"}
+    p.lathe(prof, 24, lambda i, j: fm[j], matrix=bay_frame(a), start=math.pi / 24)
+    # hatch cross bars and latches
+    p.box(polar(BAY_R - 0.12, a, 0.0), (0.12, 6.4, 0.5), "hull2", rot_z=a, bevel=0.0)
+    p.box(polar(BAY_R - 0.12, a, 0.0), (0.12, 0.5, 6.4), "hull2", rot_z=a, bevel=0.0)
+    for k in range(4):
+        ang = math.pi / 4 + k * math.pi / 2
+        off = side * math.cos(ang) * 5.9 + Vector((0, 0, math.sin(ang) * 5.9))
+        p.box(polar(BAY_R - 0.6, a, 0.0) + off, (1.2, 0.9, 0.9), "dark", rot_z=a, bevel=0.0)
+    # docking guide lights on the adapter face corners
+    for sx in (-1, 1):
+        for sz in (-1, 1):
+            p.box(polar(46.25, a, sz * 4.6) + side * sx * 5.6, (0.15, 0.6, 0.6), "light",
+                  rot_z=a, bevel=0.0)
+    # strut: post down from the adapter, beam in under the habitat ring to the spine collar
+    p.box(polar(44.6, a, -9.9), (2.4, 2.4, 8.8), "dark", rot_z=a, bevel=0.1)
+    p.box(polar(25.0, a, -13.4), (38.0, 2.2, 2.0), "dark", rot_z=a, bevel=0.1)
+    p.box(polar(25.0, a, -12.3), (34.0, 1.2, 0.25), "hull2", rot_z=a, bevel=0.0)
+    p.box(polar(44.6, a, -14.2), (3.4, 3.2, 1.6), "hull2", rot_z=a)
+
+
+def build_bays(rng):
+    p = Part("station_bays")
+    # static frame ring just outside the habitat ring (swept r <= 41.2)
+    prof = [(43.0, -1.0), (45.6, -1.0), (45.6, 1.0), (43.0, 1.0), (43.0, -1.0)]
+    fmat = {0: "dark", 1: "hull2", 2: "dark", 3: "dark"}
+    p.lathe(prof, 96, lambda i, j: "orange" if (j == 2 and i % 8 == 4) else fmat[j])
+    for i in range(24):
+        a = 2 * math.pi * (i + 0.5) / 24
+        p.box(polar(44.3, a, 1.1), (2.2, 0.5, 0.25), "hull2", rot_z=a, bevel=0.0)
+    # lower spine collar on the underside cone, below the tanks
+    prof = [(5.0, -14.4), (9.6, -14.4), (10.2, -13.8), (10.2, -12.9), (9.6, -12.3), (5.6, -12.3)]
+    cmat = {0: "dark", 1: "dark", 2: "hull2", 3: "orange", 4: "hull2"}
+    p.lathe(prof, 36, lambda i, j: cmat[j])
+    for a_deg in BAY_DEG:
+        bay_collar(p, math.radians(a_deg))
+    return p
+
+
+def add_bay_empties(root):
+    """addon_bay_N at each collar face. rot_z = a + 90 deg: local -Y radially out, which the
+    glTF Y-up conversion turns into the node's local +Z."""
+    out = []
+    for k, a_deg in enumerate(BAY_DEG):
+        a = math.radians(a_deg)
+        e = bpy.data.objects.new(f"addon_bay_{k + 1}", None)
+        e.empty_display_type = "SINGLE_ARROW"
+        e.empty_display_size = 6.0
+        e.location = polar(BAY_R, a)
+        e.rotation_euler = (0.0, 0.0, a + math.pi / 2)
+        bpy.context.scene.collection.objects.link(e)
+        e.parent = root
+        out.append(e)
+    return out
+
+
 def build_station():
     rng = random.Random(4242)
     build_materials()
     root = bpy.data.objects.new("station_home", None)
     root.empty_display_type = "PLAIN_AXES"
     bpy.context.scene.collection.objects.link(root)
-    objs = [b(rng).finish(root) for b in (build_core, build_ring, build_docks, build_solar)]
+    objs = [b(rng).finish(root) for b in (build_core, build_ring, build_docks, build_solar,
+                                           build_bays)]
+    add_bay_empties(root)
     return root, objs
 
 
@@ -431,7 +523,7 @@ def main():
     common.reset_scene()
     root, objs = build_station()
     if "--no-textures" not in argv:
-        pads = [tuple(polar(57.5, math.radians(d))[:2]) for d in (45, 225)]
+        pads = [tuple(polar(57.5, math.radians(d))[:2]) for d in DOCK_DEG]
         station_textures.texture_station(objs, MATS, pads)
     total = 0
     for o in objs:

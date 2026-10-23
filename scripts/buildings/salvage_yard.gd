@@ -18,9 +18,11 @@ extends Node
 ##
 ## It sells that ore to the player at [member discount] times the Factory's
 ## current bid (FactoryMarket.willing_price; [constant FALLBACK_BID] without a
-## Factory). Bought ore goes into the player's stock (Economy), where the
-## Factory market's auto-sell can sell it on at the full price: the gap is
-## the player's margin. Auto-buy (on from the start) buys every
+## Factory). Bought ore is paid at once and waits at the yard's
+## [CargoDepot]; a cargo shuttle flies it to the station, where it goes into
+## the player's stock (Economy) and the Factory market's auto-sell can sell
+## it on at the full price: the gap is the player's margin. Auto-buy (on
+## from the start) buys every
 ## [member auto_buy_interval] s while the player keeps at least
 ## [member credit_floor] credits.
 
@@ -221,9 +223,14 @@ func buy(ore: int, units: int, floor_credits: int = 0) -> int:
 	if not Economy.spend(cost):
 		return 0
 	stock[ore] -= units
-	var got := PackedInt32Array([0, 0, 0])
-	got[ore] = units
-	Economy.add(0, got)
+	# Paid now; the ore waits at the yard's depot for a cargo shuttle.
+	var depot := CargoDepot.of(building)
+	if depot:
+		depot.add_stock(ore, units)
+	else:
+		var got := PackedInt32Array([0, 0, 0])
+		got[ore] = units
+		Economy.add(0, got)
 	funds += cost
 	total_sold[ore] += units
 	total_sales += cost

@@ -33,7 +33,7 @@ func _init() -> void:
 func _on_setup() -> void:
 	var mgr := building.get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
 	shield = StationShield.new()
-	shield.setup(self, mgr.links if mgr else null)
+	shield.setup(self, mgr)
 	var frame := building.get_parent()
 	if frame:
 		frame.add_child(shield)

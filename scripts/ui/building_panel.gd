@@ -22,6 +22,8 @@ var _title: Label
 var _status: Label
 var _progress: ProgressBar
 var _desc: Label
+## "Stock waiting: 37 iron, shuttles 2/3" (structures with a CargoDepot).
+var _cargo: Label
 var _hire_section: VBoxContainer
 var _hire_header: Label
 var _crew: VBoxContainer
@@ -77,6 +79,9 @@ func _ready() -> void:
 	_progress.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_progress.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	sh.add_child(_progress)
+	_cargo = UIUtil.label("", &"DimLabel")
+	_cargo.visible = false
+	v.add_child(_cargo)
 	_desc = UIUtil.label("", &"DimLabel")
 	_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_desc.custom_minimum_size.x = panel_width - 24.0
@@ -205,6 +210,7 @@ func _process(delta: float) -> void:
 		_refresh_crew_status()
 		if building.is_active() and building.get_service() is DefenseStructure:
 			_status.text = building.get_status_text()
+		_refresh_cargo()
 
 
 func _on_building_event(_b: Building) -> void:
@@ -220,6 +226,7 @@ func _refresh() -> void:
 	_status.add_theme_color_override("font_color", PipMeter.GOOD if b.is_active() else Color(1.0, 0.75, 0.45))
 	_progress.visible = not b.is_active()
 	_progress.value = b.get_progress()
+	_refresh_cargo()
 	_refresh_outfitter()
 	_hire_section.visible = b.def.can_hire()
 	if not b.def.can_hire():
@@ -231,6 +238,13 @@ func _refresh() -> void:
 	_hire_button.tooltip_text = why if not why.is_empty() else "Hire a %s captain. Their ship docks here." % b.def.hire_role.to_lower()
 	_hire_reason.text = why
 	_hire_reason.visible = not why.is_empty()
+
+
+func _refresh_cargo() -> void:
+	var depot := building.get_cargo_depot() if is_instance_valid(building) else null
+	_cargo.visible = depot != null and building.is_active()
+	if _cargo.visible:
+		_cargo.text = depot.summary_text()
 
 
 func _refresh_outfitter() -> void:

@@ -2,7 +2,8 @@ class_name ShipWeapon
 extends RefCounted
 ## Cannons of one ship. Fires alternately from the model's muzzle empties
 ## (muzzle_l, muzzle_r) at [member ShipStats.fire_rate] shots per second when
-## the target is in range and roughly ahead. Each shot rolls to hit
+## the target is in range and the guns bear on it (3D: heading and aim
+## pitch, see [method facing]). Each shot rolls to hit
 ## (accuracy, range, target dodge) and becomes a tracer in the
 ## ProjectilePool that deals its damage when it arrives. Shots at the
 ## station shield bubble always land on its surface.
@@ -38,17 +39,22 @@ func step(dt: float) -> void:
 
 
 func in_range(target: Node3D) -> bool:
-	return Combat.flat_distance(ship.global_position, target.global_position) <= stats.weapon_range + float(target.call(&"get_hit_radius"))
+	return ship.global_position.distance_to(target.global_position) <= stats.weapon_range + float(target.call(&"get_hit_radius"))
 
 
-## True when the nose points at [param target] within the fire cone.
+## True when the guns point at [param target] within the fire cone, in 3D:
+## the nose's heading and its aim pitch (Ship.gun_forward) against the
+## line to the target.
 func facing(target: Node3D, cone_deg: float = FIRE_CONE_DEG) -> bool:
 	var to := target.global_position - ship.global_position
-	to.y = 0.0
+	var s := ship as Ship
+	if s and Ship.flat_combat:
+		to.y = 0.0
 	if to.length() < 1.0:
 		return true
-	var fwd := ship.global_basis * Vector3.FORWARD
-	fwd.y = 0.0
+	var fwd := s.gun_forward() if s else ship.global_basis * Vector3.FORWARD
+	if s and Ship.flat_combat:
+		fwd.y = 0.0
 	return fwd.normalized().dot(to.normalized()) >= cos(deg_to_rad(cone_deg))
 
 

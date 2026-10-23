@@ -10,6 +10,11 @@ extends Node3D
 ##   that fades in where the meshes fade out.
 ## - far: a dust band annulus (shaders/belt_dust.gdshader).
 ##
+## The band is thick: rock heights are gaussian around y = 0 (denser near the
+## midplane, sigma [constant HEIGHT_SIGMA] of [member BeltDef.vertical_spread],
+## resampled past the spread), so lanes over and under it are high
+## ([method lane_altitude]).
+##
 ## The whole ring turns slowly with the sim clock. Per-asteroid data is kept
 ## (sorted by chunk) for gameplay queries; world positions include the rotation.
 
@@ -22,6 +27,10 @@ const LANE_MARGIN := 15.0
 ## Radial reach of asteroid centres as a share of the width (the centre
 ## line wobbles by 0.18 width on top of the clamped half width).
 const ROCK_REACH := 0.7
+## Rock height spread: gaussian sigma as a share of the vertical spread.
+const HEIGHT_SIGMA := 0.38
+## Share of the far dust light in each of the sheets above and below the midplane.
+const DUST_SIDE_SHARE := 0.22
 
 ## Target arc length of one chunk, metres.
 @export var chunk_arc: float = 1400.0
@@ -52,6 +61,8 @@ var _chunk_count := 0
 var _variant_names: Array[String] = []
 var _dust_mat: ShaderMaterial
 var _glint_mat: ShaderMaterial
+## Highest rock top above (or bottom below) the plane, metres (from the data).
+var _layer_height := 0.0
 
 
 func build(belt_def: BeltDef, star_position: Vector3, star_color: Color) -> void:
@@ -134,7 +145,7 @@ func rock_half_width() -> float:
 ## Height of the rock layer above (and below) the plane: the highest rock
 ## centre plus the largest radius, metres.
 func rock_layer_height() -> float:
-	return def.vertical_spread + def.max_scale
+	return _layer_height if _layer_height > 0.0 else def.vertical_spread + def.max_scale
 
 
 ## Height ships fly at over (or under) the belt, metres.
@@ -174,7 +185,7 @@ func contains_point(world_pos: Vector3) -> bool:
 		return false
 	var lp := global_transform.affine_inverse() * world_pos
 	var r := Vector2(lp.x, lp.z).length()
-	return absf(r - def.orbit_radius) <= def.width * 0.5 and absf(lp.y) <= def.vertical_spread + def.max_scale
+	return absf(r - def.orbit_radius) <= def.width * 0.5 and absf(lp.y) <= rock_layer_height()
 
 
 func get_ore_fraction() -> float:
@@ -252,10 +263,16 @@ func _generate() -> Dictionary:
 				break
 		var center_r := def.orbit_radius + wobble.get_noise_1d(angle * circumference / TAU / 6000.0) * def.width * 0.18
 		var r := center_r + clampf(rng.randfn(0.0, sigma), -def.width * 0.5, def.width * 0.5)
-		var y := clampf(rng.randfn(0.0, def.vertical_spread * 0.4), -def.vertical_spread, def.vertical_spread)
+		var y := rng.randfn(0.0, def.vertical_spread * HEIGHT_SIGMA)
+		for _try in 3:
+			if absf(y) <= def.vertical_spread:
+				break
+			y = rng.randfn(0.0, def.vertical_spread * HEIGHT_SIGMA)
+		y = clampf(y, -def.vertical_spread, def.vertical_spread)
 		pos[i] = Vector3(cos(angle) * r, y, sin(angle) * r)
 		var s := lerpf(lo, hi, pow(rng.randf(), size_bias))
 		rad[i] = s
+		_layer_height = maxf(_layer_height, absf(y) + s)
 		var ore := OreType.ROCK
 		var v := rng.randi() % rock_count
 		if rng.randf() < ore_fraction:
@@ -322,7 +339,7 @@ func _build_chunks(data: Dictionary) -> void:
 	var meshes: Array[Mesh] = []
 	for v_name in _variant_names:
 		meshes.append(AsteroidBelt.get_variant_mesh(v_name))
-	var chunk_radius := sqrt(pow(chunk_arc * 0.5, 2.0) + pow(def.width * 0.6, 2.0))
+	var chunk_radius := sqrt(pow(chunk_arc * 0.5, 2.0) + pow(def.width * 0.6, 2.0) + pow(def.vertical_spread, 2.0))
 	var glow := def.glow
 
 	for c in _chunk_count:
@@ -435,7 +452,8 @@ func _build_glints(star_position: Vector3, star_color: Color) -> void:
 	mmi.name = "Glints"
 	mmi.multimesh = mm
 	var r := def.orbit_radius + def.width
-	mmi.custom_aabb = AABB(Vector3(-r, -def.vertical_spread - 50.0, -r), Vector3(r * 2.0, def.vertical_spread * 2.0 + 100.0, r * 2.0))
+	var h := rock_layer_height() + 50.0
+	mmi.custom_aabb = AABB(Vector3(-r, -h, -r), Vector3(r * 2.0, h * 2.0, r * 2.0))
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mmi)
 
@@ -463,6 +481,20 @@ func _build_dust(star_position: Vector3, star_color: Color) -> void:
 	_dust_mat.set_shader_parameter("near_fade_end", detail_fade_end * 2.2)
 	mi.material_override = _dust_mat
 	add_child(mi)
+	# Thin dust sheets above and below the midplane give the band its
+	# thickness from afar (the midplane sheet keeps most of the light).
+	_dust_mat.set_shader_parameter("intensity", 0.16 * def.dust_color.a * (1.0 - 2.0 * DUST_SIDE_SHARE))
+	for sgn: float in [-1.0, 1.0]:
+		var side := MeshInstance3D.new()
+		side.name = "DustSheet%s" % ("Up" if sgn > 0.0 else "Down")
+		side.mesh = mi.mesh
+		side.position.y = sgn * def.vertical_spread * HEIGHT_SIGMA * 1.2
+		side.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var m := _dust_mat.duplicate() as ShaderMaterial
+		m.set_shader_parameter("intensity", 0.16 * def.dust_color.a * DUST_SIDE_SHARE)
+		m.set_shader_parameter("seed", float(def.seed % 97) + 13.0 * sgn)
+		side.material_override = m
+		add_child(side)
 
 
 static func _random_axis(rng: RandomNumberGenerator) -> Vector3:

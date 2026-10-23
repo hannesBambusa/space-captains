@@ -3,11 +3,15 @@ extends VBoxContainer
 ## Bottom build bar: one button per BuildingDef (name and cost), greyed out
 ## with the reason as tooltip when unaffordable. Clicking arms placement;
 ## while placing, a hint line above shows the controls and why a spot is
-## invalid.
+## invalid. Station addons (BuildingDef.station_addon) sit in their own
+## "ADDONS" group after the plane structures; picking one enters bay-pick
+## mode (PlacementController), greyed out with "No free addon bay" when all
+## bays are taken.
 
 const VALID_COLOR := Color(0.45, 1.0, 0.6)
 const INVALID_COLOR := Color(1.0, 0.45, 0.38)
 const HINT := "Click: place    Shift-click: place more    Drag: orbit    Right-click / Esc: cancel"
+const ADDON_HINT := "Click a free bay: install    Drag: orbit    Right-click / Esc: cancel"
 
 var hud: HUD
 
@@ -50,10 +54,25 @@ func setup(owner_hud: HUD) -> void:
 	title.custom_minimum_size.x = 44.0
 	h.add_child(title)
 	if hud.manager:
+		var addons: Array[BuildingDef] = []
 		for def in hud.manager.building_defs:
+			if def.station_addon:
+				addons.append(def)
+				continue
 			var b := _make_button(def)
 			h.add_child(b)
 			_buttons[def] = b
+		if not addons.is_empty():
+			h.add_child(VSeparator.new())
+			var group := UIUtil.label("ADDONS", &"HeaderLabel")
+			group.custom_minimum_size.x = 56.0
+			group.tooltip_text = "Station addons: built onto one of the Home Station's %d addon bays" % BuildingManager.BAY_COUNT
+			group.mouse_filter = Control.MOUSE_FILTER_PASS
+			h.add_child(group)
+			for def in addons:
+				var b := _make_button(def)
+				h.add_child(b)
+				_buttons[def] = b
 	Economy.changed.connect(func(_c: int, _m: int) -> void: _refresh())
 	if hud.manager:
 		hud.manager.building_added.connect(func(_b: Building) -> void: _refresh())
@@ -98,8 +117,11 @@ func _refresh() -> void:
 	for def: BuildingDef in _buttons:
 		var b: Button = _buttons[def]
 		var why := Economy.shortfall_text(def.cost_credits, def.cost_ore())
-		if hud.manager and not hud.manager.limit_reason(def).is_empty():
-			why = hud.manager.limit_reason(def)
+		var block := ""
+		if hud.manager:
+			block = hud.manager.addon_block_reason(def) if def.station_addon else hud.manager.limit_reason(def)
+		if not block.is_empty():
+			why = block
 		var armed := hud.placement != null and hud.placement.def == def
 		b.disabled = not why.is_empty() and not armed
 		b.modulate = Color(1, 1, 1, 0.5) if b.disabled else Color.WHITE
@@ -121,8 +143,8 @@ func _on_pressed(def: BuildingDef) -> void:
 func _on_armed(def: BuildingDef) -> void:
 	_hint.visible = def != null
 	if def:
-		_hint_title.text = "Placing %s" % def.display_name
-		_hint_status.text = HINT
+		_hint_title.text = ("Installing %s" if def.station_addon else "Placing %s") % def.display_name
+		_hint_status.text = _hint_for(def)
 	_refresh()
 
 
@@ -130,8 +152,12 @@ func _on_validity(valid: bool, reason: String) -> void:
 	if hud.placement == null or hud.placement.def == null:
 		return
 	if valid:
-		_hint_status.text = HINT
+		_hint_status.text = _hint_for(hud.placement.def)
 		_hint_status.add_theme_color_override("font_color", Color(0.6, 0.66, 0.74))
 	else:
 		_hint_status.text = reason
 		_hint_status.add_theme_color_override("font_color", INVALID_COLOR)
+
+
+static func _hint_for(def: BuildingDef) -> String:
+	return ADDON_HINT if def and def.station_addon else HINT

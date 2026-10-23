@@ -14,6 +14,9 @@ extends Resource
 @export_range(0.0, 360.0, 0.1, "degrees") var angle_deg: float = 0.0
 ## Metres out from (+) or in toward (-) the star from the belt centre line.
 @export var radial_offset: float = 900.0
+## Metres above (+) or below (-) the system plane. Keep it clear of the
+## belt's rock layer only if the den sits inside the band radially.
+@export var height: float = 0.0
 
 @export_group("Spawning")
 ## Scavengers alive at once from this den.

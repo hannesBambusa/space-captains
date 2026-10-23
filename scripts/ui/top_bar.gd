@@ -89,6 +89,7 @@ func _ready() -> void:
 	tooltip_text = "Space: pause    1 / 2 / 3: sim speed"
 	Economy.changed.connect(_on_economy)
 	ContractBoard.delivery_made.connect(_on_delivery)
+	Economy.cargo_received.connect(_on_cargo)
 	ContractBoard.payout_made.connect(func(_c: Contract, _s: Node, credits: int) -> void: _flash_sum(_credits_delta, -credits))
 	Economy.income.connect(func(amount: int, source: String) -> void:
 		_flash_sum(_income_delta, amount)
@@ -156,11 +157,19 @@ func _flash_sum(label: Label, amount: int) -> void:
 
 
 ## [param ore] is the AsteroidBelt.OreType, -1 for salvage (mostly iron).
-func _on_delivery(_contract: Contract, _ship: Node, credits: int, materials: int, ore: int) -> void:
+func _on_delivery(_contract: Contract, ship: Node, credits: int, materials: int, ore: int) -> void:
 	if credits != 0:
 		_flash_sum(_credits_delta, -credits)
-	if materials != 0:
+	# Ore left at an outpost depot shows when its shuttle lands (_on_cargo).
+	if materials != 0 and CargoDepot.of_ship(ship) == null:
 		_flash_sum(_ore_deltas[Economy.ore_of_belt(ore)], materials)
+
+
+## A cargo shuttle landed ore at the station.
+func _on_cargo(cargo: PackedInt32Array, _source: String) -> void:
+	for i in mini(cargo.size(), _ore_deltas.size()):
+		if cargo[i] > 0:
+			_flash_sum(_ore_deltas[i], cargo[i])
 
 
 ## Factory demand pips (Low 1, Normal 2, High 3) and the price tooltip.

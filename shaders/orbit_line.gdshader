@@ -18,7 +18,9 @@ void vertex() {
 	vec3 center = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	vec3 cam = INV_VIEW_MATRIX[3].xyz;
 	vec3 dir = normalize((MODEL_MATRIX * vec4(VERTEX.x, 0.0, VERTEX.z, 0.0)).xyz);
-	vec3 tangent = normalize(cross(vec3(0.0, 1.0, 0.0), dir));
+	// Circle normal from the model (orbit lines on inclined planes).
+	vec3 up = normalize((MODEL_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+	vec3 tangent = normalize(cross(up, dir));
 	vec3 to_cam = cam - center;
 	float dist = length(to_cam);
 	float world_per_px = 2.0 * dist / (PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);

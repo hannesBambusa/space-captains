@@ -27,8 +27,17 @@ extends Node3D
 ## captain in an [EscapePod] ([method eject_chance]); otherwise the captain is
 ## gone. Losses to scavengers give nearby wingmates a Grudge.
 ##
-## Belt lanes: in open space ships leave the plane to clear asteroid belts
-## ([method _update_altitude]). Before the route enters a belt band the ship
+## Cruise arcs: on travel legs (the brain says when, [method cruise_free])
+## a ship does not fly the straight line from its start height to its
+## goal's height (the plane for goals in a belt band) but an arc off it
+## ([CruiseLeg]): its personality band ([method cruise_band]: Bold low and
+## direct, Cautious far off the line) scaled by the leg length, above the
+## line outbound and below it inbound (the highway rule, so opposing traffic
+## passes at different heights). Fights, formations and docking fly
+## straight at the goal's height.
+## Belt lanes: ships leave that height to clear asteroid belts
+## ([method _update_altitude]); the lane altitude wins over the arc unless
+## the arc already clears the band on the same side. Before the route enters a belt band the ship
 ## climbs over it or dives under it (its lane, [method lane_sign], splits the
 ## traffic), and comes back down after the band. Near a goal that has its own
 ## height (a miner beside its rock) it takes that height; caught low inside
@@ -40,7 +49,18 @@ extends Node3D
 ## ([method warp_lead]: fleets, escorts). While spooling the hull shakes and
 ## the engines run hot; in the hop a stretched streak trails it and a flash
 ## marks the entry and the exit. The lane height of any belt band on the hop
-## is held throughout.
+## is held throughout; a hop with no band flies the straight 3D line from
+## the (levelled) spool height to the arc's height at the drop-out point.
+##
+## 3D combat ([method fight_step], [AttackRun]): attack runs circle the
+## target on a tilted plane, dive or climb through it and break off
+## vertically, flavoured by personality ([method attack_style]) and spread
+## out in fleets ([method attack_slot]). The fight sets the cruise height
+## itself (belt lanes only while still closing in) and the mover flies
+## [member ShipMover.agile]. The nose pitches toward the target while
+## fighting (up to [constant AIM_PITCH_MAX_DEG], [method gun_forward]) and
+## the guns fire along it. Fleeing under fire ([method is_fleeing]) the ship
+## dives or climbs away from the nearest hostile's height to break the line.
 
 signal status_changed(ship: Ship)
 signal damaged(ship: Ship, amount: float, attacker: Node3D)
@@ -53,9 +73,9 @@ const GLOW_NODE := "engine_glow"
 const MAX_STEP := 0.1
 const MAX_SUBSTEPS := 40
 
-enum Role { MINER, MERCENARY, SCAVENGER, SALVAGER, POD }
+enum Role { MINER, MERCENARY, SCAVENGER, SALVAGER, POD, SHUTTLE }
 
-const ROLE_NAMES: PackedStringArray = ["Miner", "Mercenary", "Scavenger", "Salvager", "Pod"]
+const ROLE_NAMES: PackedStringArray = ["Miner", "Mercenary", "Scavenger", "Salvager", "Pod", "Cargo shuttle"]
 ## Docked captains look in at the Outfitter this often, sim seconds.
 const IDLE_VISIT_INTERVAL := 45.0
 const TRAIT_INTERVAL := 2.0
@@ -67,6 +87,18 @@ const SEPARATION_INTERVAL := 0.25
 ## that height, and at which it climbs back to its lane, metres.
 const GOAL_HEIGHT_ENTER := 18.0
 const GOAL_HEIGHT_EXIT := 45.0
+## A goal this far above or below the plane picks the belt lane on its side, metres.
+const LANE_BASE_SIDE := 100.0
+## Visual and gun pitch toward a target while fighting: limit, rate (degrees, degrees/s).
+const AIM_PITCH_MAX_DEG := 35.0
+const AIM_PITCH_RATE_DEG := 120.0
+## Fleeing under fire: height off the line, how near a hostile must be, vertical ease (m, m, m/s).
+const EVADE_HEIGHT := 170.0
+const EVADE_RANGE := 900.0
+const EVADE_EASE := 45.0
+
+## Debug: fly the old flat attack runs and aim on the plane only (A/B tests).
+static var flat_combat: bool = false
 
 @export var role: Role = Role.MINER
 @export var max_speed: float = 150.0
@@ -128,7 +160,25 @@ var _visit_timer := 0.0
 var _trait_timer := 0.0
 var _lane := 1.0
 var _at_goal_height := false
+var _leg := CruiseLeg.new()
+## Vertical speed of the last world goal (a climbing ward or fleet leader), m/s.
+var _goal_vy := 0.0
+var _goal_vy_at := -1.0
+## 0..1, picks this ship's cruise height inside its band (stable per name).
+var _cruise_roll := 0.5
 var _streak: MeshInstance3D
+var _run := AttackRun.new()
+## Sim time of the last fight_step, the fight's height and target.
+var _fight_at := -1.0
+var _fight_y := 0.0
+var _fight_close := false
+var _fight_target: Node3D
+## Nose pitch toward the target (radians) and how far it replaces the climb pitch (0..1).
+var _aim_pitch := 0.0
+var _aim_blend := 0.0
+## Evasive height offset while fleeing: current and wanted (metres).
+var _evade_y := 0.0
+var _evade_want := 0.0
 
 
 ## Call before adding to the tree.
@@ -148,6 +198,7 @@ func _ready() -> void:
 	add_to_group(Combat.GROUP)
 	_sep_timer = randf() * SEPARATION_INTERVAL
 	_lane = 1.0 if hash(String(name)) % 2 == 0 else -1.0
+	_cruise_roll = float(hash(String(name) + "/cruise") % 1000) / 999.0
 	if loadout == null:
 		loadout = ShipLoadout.default_for(ROLE_NAMES[role])
 	if captain and faction == Combat.Faction.PLAYER:
@@ -227,7 +278,8 @@ func sim_step(dt: float) -> void:
 		_sep_timer = SEPARATION_INTERVAL
 		_update_separation()
 	_update_warp_policy()
-	_update_altitude()
+	_update_altitude(dt)
+	_update_aim(dt)
 	mover.step(dt)
 	# Keep the heading current for aiming and formations during fast-forward
 	# (the visual roll and bob are applied per frame in _apply_visuals).
@@ -492,10 +544,39 @@ func _visit_services() -> bool:
 	return false
 
 
-## Attack run on [param target]: close to cannon range, then circle it at
-## about half range with the guns on it, firing when lined up. [param side]
+## Attack run on [param target] in 3D ([AttackRun]): close to cannon
+## range, then circle it on a tilted plane, with dive and climb passes and
+## vertical break-offs, firing whenever the guns bear. [param side]
 ## (+1 / -1) picks the circling direction. Only in open space.
 func fight_step(target: Node3D, side: float = 1.0) -> void:
+	if flat_combat:
+		_fight_step_flat(target, side)
+		return
+	var tp := target.global_position
+	var r := stats.weapon_range if weapon else 300.0
+	var hr := float(target.call(&"get_hit_radius"))
+	var tv := target.call(&"get_aim_velocity") as Vector3
+	var now := SimClock.time
+	if _run.target_id != target.get_instance_id():
+		var slot := attack_slot()
+		_run.begin(target, attack_style(target), hash(String(name)), slot.x, slot.y, now)
+	_run.step(global_position, get_world_velocity(), tp, tv, r, hr, side, now)
+	var face := Vector3.ZERO
+	if _run.face:
+		face = tp - global_position
+		face.y = 0.0
+	_fight_at = now
+	_fight_y = _run.goal.y
+	_fight_close = _run.close
+	_fight_target = target
+	set_world_goal(_run.goal, Vector3(tv.x, _run.goal_vy, tv.z), face, _run.radius)
+	if weapon:
+		weapon.try_fire(target)
+
+
+## The old flat attack run (debug, [member flat_combat]): circle at about
+## half range at the goal's height.
+func _fight_step_flat(target: Node3D, side: float) -> void:
 	var tp := target.global_position
 	var my := global_position
 	var to := Vector3(tp.x - my.x, 0.0, tp.z - my.z)
@@ -520,7 +601,75 @@ func fight_step(target: Node3D, side: float = 1.0) -> void:
 		weapon.try_fire(target)
 
 
-## Goal in world space (converted to the current parent frame).
+## How this pilot flies attack runs. Bold: steep planes, frequent close
+## passes; Cautious: a wider orbit above the target, rare passes from
+## above; Lazy: flat and seldom. Subclasses (raiders) override.
+func attack_style(_target: Node3D) -> AttackRun.Style:
+	var st := AttackRun.Style.new()
+	if captain == null:
+		return st
+	match captain.personality:
+		Captain.Personality.BOLD:
+			st.tilt_deg = Vector2(35.0, 50.0)
+			st.radius = 0.85
+			st.pass_height = 240.0
+			st.pass_close = 0.25
+			st.orbit_time = Vector2(6.0, 10.0)
+			st.pass_chance = 0.7
+		Captain.Personality.CAUTIOUS:
+			st.tilt_deg = Vector2(20.0, 30.0)
+			st.radius = 1.2
+			st.lift = 0.35
+			st.pass_height = 170.0
+			st.pass_close = 0.7
+			st.orbit_time = Vector2(12.0, 20.0)
+			st.pass_chance = 0.3
+			st.pass_from = 1.0
+		Captain.Personality.LAZY:
+			st.tilt_deg = Vector2(20.0, 32.0)
+			st.orbit_time = Vector2(12.0, 18.0)
+			st.pass_chance = 0.35
+	return st
+
+
+## (slot, size) of this ship in its attack group (fleet wingmen spread out).
+func attack_slot() -> Vector2i:
+	return brain.attack_slot() if brain else Vector2i(0, 1)
+
+
+## Running for safety (the brain says so; raiders override).
+func is_fleeing() -> bool:
+	return brain != null and brain.is_fleeing()
+
+
+## Gun line in world space: the heading pitched by the nose pitch.
+func gun_forward() -> Vector3:
+	var p := nose_pitch()
+	return global_basis * Vector3(0.0, sin(p), -cos(p))
+
+
+## Nose pitch (radians, + = up): the climb pitch, or toward the target while fighting.
+func nose_pitch() -> float:
+	if mover == null:
+		return 0.0
+	return lerpf(mover.pitch, _aim_pitch, _aim_blend)
+
+
+func _update_aim(dt: float) -> void:
+	var fighting := _fight_at == SimClock.time and is_instance_valid(_fight_target)
+	var want := 0.0
+	if fighting:
+		var d := _fight_target.global_position - global_position
+		want = clampf(atan2(d.y, maxf(Vector2(d.x, d.z).length(), 1.0)), -deg_to_rad(AIM_PITCH_MAX_DEG), deg_to_rad(AIM_PITCH_MAX_DEG))
+	_aim_pitch = move_toward(_aim_pitch, want if fighting else mover.pitch, deg_to_rad(AIM_PITCH_RATE_DEG) * dt)
+	_aim_blend = move_toward(_aim_blend, 1.0 if fighting else 0.0, dt * 2.0)
+	if not fighting:
+		_fight_target = null
+
+
+## Goal in world space (converted to the current parent frame). In open
+## space its height is where the ship cruises to (see [method _update_altitude]);
+## arrival is judged on the plane.
 func set_world_goal(pos: Vector3, vel: Vector3 = Vector3.ZERO, face: Vector3 = Vector3.ZERO, radius: float = 12.0, speed: float = -1.0) -> void:
 	var p := get_parent() as Node3D
 	var local := pos
@@ -529,9 +678,12 @@ func set_world_goal(pos: Vector3, vel: Vector3 = Vector3.ZERO, face: Vector3 = V
 		local = p.to_local(pos)
 		lvel = p.global_basis.inverse() * (vel - SpaceNav.world_velocity(p))
 		face = p.global_basis.inverse() * face
-	local.y = 0.0
+	if not mover.avoid_enabled:
+		local.y = 0.0
 	mover.set_goal(local, lvel, speed, true, face, radius)
 	mover.goal_has_altitude = false
+	_goal_vy = vel.y
+	_goal_vy_at = SimClock.time
 
 
 ## +1 = flies over belts, -1 = under. Stable per ship (name hash), so the
@@ -542,21 +694,48 @@ func lane_sign() -> float:
 
 ## Sets the mover's height for this step (world frame only, see the class
 ## notes). Cheap: one ring test per belt.
-func _update_altitude() -> void:
+func _update_altitude(dt: float) -> void:
 	mover.cruise_active = mover.avoid_enabled
 	mover.hold_climb = false
+	mover.cruise_vy = 0.0
+	var fighting := _fight_at == SimClock.time
+	_evade_y = move_toward(_evade_y, _evade_want, EVADE_EASE * dt)
+	mover.agile = mover.avoid_enabled and (fighting or _evade_want != 0.0)
 	if not mover.avoid_enabled:
 		_at_goal_height = false
-		return
-	if mover.warp_state != ShipMover.Warp.IDLE:
-		# Hold the hop's lane height; never cross back through the rocks.
-		var y := position.y
-		_at_goal_height = false
-		mover.cruise_y = (signf(y) if absf(y) > 1.0 else _lane) * mover.warp_altitude
+		_leg.clear()
 		return
 	var parent := get_parent() as Node3D
 	var pos := global_position
 	var goal := parent.to_global(mover.goal_pos) if parent else mover.goal_pos
+	var tree := get_tree()
+	# The goal's own height (the station complex on its planet's inclined
+	# orbit, a den above the plane), or the plane for goals in a belt band
+	# (miners take their rock's height only beside it).
+	var base := goal.y if SpaceNav.rock_band_at(tree, goal) == null else 0.0
+	if fighting:
+		# The attack run sets its own height (relative to the target).
+		base = _fight_y
+	_track_leg(pos, goal, dt)
+	if mover.warp_state != ShipMover.Warp.IDLE:
+		# Hold the hop's lane height; never cross back through the rocks.
+		var y := position.y
+		_at_goal_height = false
+		mover.warp_exit_y = NAN
+		if mover.warp_altitude > 0.0:
+			mover.cruise_y = (signf(y) if absf(y) > 1.0 else lane_sign()) * mover.warp_altitude
+		elif mover.warp_state == ShipMover.Warp.SPOOL:
+			# No band on the hop: spool level.
+			mover.cruise_y = y
+		else:
+			# In the hop: the mover flies the 3D line to the cruise height
+			# at the drop-out point, then eases on from there.
+			var end := mover.warp_end
+			var rem := Combat.flat_distance(end, goal)
+			var exit_y := _leg.height(rem, base, goal) if _leg.active else base
+			mover.warp_exit_y = exit_y
+			mover.cruise_y = exit_y
+		return
 	var goal_flat := Combat.flat_distance(pos, goal)
 	if not mover.goal_has_altitude:
 		_at_goal_height = false
@@ -566,11 +745,40 @@ func _update_altitude() -> void:
 		_at_goal_height = goal_flat < GOAL_HEIGHT_ENTER and mover.relative_speed() < 8.0
 	if _at_goal_height:
 		mover.cruise_y = mover.goal_y
+		mover.y_peak = NAN
 		return
-	var tree := get_tree()
+	var cruise := base
+	if _leg.active:
+		cruise = _leg.height(goal_flat, base, goal)
+		mover.y_peak = _leg.peak(base)
+	else:
+		mover.y_peak = NAN
+		# Straight at the goal's height: follow its climb (formation slots,
+		# the attack plane).
+		if (fighting or base == goal.y) and _goal_vy_at == SimClock.time:
+			mover.cruise_vy = _goal_vy
+	if absf(_evade_y) > 0.5:
+		cruise += _evade_y
+	if fighting and _fight_close:
+		# In the fight: its heights win over the belt lanes.
+		mover.cruise_y = cruise
+		return
 	var need := SpaceNav.belt_lane_altitude(tree, pos, get_world_velocity(), goal, tan(deg_to_rad(mover.climb_angle_deg)))
+	if need <= 0.0:
+		mover.cruise_y = cruise
+		return
 	var band := SpaceNav.rock_band_at(tree, pos)
-	var side := _lane
+	if band == null and absf(cruise) >= need:
+		# The cruise arc already clears the band ahead.
+		mover.cruise_y = cruise
+		return
+	# Over or under a band: the side the goal (or the arc) lies on, else
+	# this ship's lane.
+	var side := lane_sign()
+	if absf(base) > LANE_BASE_SIDE:
+		side = signf(base)
+	elif absf(cruise) > LANE_BASE_SIDE:
+		side = signf(cruise)
 	if band:
 		# Inside a band, stay on the side already reached (never cross the rocks).
 		var layer := band.rock_layer_height()
@@ -581,10 +789,62 @@ func _update_altitude() -> void:
 			mover.hold_climb = true
 			var v := SpaceNav.belt_point_velocity(band, pos)
 			mover.hold_velocity = parent.global_basis.inverse() * (v - SpaceNav.world_velocity(parent)) if parent else v
-	mover.cruise_y = side * need
+	# The lane altitude wins, unless the arc is already higher on that side.
+	mover.cruise_y = cruise if signf(cruise) == side and absf(cruise) > need else side * need
+
+
+## Starts a new cruise leg when the goal changed (or the ship may now fly
+## its own arc), or drops it when the brain wants direct flight (fights,
+## formations).
+func _track_leg(pos: Vector3, goal: Vector3, dt: float) -> void:
+	var free := cruise_free()
+	if not free:
+		_leg.clear()
+		return
+	var gv := mover.goal_vel
+	var p := get_parent() as Node3D
+	if p:
+		gv = p.global_basis * gv + SpaceNav.world_velocity(p)
+	if not _leg.active or _leg.goal_jumped(goal, gv, dt):
+		var leg_len := Combat.flat_distance(pos, goal)
+		var sys := get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+		var st := sys.home_station.global_position if sys and sys.home_station else Vector3.INF
+		_leg.begin(pos, goal, CruiseLeg.plan_offset(leg_len, cruise_band(), _cruise_roll, CruiseLeg.highway_sign(pos, goal, st)))
+
+
+## May this ship fly its own cruise arc right now (travel legs), or must it
+## fly straight at its goal (fights, formations, docking approaches)?
+func cruise_free() -> bool:
+	return brain != null and brain.cruise_free()
+
+
+## Cruise arc size: x..y = height off the straight line in metres (this
+## ship's roll picks a value), z = leg length at which it is reached in
+## full (shorter legs scale it down). By personality: Bold flies low and
+## direct, Cautious high above (or below) the traffic.
+func cruise_band() -> Vector3:
+	if captain == null:
+		return Vector3(200.0, 700.0, 8000.0)
+	match captain.personality:
+		Captain.Personality.BOLD:
+			return Vector3(150.0, 420.0, 8000.0)
+		Captain.Personality.GREEDY:
+			return Vector3(250.0, 650.0, 8000.0)
+		Captain.Personality.LAZY:
+			return Vector3(350.0, 850.0, 8000.0)
+		Captain.Personality.CAUTIOUS:
+			return Vector3(650.0, 1200.0, 8000.0)
+	return Vector3(200.0, 700.0, 8000.0)
+
+
+## The current leg's straight line height and the arc's offset from it
+## (NAN when not on a cruise leg), for tools.
+func cruise_line_y() -> float:
+	return _leg.last_line_y if _leg.active else NAN
 
 
 func _update_separation() -> void:
+	_update_evade()
 	var sep := Vector3.ZERO
 	if mover.avoid_enabled:
 		var p := global_position
@@ -608,6 +868,21 @@ func _update_separation() -> void:
 				flat = d.length()
 			sep += d / maxf(flat, 0.01) * (1.0 - dist / SEPARATION_RADIUS)
 	mover.separation = sep.limit_length(1.0) * SEPARATION_SPEED
+
+
+## Fleeing under fire with a hostile near: dive or climb away from its
+## height (kept until calm), else back onto the line.
+func _update_evade() -> void:
+	if flat_combat or not mover.avoid_enabled or not is_fleeing() or durability.seconds_since_hit() > 6.0:
+		_evade_want = 0.0
+		return
+	var h := Combat.nearest_hostile(get_tree(), global_position, EVADE_RANGE, faction)
+	if h == null:
+		_evade_want = 0.0
+		return
+	if _evade_want == 0.0:
+		var dy := global_position.y - h.global_position.y
+		_evade_want = (signf(dy) if absf(dy) > 20.0 else lane_sign()) * EVADE_HEIGHT
 
 
 ## World velocity, m/s.
@@ -817,7 +1092,7 @@ func _apply_visuals(_dt: float) -> void:
 	if _model:
 		var sway := 1.0 if parked else 0.3
 		_model.position = Vector3(0.0, sin(w) * bob_height * sway, 0.0)
-		_model.rotation = Vector3(mover.pitch + sin(w * 0.5) * 0.02 * sway, sin(w * 0.37) * 0.03 * sway, mover.bank + sin(w) * 0.03 * sway)
+		_model.rotation = Vector3(nose_pitch() + sin(w * 0.5) * 0.02 * sway, sin(w * 0.37) * 0.03 * sway, mover.bank + sin(w) * 0.03 * sway)
 	var speed_part := clampf(mover.relative_speed() / maxf(max_speed, 1.0), 0.0, 1.0)
 	var want := 0.12 if parked else maxf(mover.thrust, speed_part * 0.45) + 0.15
 	if mover.warp_state != ShipMover.Warp.IDLE:

@@ -9,8 +9,8 @@ extends Node3D
 ## [constant REPAIR_COST_PER_HULL] per point (RepairBay's rate less the share
 ## the station keeps from captains: the station pays the yard, not itself).
 ## No credits, no repairs. One feed line per repair session.
-## Destroyed: explosion, a scrap field, the building and its corridor are
-## removed (the slot is free to build again).
+## Destroyed: explosion, a scrap field, the building is removed (the slot
+## is free to build again).
 ## Sits [member aim_height] above the building origin so tracers hit the body.
 
 signal changed
@@ -137,7 +137,7 @@ func take_hit(amount: float, attacker: Node3D, _at: Vector3) -> void:
 
 
 ## Blows the structure up: explosion, scrap field, feed line; the building
-## and its corridor are removed.
+## is removed.
 func destroy(killer: Node3D = null) -> void:
 	if dead:
 		return

@@ -1,7 +1,7 @@
 class_name DefenseTurret
 extends DefenseStructure
 ## Service node of a Defense Turret: a standalone twin-barrel point-defence
-## mount anywhere in the build zone (no corridor; BuildingDef.standalone).
+## mount anywhere in the build zone (BuildingDef.standalone).
 ## Defends the station on its own, so the colony is not helpless while every
 ## mercenary is out on a job.
 ##
@@ -148,7 +148,7 @@ func _step(dt: float) -> void:
 
 
 func _in_range(t: Node3D) -> bool:
-	return Combat.flat_distance(global_position, t.global_position) <= weapon_range + float(t.call(&"get_hit_radius"))
+	return global_position.distance_to(t.global_position) <= weapon_range + float(t.call(&"get_hit_radius"))
 
 
 ## Best hostile in range: raiders and anything attacking the colony first,

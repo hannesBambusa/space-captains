@@ -5,10 +5,14 @@ extends Node3D
 
 const STATION_PATH := "res://assets/models/station/station_home.glb"
 const RING_NODE := "station_ring"
+## Docking pad empties "dock_pad_1", "dock_pad_2" in the model, or these
+## (station space; the arms point at 15 and 195 degrees in Blender).
+const DOCK_PAD_NODE := "dock_pad_%d"
+const DOCK_PAD_FALLBACK: Array[Vector3] = [Vector3(55.5, 0.0, -14.9), Vector3(-55.5, 0.0, 14.9)]
 
 ## Whole-station yaw speed in degrees per second. 0: the core, docks and
-## solar arms stay still, so corridors to the station complex
-## (CorridorNetwork) stay attached to the core.
+## solar arms stay still, so the addon bays, docking pads (cargo shuttles)
+## and keep-outs (StationKeepouts) keep their place.
 @export var station_spin_deg: float = 0.0
 ## Habitat ring yaw speed in degrees per second, on top of the station spin.
 @export var ring_spin_deg: float = 3.0
@@ -26,6 +30,14 @@ func _ready() -> void:
 ## The instanced model (glb or placeholder).
 func get_model() -> Node3D:
 	return _model
+
+
+## Station-space position of docking pad [param index] (0 or 1).
+func dock_pad(index: int) -> Vector3:
+	var n := _model.find_child(DOCK_PAD_NODE % (index + 1), true, false) as Node3D if _model else null
+	if n:
+		return ModelLoader.relative_transform(self, n).origin
+	return DOCK_PAD_FALLBACK[clampi(index, 0, DOCK_PAD_FALLBACK.size() - 1)]
 
 
 ## The spinning habitat ring inside the model, or null.

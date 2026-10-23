@@ -57,7 +57,8 @@ var hp: float = 0.0
 ## Current horizontal radius (the vertical one is radius * height_ratio).
 var radius: float = 300.0
 var generator: ShieldGenerator
-var links: CorridorNetwork
+## Supplies the complex (structures, bounds); the bubble refits when it changes.
+var manager: BuildingManager
 ## Sim seconds left until it re-raises (DOWN).
 var cooldown_left: float = 0.0
 var last_hit_time: float = -INF
@@ -94,9 +95,9 @@ static func shielding(tree: SceneTree, p: Vector3, from: Vector3) -> StationShie
 
 
 ## Call before adding to the frame.
-func setup(owner_generator: ShieldGenerator, network: CorridorNetwork) -> void:
+func setup(owner_generator: ShieldGenerator, building_manager: BuildingManager) -> void:
 	generator = owner_generator
-	links = network
+	manager = building_manager
 	name = "StationShield"
 
 
@@ -122,8 +123,8 @@ func _ready() -> void:
 	_mesh.layers = 2
 	_mesh.visible = false
 	add_child(_mesh)
-	if links:
-		links.changed.connect(refit)
+	if manager:
+		manager.layout_changed.connect(refit)
 	refit()
 	radius = _target_radius
 	position = _target_center
@@ -208,16 +209,14 @@ func is_regenerating() -> bool:
 ## Recomputes the radius and centre that fit the complex (it then grows
 ## toward them smoothly).
 func refit() -> void:
-	if links == null:
+	if manager == null:
 		return
-	var box := links.complex_bounds()
+	var box := manager.complex_bounds()
 	var c := box.get_center()
 	var centre := Vector3(c.x, 0.0, c.y)
-	var r := 0.0
-	for an in links.anchors:
-		if an.kind == CorridorNetwork.Anchor.Kind.JUNCTION or an.standalone:
-			continue
-		r = maxf(r, Vector2(an.position.x - centre.x, an.position.z - centre.z).length() + an.radius)
+	var r := Vector2(centre.x, centre.z).length() + manager.station_radius
+	for b in manager.complex_structures():
+		r = maxf(r, Vector2(b.position.x - centre.x, b.position.z - centre.z).length() + b.def.footprint_radius)
 	_target_center = centre
 	_target_radius = maxf(r + margin, min_radius)
 

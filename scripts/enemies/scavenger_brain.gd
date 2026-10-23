@@ -99,6 +99,18 @@ func can_warp() -> bool:
 	return false
 
 
+## May the ship fly its own cruise arc (Ship.cruise_band)? Roaming,
+## heading home and on the raid approach; hunting and fights fly straight.
+func cruise_free() -> bool:
+	match state:
+		State.ROAMING, State.RETURNING:
+			return true
+		State.RAIDING:
+			return not Combat.is_live_target(target) and is_instance_valid(_raid_target) \
+					and Combat.flat_distance(ship.global_position, _raid_target.global_position) > RAID_LOOT_RANGE * 3.0
+	return false
+
+
 func warp_drop() -> float:
 	return RAID_WARP_DROP if state == State.RAIDING else SpaceNav.WARP_DROP
 
@@ -159,7 +171,7 @@ func _think() -> void:
 		return
 	# Self-defence.
 	var la := _last_attacker.get_ref() as Node3D if _last_attacker else null
-	if Combat.is_live_target(la) and ship.durability.seconds_since_hit() < 4.0 and Combat.flat_distance(ship.global_position, la.global_position) < RETALIATE_RANGE:
+	if Combat.is_live_target(la) and ship.durability.seconds_since_hit() < 4.0 and ship.global_position.distance_to(la.global_position) < RETALIATE_RANGE:
 		if not (la is MinerShip):
 			target = _through_shield(la)
 			_set_state(State.ATTACKING)
@@ -170,7 +182,7 @@ func _think() -> void:
 		if state != State.RAIDING:
 			_set_state(State.RAIDING)
 		return
-	if state == State.ATTACKING and Combat.is_live_target(target) and Combat.flat_distance(ship.global_position, target.global_position) < RETALIATE_RANGE * 1.4:
+	if state == State.ATTACKING and Combat.is_live_target(target) and ship.global_position.distance_to(target.global_position) < RETALIATE_RANGE * 1.4:
 		target = _through_shield(target)
 		return
 	var prey := _pick_prey()
@@ -195,7 +207,7 @@ func _pick_prey() -> Ship:
 		var m := n as Ship
 		if m == null or not (m is MinerShip or m is EscapePod) or not m.is_targetable():
 			continue
-		var d := Combat.flat_distance(pos, m.global_position)
+		var d := pos.distance_to(m.global_position)
 		var on_turf := false
 		if den and den.belt:
 			on_turf = Combat.flat_distance(den.global_position, m.global_position) < den.def.hunt_range \
@@ -269,7 +281,7 @@ func _launch_step() -> void:
 		return
 	var out := den.get_mouth_position() + den.get_outward() * 260.0
 	ship.set_world_goal(out, Vector3.ZERO, Vector3.ZERO, 40.0, ship.max_speed * 0.5)
-	if Combat.flat_distance(ship.global_position, out) < 80.0:
+	if ship.global_position.distance_to(out) < 80.0:
 		_set_state(State.RAIDING if ship.is_raider else State.ROAMING)
 
 
@@ -304,7 +316,7 @@ func _steal_step(dt: float) -> void:
 	if m == null or not m.is_loaded():
 		_steal_time = 0.0
 		return
-	var close := Combat.flat_distance(ship.global_position, m.global_position) < STEAL_RANGE
+	var close := ship.global_position.distance_to(m.global_position) < STEAL_RANGE
 	if close or m.hull_fraction() < DISABLED_HULL:
 		_steal_time += dt
 	else:
@@ -327,7 +339,7 @@ func _return_step() -> void:
 	var mouth := den.get_mouth_position()
 	var outside := mouth + den.get_outward() * 40.0
 	ship.set_world_goal(outside, Vector3.ZERO, Vector3.ZERO, 30.0)
-	if Combat.flat_distance(ship.global_position, outside) < 60.0:
+	if Combat.flat_distance(ship.global_position, outside) < 60.0 and absf(ship.global_position.y - outside.y) < 40.0:
 		den.recall(ship)
 
 
