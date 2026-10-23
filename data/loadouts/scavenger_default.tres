@@ -1,0 +1,60 @@
+[gd_resource type="Resource" script_class="ShipLoadout" load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/ships/ship_loadout.gd" id="0_load"]
+[ext_resource type="Script" path="res://scripts/ships/ship_module.gd" id="1_mod"]
+
+[sub_resource type="Resource" id="m0"]
+script = ExtResource("1_mod")
+id = &"salvaged_cannons"
+display_name = "Salvaged Cannons"
+slot = 0
+weapon_kind = 2
+weapon_damage = 8.0
+weapon_range = 560.0
+fire_rate = 2.6
+
+[sub_resource type="Resource" id="m1"]
+script = ExtResource("1_mod")
+id = &"loot_bay"
+display_name = "Loot Bay"
+slot = 1
+cargo_bonus = 0.5
+
+[sub_resource type="Resource" id="m2"]
+script = ExtResource("1_mod")
+id = &"scrap_plating"
+display_name = "Scrap Plating"
+slot = 2
+hull_bonus = 60.0
+shield_bonus = 50.0
+shield_regen = 4.0
+
+[sub_resource type="Resource" id="m3"]
+script = ExtResource("1_mod")
+id = &"patched_drive"
+display_name = "Patched Drive"
+slot = 3
+speed_mult = 1.17
+accel_mult = 1.2
+turn_mult = 1.15
+
+[sub_resource type="Resource" id="m4"]
+script = ExtResource("1_mod")
+id = &"raider_scanner"
+display_name = "Raider Scanner"
+slot = 4
+sensor_range = 3000.0
+
+[resource]
+script = ExtResource("0_load")
+role_name = "Scavenger"
+base_hull = 240.0
+base_speed = 150.0
+base_acceleration = 32.0
+base_turn_rate_deg = 110.0
+base_sensor_range = 2000.0
+tool = SubResource("m0")
+cargo = SubResource("m1")
+defense = SubResource("m2")
+engine = SubResource("m3")
+sensor = SubResource("m4")

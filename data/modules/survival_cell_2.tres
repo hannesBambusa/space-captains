@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ShipModule" format=3]
+
+[ext_resource type="Script" path="res://scripts/ships/ship_module.gd" id="1_mod"]
+
+[resource]
+script = ExtResource("1_mod")
+id = &"survival_cell_2"
+display_name = "Survival Cell Mk II"
+slot = 2
+tier = 2
+cost = 400
+roles = PackedStringArray("Miner", "Salvager")
+blurb = "Armoured cockpit with an escape pod: better odds of ejecting."
+hull_bonus = 130.0
+shield_bonus = 80.0
+shield_regen = 5.0
+eject_bonus = 0.5

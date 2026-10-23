@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="BuildingDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_def.gd" id="1_bdef"]
+[ext_resource type="Script" path="res://scripts/mercenary_ship.gd" id="2_merc"]
+
+[resource]
+script = ExtResource("1_bdef")
+id = &"mercenary_outpost"
+display_name = "Mercenary Outpost"
+short_label = "Mercenary Outpost"
+description = "Hangar and repair dock for freelance fighter pilots. Hire mercenaries here; they defend the colony on their own and take bounty and escort contracts."
+model_path = "res://assets/models/buildings/mercenary_outpost.glb"
+cost_credits = 600
+cost_materials = 150
+build_time = 25.0
+footprint_radius = 36.0
+max_hires = 4
+hire_cost_credits = 300
+hire_role = "Mercenary"
+hire_ship_path = "res://assets/models/ships/merc_fighter.glb"
+hire_ship_script = ExtResource("2_merc")
+inner_berths = 1
+berth_depth = 10.0
+outer_berth_side = 24.0
+outer_berth_step = 19.0
+ship_cost = 600

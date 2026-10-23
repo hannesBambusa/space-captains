@@ -1,0 +1,479 @@
+class_name CaptainBrain
+extends RefCounted
+## A captain's decisions. Generic over roles: the [RoleEvaluator] scores
+## contracts, the ship does the role-specific work through its job hooks
+## (Ship.job_begin / job_target / job_work / job_end), and the brain runs the
+## trip: undock, travel, work, return, dock, unload, rest.
+##
+## Docked captains re-evaluate every few sim seconds (profile interval plus
+## jitter, so they do not all decide on the same frame). A refusal is
+## remembered with its reason for the UI.
+##
+## Stage 2: [method assess_threat] reads nearby hostiles, recent hits and
+## escort cover; above the captain's flee level (profile plus Nerve) the
+## captain abandons the job and flees (FLEEING) toward home, or toward the
+## nearest friendly mercenary when one is closer. Attributes feed the pacing
+## (Diligence: rest and breaks). Subclasses (MercenaryBrain) reuse the
+## undock / dock / rest steps and add their own work states.
+##
+## Stage 3: deliveries earn reputation (ore and danger raise it) and count
+## toward traits (Crystal Hound, Lone Wolf); back in the berth the ship
+## counts the trip's damage (Ship.on_docked_home). Salvage contracts run the
+## same trip (SalvagerShip does the work, the board pays per load).
+
+signal state_changed(brain: CaptainBrain)
+## A decision on a contract: accepted, or refused with a reason.
+signal decided(brain: CaptainBrain, accepted: bool, text: String)
+
+enum State {
+	DOCKED, IDLE, EVALUATING, UNDOCKING, TRAVELING_TO_JOB, MINING, RETURNING, DOCKING, UNLOADING, RESTING, FLEEING,
+	PATROLLING, ENGAGING, ESCORTING, HUNTING, REPAIRING, DESTROYED,
+}
+
+const STATE_NAMES: PackedStringArray = [
+	"Docked", "Idle", "Evaluating", "Undocking", "En route", "Mining", "Returning", "Docking", "Unloading", "Resting", "Fleeing",
+	"Patrolling", "Engaging", "Escorting", "Hunting bounty", "Repairing", "Destroyed",
+]
+const ORE_NAMES: PackedStringArray = ["rock", "iron", "titanium", "crystal"]
+## Sim seconds spent "thinking" in EVALUATING (so the UI can show it).
+const THINK_TIME := 1.0
+const UNLOAD_TIME := 4.0
+## Distance to the outpost's approach point at which the ship matches its
+## frame and starts the docking path, metres.
+const DOCK_HANDOFF_DISTANCE := 120.0
+## Hostiles within this distance raise the threat level, metres.
+const THREAT_RADIUS := 1300.0
+## Friendly mercenaries within this distance lower it (escort cover), metres.
+const COVER_RADIUS := 600.0
+## Sim seconds between threat checks.
+const THREAT_INTERVAL := 0.4
+## A fleeing captain runs to a mercenary closer than this instead of home.
+const RUN_TO_MERC_RANGE := 2500.0
+
+
+class Trip:
+	var contract: Contract
+	var started_at: float = 0.0
+	## Stage 2: escorts may attach to trips that ask for it.
+	var escort_requested: bool = false
+	## Free-form data for later systems (escort ship, threat notes).
+	var meta: Dictionary = {}
+	## Work progress 0..1 (mining: drilling).
+	var progress: float = 0.0
+	## Mining: belt asteroid index, its ore, the hover point in belt space.
+	var asteroid: int = -1
+	var ore: int = 0
+	var standoff_local := Vector3.ZERO
+	var work_time: float = 10.0
+	## Cargo aboard (a mined load).
+	var loaded: bool = false
+	## Share of the load still aboard (scavengers can take part of it).
+	var cargo: float = 1.0
+
+
+var ship: Ship
+var captain: Captain
+var profile: PersonalityProfile
+var evaluator: RoleEvaluator
+var state: State = State.DOCKING
+var trip: Trip
+var rng := RandomNumberGenerator.new()
+## Last refusal, for the UI ("" when the last decision was a yes).
+var last_refusal: String = ""
+var last_refusal_target: String = ""
+## Last decision line for the UI ("Took Cinder Belt", "Refused Talon Reach: ...").
+var last_decision: String = ""
+
+var _timer: float = 0.0
+var _resting_on_break: bool = false
+var _threat_timer: float = 0.0
+var _threat: float = 0.0
+## While fleeing: the friendly ship being run to (null = home).
+var _flee_to: Ship
+var _calm_time: float = 0.0
+
+
+func _init(owner_ship: Ship, role_evaluator: RoleEvaluator) -> void:
+	ship = owner_ship
+	captain = owner_ship.captain
+	evaluator = role_evaluator
+	profile = PersonalityProfile.for_personality(captain.personality if captain else Captain.Personality.BOLD)
+	rng.randomize()
+
+
+func get_state_name() -> String:
+	return STATE_NAMES[state]
+
+
+func get_status_text() -> String:
+	match state:
+		State.TRAVELING_TO_JOB:
+			return "En route to %s" % _trip_target_name()
+		State.MINING:
+			return "Mining %d%%" % roundi((trip.progress if trip else 0.0) * 100.0)
+		State.RETURNING:
+			if trip and trip.loaded:
+				return "Returning with %s" % ORE_NAMES[clampi(trip.ore, 0, ORE_NAMES.size() - 1)]
+			return "Returning"
+		State.UNLOADING:
+			return "Unloading"
+		State.RESTING:
+			return "Taking a break" if _resting_on_break else "Resting"
+		State.FLEEING:
+			if is_instance_valid(_flee_to):
+				return "Fleeing to %s" % _flee_to.get_display_name()
+			return "Fleeing home"
+	return get_state_name()
+
+
+func is_on_trip() -> bool:
+	return trip != null
+
+
+## World position of the home outpost (or the ship when homeless).
+func home_position() -> Vector3:
+	if ship.home and is_instance_valid(ship.home):
+		return ship.home.global_position
+	return ship.global_position
+
+
+## Called when the ship is placed in its berth instantly.
+func on_snapped_to_berth() -> void:
+	if state == State.DOCKING:
+		_set_state(State.DOCKED)
+		_timer = rng.randf_range(0.2, 1.0)
+
+
+# --- Update -------------------------------------------------------------------
+
+func update(dt: float) -> void:
+	match state:
+		State.DOCKED:
+			_timer -= dt
+			if _timer <= 0.0:
+				_set_state(State.EVALUATING)
+				_timer = THINK_TIME
+		State.EVALUATING:
+			_timer -= dt
+			if _timer <= 0.0:
+				_decide()
+		State.UNDOCKING:
+			if ship.mover.path_done():
+				ship.enter_space()
+				if ship.job_begin(trip):
+					_set_state(State.TRAVELING_TO_JOB)
+				else:
+					_abort_trip()
+					_set_state(State.RETURNING)
+		State.TRAVELING_TO_JOB:
+			_steer_to_job(false)
+			if _check_threats(dt):
+				return
+			if ship.mover.arrived(3.0):
+				_set_state(State.MINING)
+		State.MINING:
+			_steer_to_job(true)
+			if _check_threats(dt):
+				return
+			if ship.job_work(trip, dt):
+				ship.job_end(trip)
+				trip.loaded = true
+				_set_state(State.RETURNING)
+		State.RETURNING:
+			if trip and trip.loaded and _check_threats(dt):
+				return
+			_steer_home()
+		State.FLEEING:
+			_update_flee(dt)
+		State.DOCKING:
+			if ship.mover.path_done():
+				ship.on_docked_home()
+				if trip == null:
+					_back_to_docked()
+				else:
+					_set_state(State.UNLOADING)
+					_timer = UNLOAD_TIME
+					_deliver()
+		State.UNLOADING:
+			_timer -= dt
+			if _timer <= 0.0:
+				_resting_on_break = false
+				_set_state(State.RESTING)
+				_timer = rest_duration()
+		State.RESTING:
+			_timer -= dt
+			if _timer <= 0.0:
+				_resting_on_break = false
+				_set_state(State.DOCKED)
+				_timer = rng.randf_range(0.3, 1.5)
+		State.IDLE:
+			ship.mover.hold()
+
+
+# --- Decisions ----------------------------------------------------------------
+
+## Scores the available contracts now. Returns the chosen evaluation (or the
+## best refused one, or null when there is nothing for this role).
+func score_contracts(contracts: Array[Contract] = []) -> RoleEvaluator.Evaluation:
+	if contracts.is_empty():
+		contracts = ContractBoard.get_available()
+	return evaluator.pick(self, contracts)
+
+
+func _decide() -> void:
+	var contracts := ContractBoard.get_available()
+	var e := evaluator.pick(self, contracts)
+	if e == null:
+		last_decision = "No contracts posted"
+		_back_to_docked()
+		return
+	if break_chance() > 0.0 and rng.randf() < break_chance():
+		last_decision = "Taking a break"
+		_resting_on_break = true
+		_set_state(State.RESTING)
+		_timer = rng.randf_range(profile.break_time.x, profile.break_time.y)
+		return
+	if e.accept and _take(e.contract):
+		return
+	var target := e.contract.get_target_name()
+	var changed := e.reason != last_refusal or target != last_refusal_target
+	last_refusal = e.reason
+	last_refusal_target = target
+	last_decision = "Refused %s: %s" % [target, e.reason.to_lower()]
+	if changed:
+		decided.emit(self, false, "%s: %s" % [target, e.reason])
+	_back_to_docked()
+
+
+## Starts a trip on [param contract]. False when it filled up meanwhile.
+func _take(contract: Contract) -> bool:
+	if not contract.add_taker(ship):
+		return false
+	trip = Trip.new()
+	trip.contract = contract
+	trip.started_at = SimClock.time
+	last_refusal = ""
+	last_refusal_target = ""
+	last_decision = "Took %s, %s" % [contract.get_target_name(), contract.get_reward_text()]
+	decided.emit(self, true, "Took %s, %s" % [contract.get_target_name(), contract.get_reward_text()])
+	ship.start_undock()
+	_set_state(State.UNDOCKING)
+	return true
+
+
+## Rest after a trip, sim seconds (profile range scaled by Diligence).
+func rest_duration() -> float:
+	var k := captain.rest_scale() if captain else 1.0
+	return rng.randf_range(profile.rest_time.x, profile.rest_time.y) * k
+
+
+func break_chance() -> float:
+	var b := profile.break_chance + (captain.break_bonus() if captain else 0.0)
+	return clampf(b, 0.0, 0.6) if profile.break_chance > 0.0 or b > 0.02 else 0.0
+
+
+## Threat level at which this captain flees (profile plus Nerve).
+func flee_level() -> float:
+	return clampf(profile.flee_threat + (captain.nerve_offset() if captain else 0.0), 0.1, 0.98)
+
+
+func _back_to_docked() -> void:
+	_set_state(State.DOCKED)
+	_timer = rng.randf_range(profile.evaluate_interval.x, profile.evaluate_interval.y)
+
+
+# --- Trip steps ---------------------------------------------------------------
+
+func _steer_to_job(working: bool) -> void:
+	if trip == null:
+		_set_state(State.RETURNING)
+		return
+	var t := ship.job_target(trip, working)
+	if t.is_empty():
+		_abort_trip()
+		_set_state(State.RETURNING)
+		return
+	ship.mover.set_goal(t["pos"], t["vel"], -1.0, true, t.get("face", Vector3.ZERO), 4.0 if working else 6.0)
+
+
+func _steer_home() -> void:
+	var home := ship.home
+	if home == null or not is_instance_valid(home):
+		_set_state(State.IDLE)
+		return
+	var approach := home.to_global(home.approach_point())
+	approach.y = 0.0
+	ship.mover.set_goal(approach, SpaceNav.world_velocity(home), -1.0, true, Vector3.ZERO, 20.0)
+	var rel := approach - ship.global_position
+	rel.y = 0.0
+	if rel.length() < DOCK_HANDOFF_DISTANCE and ship.mover.relative_speed() < 45.0:
+		ship.enter_home_frame()
+		ship.start_dock()
+		_set_state(State.DOCKING)
+
+
+func _deliver() -> void:
+	if trip == null:
+		return
+	var c := trip.contract
+	if trip.loaded and c is MiningContract:
+		var res := ContractBoard.deliver_mining_load(c as MiningContract, ship, trip.ore, trip.cargo)
+		var credits: int = res["credits"]
+		var mats: int = res["materials"]
+		if captain:
+			captain.loads_delivered += 1
+			captain.credits_earned += credits
+			captain.add_reputation(Reputation.for_load(trip.ore, c.get_danger()))
+			if trip.ore == AsteroidBelt.OreType.CRYSTAL:
+				captain.crystal_loads += 1
+				if captain.crystal_loads >= CaptainTraits.CRYSTAL_LOADS:
+					captain.add_trait(CaptainTraits.CRYSTAL_HOUND)
+			captain.note_job(bool(res.get("escorted", false)))
+		ship.on_cargo_delivered()
+		ship.show_toast("+%d materials" % mats, Color(0.55, 1.0, 0.65))
+	elif trip.loaded and c is SalvageContract:
+		var scrap := roundi(float(trip.meta.get("scrap", 0)) * trip.cargo)
+		var res := ContractBoard.deliver_salvage_load(c as SalvageContract, ship, scrap)
+		var mats: int = res["materials"]
+		if captain:
+			captain.salvage_loads += 1
+			captain.credits_earned += int(res["credits"])
+			captain.add_reputation(Reputation.SALVAGE_LOAD * clampf(float(scrap) / float(SalvageContract.LOAD_SCRAP), 0.3, 1.5))
+			captain.note_job(bool(res.get("escorted", false)))
+		ship.on_cargo_delivered()
+		ship.show_toast("+%d materials" % mats, Color(0.55, 1.0, 0.65))
+	else:
+		_release(c)
+	trip = null
+
+
+## Ends [param c] for this ship without a delivery.
+func _release(c: Contract) -> void:
+	if c == null:
+		return
+	if c is MiningContract:
+		(c as MiningContract).finish_trip(ship, false)
+	elif c is SalvageContract:
+		(c as SalvageContract).finish_trip(ship, false)
+	else:
+		c.remove_taker(ship)
+
+
+func _abort_trip() -> void:
+	if trip == null:
+		return
+	_release(trip.contract)
+	ship.job_end(trip)
+	trip = null
+
+
+# --- Threats ------------------------------------------------------------------
+
+## 0..1 danger near the ship right now: a recent hit, hostiles within
+## [constant THREAT_RADIUS] (closer = worse), minus escort cover.
+func assess_threat() -> float:
+	if ship.dead or not ship.is_inside_tree():
+		return 0.0
+	var t := 0.0
+	if ship.durability.seconds_since_hit() < 4.0:
+		t += 0.55
+	var pos := ship.global_position
+	var hostiles := Combat.hostiles_near(ship.get_tree(), pos, THREAT_RADIUS, ship.faction)
+	for h in hostiles:
+		var d := Combat.flat_distance(pos, h.global_position)
+		t += 0.1 + 0.35 * (1.0 - d / THREAT_RADIUS)
+	if t > 0.0:
+		t -= 0.2 * float(_friendly_guns_near(pos, COVER_RADIUS).size())
+	return clampf(t, 0.0, 1.0)
+
+
+## Cached threat level, refreshed every [constant THREAT_INTERVAL].
+func current_threat(dt: float = 0.0) -> float:
+	_threat_timer -= dt
+	if _threat_timer <= 0.0:
+		_threat_timer = THREAT_INTERVAL
+		_threat = assess_threat()
+	return _threat
+
+
+## True when the captain broke off to flee.
+func _check_threats(dt: float = 0.1) -> bool:
+	if current_threat(dt) < flee_level():
+		return false
+	flee()
+	return true
+
+
+## Drops the job and runs for safety. Cargo aboard is kept.
+func flee() -> void:
+	if trip and not trip.loaded:
+		_abort_trip()
+	_flee_to = _nearest_guardian()
+	_calm_time = 0.0
+	if state != State.FLEEING and captain:
+		EventLog.post("%s is fleeing" % captain.captain_name, EventLog.Kind.COMBAT, ship)
+	_set_state(State.FLEEING)
+
+
+## Fleeing: run to the guardian until close or the danger passed, then home.
+func _update_flee(dt: float) -> void:
+	if current_threat(dt) < 0.05:
+		_calm_time += dt
+	else:
+		_calm_time = 0.0
+	if is_instance_valid(_flee_to) and not _flee_to.dead and _flee_to.is_targetable():
+		var d := Combat.flat_distance(ship.global_position, _flee_to.global_position)
+		if d > 160.0 and _calm_time < 3.0:
+			var p := ship.get_parent() as Node3D
+			var goal := _flee_to.global_position
+			if p:
+				goal = p.to_local(goal)
+			ship.mover.set_goal(goal, _flee_to.get_world_velocity(), -1.0, false, Vector3.ZERO, 30.0)
+			return
+	_flee_to = null
+	_steer_home()
+
+
+## Nearest armed friendly ship in open space closer than home, or null.
+func _nearest_guardian() -> Ship:
+	var pos := ship.global_position
+	var home_d := Combat.flat_distance(pos, home_position())
+	var best: Ship = null
+	var best_d := minf(RUN_TO_MERC_RANGE, home_d)
+	for s in _friendly_guns_near(pos, RUN_TO_MERC_RANGE):
+		var d := Combat.flat_distance(pos, s.global_position)
+		if d < best_d:
+			best_d = d
+			best = s
+	return best
+
+
+func _friendly_guns_near(pos: Vector3, radius: float) -> Array[Ship]:
+	var out: Array[Ship] = []
+	for n in ship.get_tree().get_nodes_in_group(Ship.GROUP):
+		var s := n as Ship
+		if s == ship or s.dead or s.faction != ship.faction or s.weapon == null or not s.is_targetable():
+			continue
+		if Combat.flat_distance(pos, s.global_position) <= radius:
+			out.append(s)
+	return out
+
+
+## The ship blew up: release the contract, stop.
+func on_ship_destroyed() -> void:
+	if trip:
+		_release(trip.contract)
+		trip = null
+	_set_state(State.DESTROYED)
+
+
+func _trip_target_name() -> String:
+	return trip.contract.get_target_name() if trip and trip.contract else "?"
+
+
+func _set_state(s: State) -> void:
+	if state == s:
+		return
+	state = s
+	state_changed.emit(self)
+	ship.status_changed.emit(ship)

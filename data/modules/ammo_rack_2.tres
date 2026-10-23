@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ShipModule" format=3]
+
+[ext_resource type="Script" path="res://scripts/ships/ship_module.gd" id="1_mod"]
+
+[resource]
+script = ExtResource("1_mod")
+id = &"ammo_rack_2"
+display_name = "Ammo Rack Mk II"
+slot = 1
+tier = 2
+cost = 400
+roles = PackedStringArray("Mercenary")
+blurb = "Faster feed: more shots per second."
+fire_rate_mult = 1.16

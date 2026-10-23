@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="ShipModule" format=3]
+
+[ext_resource type="Script" path="res://scripts/ships/ship_module.gd" id="1_mod"]
+
+[resource]
+script = ExtResource("1_mod")
+id = &"deflector_2"
+display_name = "Deflector Mk II"
+slot = 2
+tier = 2
+cost = 500
+roles = PackedStringArray("Mercenary")
+blurb = "Stronger, faster shields."
+hull_bonus = 80.0
+shield_bonus = 360.0
+shield_regen = 20.0

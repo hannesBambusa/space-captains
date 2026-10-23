@@ -1,0 +1,121 @@
+[gd_scene load_steps=27 format=3]
+
+[ext_resource type="Shader" path="res://shaders/space_sky.gdshader" id="1_sky"]
+[ext_resource type="Script" path="res://scripts/solar_system.gd" id="2_system"]
+[ext_resource type="Resource" path="res://data/systems/home_system.tres" id="3_def"]
+[ext_resource type="Script" path="res://scripts/space_dust.gd" id="4_dust"]
+[ext_resource type="PackedScene" path="res://scenes/rts_camera.tscn" id="5_cam"]
+[ext_resource type="Script" path="res://scripts/screenshot_mode.gd" id="6_shot"]
+[ext_resource type="Script" path="res://scripts/building_manager.gd" id="7_bm"]
+[ext_resource type="Resource" path="res://data/buildings/mining_outpost.tres" id="8_outpost"]
+[ext_resource type="Script" path="res://scripts/selection_controller.gd" id="9_sel"]
+[ext_resource type="Script" path="res://scripts/placement_controller.gd" id="10_place"]
+[ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="11_hud"]
+[ext_resource type="Script" path="res://scripts/ui_demo.gd" id="12_demo"]
+[ext_resource type="Script" path="res://scripts/contracts/contract_markers.gd" id="13_markers"]
+[ext_resource type="Script" path="res://scripts/mining_demo.gd" id="14_mdemo"]
+[ext_resource type="Resource" path="res://data/buildings/mercenary_outpost.tres" id="15_merc"]
+[ext_resource type="Script" path="res://scripts/combat/combat_world.gd" id="16_combat"]
+[ext_resource type="Script" path="res://scripts/combat_demo.gd" id="17_cdemo"]
+[ext_resource type="Resource" path="res://data/buildings/outfitter.tres" id="18_outf"]
+[ext_resource type="Resource" path="res://data/buildings/salvage_yard.tres" id="19_salv"]
+[ext_resource type="Script" path="res://scripts/progress_demo.gd" id="20_pdemo"]
+[ext_resource type="Script" path="res://scripts/station_demo.gd" id="21_sdemo"]
+
+[sub_resource type="ShaderMaterial" id="sky_mat"]
+shader = ExtResource("1_sky")
+
+[sub_resource type="Sky" id="sky"]
+sky_material = SubResource("sky_mat")
+radiance_size = 3
+
+[sub_resource type="Environment" id="env"]
+background_mode = 2
+sky = SubResource("sky")
+ambient_light_source = 3
+ambient_light_color = Color(0.46, 0.5, 0.6, 1)
+ambient_light_sky_contribution = 0.3
+ambient_light_energy = 1.1
+reflected_light_source = 2
+tonemap_mode = 3
+tonemap_exposure = 1.1
+tonemap_white = 6.0
+glow_enabled = true
+glow_levels/1 = 0.0
+glow_levels/2 = 0.4
+glow_levels/3 = 1.0
+glow_levels/4 = 1.0
+glow_levels/5 = 0.45
+glow_levels/6 = 0.2
+glow_levels/7 = 0.0
+glow_intensity = 0.32
+glow_strength = 1.0
+glow_bloom = 0.0
+glow_blend_mode = 0
+glow_hdr_threshold = 1.8
+glow_hdr_scale = 1.5
+adjustment_enabled = true
+adjustment_brightness = 1.0
+adjustment_contrast = 1.06
+adjustment_saturation = 1.1
+
+[node name="System" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("env")
+
+[node name="SolarSystem" type="Node3D" parent="."]
+script = ExtResource("2_system")
+system_def = ExtResource("3_def")
+
+[node name="SpaceDust" type="MultiMeshInstance3D" parent="."]
+script = ExtResource("4_dust")
+mote_count = 5000
+max_camera_distance = 2600.0
+
+[node name="RTSCamera" parent="." instance=ExtResource("5_cam")]
+min_distance = 80.0
+max_distance = 62000.0
+default_distance = 2600.0
+zoom_step = 0.16
+pitch_near_deg = 30.0
+pitch_far_deg = 80.0
+pitch_curve = 2.6
+fit_distance = 58000.0
+bounds_radius = 27000.0
+
+[node name="ScreenshotMode" type="Node" parent="."]
+script = ExtResource("6_shot")
+
+[node name="Buildings" type="Node" parent="."]
+script = ExtResource("7_bm")
+building_defs = Array[Resource]([ExtResource("8_outpost"), ExtResource("15_merc"), ExtResource("18_outf"), ExtResource("19_salv")])
+
+[node name="Combat" type="Node3D" parent="."]
+script = ExtResource("16_combat")
+
+[node name="Selection" type="Node3D" parent="."]
+script = ExtResource("9_sel")
+
+[node name="Placement" type="Node3D" parent="."]
+script = ExtResource("10_place")
+
+[node name="ContractMarkers" type="Node3D" parent="."]
+script = ExtResource("13_markers")
+
+[node name="HUD" parent="." instance=ExtResource("11_hud")]
+
+[node name="UIDemo" type="Node" parent="."]
+script = ExtResource("12_demo")
+
+[node name="MiningDemo" type="Node" parent="."]
+script = ExtResource("14_mdemo")
+
+[node name="CombatDemo" type="Node" parent="."]
+script = ExtResource("17_cdemo")
+
+[node name="ProgressDemo" type="Node" parent="."]
+script = ExtResource("20_pdemo")
+
+[node name="StationDemo" type="Node" parent="."]
+script = ExtResource("21_sdemo")

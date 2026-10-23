@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="BuildingDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_def.gd" id="1_bdef"]
+[ext_resource type="Script" path="res://scripts/buildings/outfitter.gd" id="2_outf"]
+
+[resource]
+script = ExtResource("1_bdef")
+id = &"outfitter"
+display_name = "Outfitter"
+short_label = "Outfitter"
+description = "Module shop and refit bay. Captains buy modules here with their own earnings, by personality; you get a share of every sale. Spend materials to stock Mk II and Mk III."
+model_path = "res://assets/models/buildings/outfitter.glb"
+cost_credits = 800
+cost_materials = 250
+build_time = 25.0
+footprint_radius = 32.0
+max_count = 1
+placeholder_tint = Color(0.35, 0.85, 1, 1)
+service_script = ExtResource("2_outf")

@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="BuildingDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/building_def.gd" id="1_bdef"]
+
+[resource]
+script = ExtResource("1_bdef")
+id = &"mining_outpost"
+display_name = "Mining Outpost"
+short_label = "Mining Outpost"
+description = "Docking and refining post for independent miners. Hire mining captains here; they work the belts on contract."
+model_path = "res://assets/models/buildings/mining_outpost.glb"
+cost_credits = 500
+cost_materials = 100
+build_time = 20.0
+footprint_radius = 35.0
+max_hires = 4
+hire_cost_credits = 200
+hire_role = "Miner"
+hire_ship_path = "res://assets/models/ships/miner.glb"
+ship_cost = 400

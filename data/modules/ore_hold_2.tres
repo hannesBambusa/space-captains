@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ShipModule" format=3]
+
+[ext_resource type="Script" path="res://scripts/ships/ship_module.gd" id="1_mod"]
+
+[resource]
+script = ExtResource("1_mod")
+id = &"ore_hold_2"
+display_name = "Ore Hold Mk II"
+slot = 1
+tier = 2
+cost = 400
+roles = PackedStringArray("Miner")
+blurb = "Bigger loads: more pay and materials per trip."
+cargo_bonus = 0.4

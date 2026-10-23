@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="MiningRules" format=3]
+
+[ext_resource type="Script" path="res://scripts/contracts/mining_rules.gd" id="1_rules"]
+
+[resource]
+script = ExtResource("1_rules")
+materials_per_load = PackedInt32Array(4, 10, 25, 60)
+base_reward = PackedInt32Array(20, 50, 90, 150)
+danger_premium = 15
+mine_time = PackedFloat32Array(10, 14, 18, 24)
+reward_min = 20
+reward_max = 400
+reward_step = 10
+load_limit_options = PackedInt32Array(0, 3, 5, 10, 20, 50)

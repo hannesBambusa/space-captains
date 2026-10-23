@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ShipModule" format=3]
+
+[ext_resource type="Script" path="res://scripts/ships/ship_module.gd" id="1_mod"]
+
+[resource]
+script = ExtResource("1_mod")
+id = &"ejection_rig_3"
+display_name = "Ejection Rig Mk III"
+slot = 2
+tier = 3
+cost = 900
+roles = PackedStringArray("Mercenary")
+blurb = "Armoured cockpit with an escape pod: better odds of ejecting."
+hull_bonus = 200.0
+shield_bonus = 240.0
+shield_regen = 12.0
+eject_bonus = 0.65

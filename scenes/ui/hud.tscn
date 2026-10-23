@@ -1,0 +1,141 @@
+[gd_scene load_steps=12 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/hud.gd" id="1_hud"]
+[ext_resource type="Theme" path="res://ui/theme.tres" id="2_theme"]
+[ext_resource type="Script" path="res://scripts/ui/target_marker.gd" id="3_marker"]
+[ext_resource type="Script" path="res://scripts/ui/top_bar.gd" id="4_top"]
+[ext_resource type="Script" path="res://scripts/ui/overview_panel.gd" id="5_over"]
+[ext_resource type="Script" path="res://scripts/ui/build_menu.gd" id="6_build"]
+[ext_resource type="Script" path="res://scripts/ui/building_panel.gd" id="7_panel"]
+[ext_resource type="Script" path="res://scripts/ui/belt_panel.gd" id="8_belt"]
+[ext_resource type="Script" path="res://scripts/ui/captain_panel.gd" id="9_captain"]
+[ext_resource type="Script" path="res://scripts/ui/target_panel.gd" id="10_target"]
+[ext_resource type="Script" path="res://scripts/ui/event_feed.gd" id="11_feed"]
+
+[node name="HUD" type="CanvasLayer"]
+layer = 10
+script = ExtResource("1_hud")
+
+[node name="Root" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme = ExtResource("2_theme")
+
+[node name="TargetMarker" type="Control" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("3_marker")
+
+[node name="TopBar" type="PanelContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_top = 12.0
+grow_horizontal = 2
+script = ExtResource("4_top")
+
+[node name="Overview" type="VBoxContainer" parent="Root"]
+layout_mode = 1
+offset_left = 12.0
+offset_top = 12.0
+offset_right = 392.0
+mouse_filter = 2
+script = ExtResource("5_over")
+
+[node name="BuildMenu" type="VBoxContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_top = -12.0
+offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+script = ExtResource("6_build")
+
+[node name="BuildingPanel" type="PanelContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -392.0
+offset_top = -12.0
+offset_right = -12.0
+offset_bottom = -12.0
+grow_horizontal = 0
+grow_vertical = 0
+script = ExtResource("7_panel")
+
+[node name="BeltPanel" type="PanelContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -392.0
+offset_top = -12.0
+offset_right = -12.0
+offset_bottom = -12.0
+grow_horizontal = 0
+grow_vertical = 0
+script = ExtResource("8_belt")
+
+[node name="CaptainPanel" type="PanelContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -392.0
+offset_top = -12.0
+offset_right = -12.0
+offset_bottom = -12.0
+grow_horizontal = 0
+grow_vertical = 0
+script = ExtResource("9_captain")
+
+[node name="TargetPanel" type="PanelContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -392.0
+offset_top = -12.0
+offset_right = -12.0
+offset_bottom = -12.0
+grow_horizontal = 0
+grow_vertical = 0
+script = ExtResource("10_target")
+
+[node name="EventFeed" type="VBoxContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = -12.0
+offset_right = 452.0
+offset_bottom = -12.0
+grow_vertical = 0
+mouse_filter = 2
+script = ExtResource("11_feed")

@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="ShipModule" format=3]
+
+[ext_resource type="Script" path="res://scripts/ships/ship_module.gd" id="1_mod"]
+
+[resource]
+script = ExtResource("1_mod")
+id = &"armor_plating_1"
+display_name = "Armor Plating Mk I"
+slot = 2
+tier = 1
+cost = 200
+roles = PackedStringArray("Mercenary")
+blurb = "Heavy hull armour."
+hull_bonus = 200.0
+shield_bonus = 180.0
+shield_regen = 12.0

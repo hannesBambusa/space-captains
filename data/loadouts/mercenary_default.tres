@@ -1,0 +1,59 @@
+[gd_resource type="Resource" script_class="ShipLoadout" load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/ships/ship_loadout.gd" id="0_load"]
+[ext_resource type="Script" path="res://scripts/ships/ship_module.gd" id="1_mod"]
+
+[sub_resource type="Resource" id="m0"]
+script = ExtResource("1_mod")
+id = &"twin_autocannon_stock"
+display_name = "Twin Autocannon"
+slot = 0
+weapon_kind = 2
+weapon_damage = 18.0
+weapon_range = 700.0
+fire_rate = 3.2
+
+[sub_resource type="Resource" id="m1"]
+script = ExtResource("1_mod")
+id = &"ammo_rack_stock"
+display_name = "Ammo Rack"
+slot = 1
+
+[sub_resource type="Resource" id="m2"]
+script = ExtResource("1_mod")
+id = &"deflector_stock"
+display_name = "Deflector"
+slot = 2
+hull_bonus = 80.0
+shield_bonus = 180.0
+shield_regen = 12.0
+
+[sub_resource type="Resource" id="m3"]
+script = ExtResource("1_mod")
+id = &"combat_thrusters_stock"
+display_name = "Combat Thrusters"
+slot = 3
+speed_mult = 1.27
+accel_mult = 1.4
+turn_mult = 1.3
+
+[sub_resource type="Resource" id="m4"]
+script = ExtResource("1_mod")
+id = &"combat_sensors_stock"
+display_name = "Combat Sensors"
+slot = 4
+sensor_range = 2600.0
+
+[resource]
+script = ExtResource("0_load")
+role_name = "Mercenary"
+base_hull = 300.0
+base_speed = 150.0
+base_acceleration = 34.0
+base_turn_rate_deg = 110.0
+base_sensor_range = 2000.0
+tool = SubResource("m0")
+cargo = SubResource("m1")
+defense = SubResource("m2")
+engine = SubResource("m3")
+sensor = SubResource("m4")

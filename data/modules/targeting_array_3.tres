@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="ShipModule" format=3]
+
+[ext_resource type="Script" path="res://scripts/ships/ship_module.gd" id="1_mod"]
+
+[resource]
+script = ExtResource("1_mod")
+id = &"targeting_array_3"
+display_name = "Targeting Array Mk III"
+slot = 4
+tier = 3
+cost = 1000
+roles = PackedStringArray("Mercenary")
+blurb = "Better hit chance and longer sight."
+sensor_range = 3300.0
+accuracy_bonus = 0.12

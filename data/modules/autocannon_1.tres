@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ShipModule" format=3]
+
+[ext_resource type="Script" path="res://scripts/ships/ship_module.gd" id="1_mod"]
+
+[resource]
+script = ExtResource("1_mod")
+id = &"autocannon_1"
+display_name = "Autocannon Mk I"
+slot = 0
+tier = 1
+cost = 220
+roles = PackedStringArray("Mercenary")
+blurb = "Harder-hitting guns."
+weapon_kind = 2
+weapon_damage = 21.0
+weapon_range = 720.0
+fire_rate = 3.3

@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="ShipModule" format=3]
+
+[ext_resource type="Script" path="res://scripts/ships/ship_module.gd" id="1_mod"]
+
+[resource]
+script = ExtResource("1_mod")
+id = &"shield_projector_3"
+display_name = "Shield Projector Mk III"
+slot = 2
+tier = 3
+cost = 950
+roles = PackedStringArray("Miner", "Salvager")
+blurb = "Stronger, faster shields."
+hull_bonus = 60.0
+shield_bonus = 320.0
+shield_regen = 18.0

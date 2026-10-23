@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="PersonalityProfile" format=3]
+
+[ext_resource type="Script" path="res://scripts/ai/personality_profile.gd" id="1_prof"]
+
+[resource]
+script = ExtResource("1_prof")
+personality = 1
+pay_weight = 1.0
+distance_weight = 0.7
+danger_weight = 1.2
+accept_threshold = 0.4
+noise = 0.12
+premium_danger = 3
+premium_factor = 1.6
+max_trip_km = 0.0
+evaluate_interval = Vector2(4.0, 6.0)
+rest_time = Vector2(8.0, 12.0)
+break_chance = 0.0
+break_time = Vector2(20.0, 40.0)
+flee_threat = 0.3
+retreat_hull = 0.6
+patrol_chance = 0.5
+attribute_base = PackedInt32Array(3, 4, 7, 6, 5, 7)
+attribute_spread = 2

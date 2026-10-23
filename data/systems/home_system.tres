@@ -1,0 +1,231 @@
+[gd_resource type="Resource" script_class="SystemDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/belt_def.gd" id="1_5yhii"]
+[ext_resource type="Script" path="res://scripts/gate_def.gd" id="2_lckmy"]
+[ext_resource type="Script" path="res://scripts/planet_def.gd" id="3_to17p"]
+[ext_resource type="Script" path="res://scripts/system_def.gd" id="4_4dhre"]
+[ext_resource type="Script" path="res://scripts/enemies/den_def.gd" id="5_den"]
+
+[sub_resource type="Resource" id="Resource_ri6ys"]
+script = ExtResource("1_5yhii")
+name = "Cinder Belt"
+count = 16000
+max_scale = 18.0
+richness = 0.25
+seed = 11
+rotation_period = 1800.0
+dust_color = Color(0.66, 0.52, 0.42, 1)
+
+[sub_resource type="Resource" id="Resource_fdqaq"]
+script = ExtResource("1_5yhii")
+name = "Talon Reach"
+ore_type = 2
+secondary_ore = 1
+secondary_share = 0.3
+orbit_radius = 13200.0
+width = 1000.0
+count = 24000
+richness = 0.5
+danger = 3
+seed = 23
+rotation_period = 3000.0
+dust_color = Color(0.6, 0.6, 0.62, 1)
+
+[sub_resource type="Resource" id="Resource_vgmyx"]
+script = ExtResource("1_5yhii")
+name = "Crystal Veil"
+ore_type = 3
+orbit_radius = 24800.0
+width = 1400.0
+count = 28000
+max_scale = 22.0
+richness = 0.8
+danger = 5
+seed = 53
+rotation_period = 6000.0
+glow = 1.6
+dust_color = Color(0.5, 0.62, 0.72, 1)
+
+[sub_resource type="Resource" id="Resource_tbifg"]
+script = ExtResource("2_lckmy")
+name = "Ostra Gate"
+target_system = "Ostra"
+orbit_radius = 26800.0
+orbit_angle_deg = 35.0
+
+[sub_resource type="Resource" id="Resource_7gfjg"]
+script = ExtResource("2_lckmy")
+name = "Kharon Gate"
+target_system = "Kharon"
+orbit_radius = 26800.0
+orbit_angle_deg = 205.0
+portal_color = Color(0.6, 0.5, 1, 1)
+
+[sub_resource type="Resource" id="Resource_djlms"]
+script = ExtResource("3_to17p")
+name = "Ashra"
+type = 4
+radius = 300.0
+seed = 3.7
+orbit_radius = 4000.0
+orbit_period = 240.0
+start_angle_deg = 300.0
+spin_period = 400.0
+axial_tilt_deg = 4.0
+atmosphere_color = Color(1, 0.45, 0.2, 0.55)
+
+[sub_resource type="Resource" id="Resource_agrij"]
+script = ExtResource("3_to17p")
+name = "Lume"
+radius = 120.0
+seed = 5.3
+orbit_radius = 1050.0
+orbit_period = 200.0
+start_angle_deg = 75.0
+spin_period = 0.0
+axial_tilt_deg = 0.0
+atmosphere_color = Color(0, 0, 0, 0)
+
+[sub_resource type="Resource" id="Resource_kvivu"]
+script = ExtResource("3_to17p")
+name = "Verda"
+type = 1
+radius = 620.0
+orbit_radius = 8600.0
+orbit_period = 760.0
+start_angle_deg = 200.0
+spin_period = 150.0
+axial_tilt_deg = 18.0
+moons = Array[Resource]([SubResource("Resource_agrij")])
+
+[sub_resource type="Resource" id="Resource_p4w24"]
+script = ExtResource("3_to17p")
+name = "Seth"
+radius = 70.0
+seed = 8.1
+orbit_radius = 750.0
+orbit_period = 160.0
+start_angle_deg = 40.0
+spin_period = 0.0
+axial_tilt_deg = 0.0
+atmosphere_color = Color(0, 0, 0, 0)
+
+[sub_resource type="Resource" id="Resource_ec8je"]
+script = ExtResource("3_to17p")
+name = "Khepri"
+type = 2
+radius = 460.0
+seed = 2.4
+orbit_radius = 11400.0
+orbit_period = 1154.0
+start_angle_deg = 95.0
+spin_period = 220.0
+axial_tilt_deg = 9.0
+atmosphere_color = Color(0.95, 0.65, 0.4, 0.55)
+moons = Array[Resource]([SubResource("Resource_p4w24")])
+
+[sub_resource type="Resource" id="Resource_nqdhm"]
+script = ExtResource("3_to17p")
+name = "Brann"
+type = 3
+radius = 150.0
+seed = 6.6
+orbit_radius = 3500.0
+orbit_period = 260.0
+start_angle_deg = 60.0
+spin_period = 0.0
+axial_tilt_deg = 0.0
+atmosphere_color = Color(0, 0, 0, 0)
+
+[sub_resource type="Resource" id="Resource_wava7"]
+script = ExtResource("3_to17p")
+name = "Kell"
+radius = 190.0
+seed = 9.4
+tint = Color(1.1, 0.92, 0.8, 1)
+orbit_radius = 4200.0
+orbit_period = 380.0
+start_angle_deg = 230.0
+spin_period = 0.0
+axial_tilt_deg = 0.0
+atmosphere_color = Color(0, 0, 0, 0)
+
+[sub_resource type="Resource" id="Resource_8t570"]
+script = ExtResource("3_to17p")
+name = "Tavros"
+type = 5
+radius = 1800.0
+seed = 4.2
+orbit_radius = 18000.0
+orbit_period = 2290.0
+start_angle_deg = 330.0
+spin_period = 90.0
+axial_tilt_deg = 22.0
+atmosphere_color = Color(0.95, 0.8, 0.6, 0.6)
+has_rings = true
+ring_inner = 1.28
+ring_outer = 1.85
+ring_color = Color(0.84, 0.76, 0.64, 1)
+moons = Array[Resource]([SubResource("Resource_nqdhm"), SubResource("Resource_wava7")])
+
+[sub_resource type="Resource" id="Resource_fpute"]
+script = ExtResource("3_to17p")
+name = "Nivis"
+type = 3
+radius = 420.0
+seed = 7.7
+orbit_radius = 22800.0
+orbit_period = 3266.0
+start_angle_deg = 150.0
+spin_period = 300.0
+axial_tilt_deg = 27.0
+atmosphere_color = Color(0.6, 0.8, 1, 0.6)
+
+[sub_resource type="Resource" id="Resource_den_talon"]
+script = ExtResource("5_den")
+name = "Rustjaw Den"
+gang = "Rustjaw"
+belt_name = "Talon Reach"
+angle_deg = 212.0
+radial_offset = 950.0
+spawn_cap = 3
+respawn_time = 50.0
+initial_spawns = 2
+hull = 2600.0
+shields = 500.0
+shield_regen = 8.0
+danger_bonus = 2
+roam_arc_deg = 20.0
+hunt_range = 9000.0
+
+[sub_resource type="Resource" id="Resource_den_veil"]
+script = ExtResource("5_den")
+name = "Ashfang Den"
+gang = "Ashfang"
+belt_name = "Crystal Veil"
+angle_deg = 168.0
+radial_offset = -1150.0
+spawn_cap = 5
+respawn_time = 35.0
+initial_spawns = 3
+hull = 5000.0
+shields = 1000.0
+shield_regen = 12.0
+danger_bonus = 4
+roam_arc_deg = 18.0
+hunt_range = 12000.0
+
+[resource]
+script = ExtResource("4_4dhre")
+system_name = "Solace"
+star_radius = 1500.0
+star_temperature = 5400.0
+light_energy = 0.95
+planets = Array[ExtResource("3_to17p")]([SubResource("Resource_djlms"), SubResource("Resource_kvivu"), SubResource("Resource_ec8je"), SubResource("Resource_8t570"), SubResource("Resource_fpute")])
+belts = Array[ExtResource("1_5yhii")]([SubResource("Resource_ri6ys"), SubResource("Resource_fdqaq"), SubResource("Resource_vgmyx")])
+gates = Array[ExtResource("2_lckmy")]([SubResource("Resource_tbifg"), SubResource("Resource_7gfjg")])
+dens = Array[ExtResource("5_den")]([SubResource("Resource_den_talon"), SubResource("Resource_den_veil")])
+station_planet = "Verda"
+station_orbit_radius = 1600.0
+station_orbit_period = 330.0
+station_start_angle_deg = 30.0

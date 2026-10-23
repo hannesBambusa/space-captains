@@ -1,0 +1,54 @@
+[gd_resource type="Resource" script_class="ShipLoadout" load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/ships/ship_loadout.gd" id="0_load"]
+[ext_resource type="Script" path="res://scripts/ships/ship_module.gd" id="1_mod"]
+
+[sub_resource type="Resource" id="m0"]
+script = ExtResource("1_mod")
+id = &"mining_laser_stock"
+display_name = "Mining Laser"
+slot = 0
+weapon_kind = 1
+drill_mult = 1.0
+
+[sub_resource type="Resource" id="m1"]
+script = ExtResource("1_mod")
+id = &"ore_hold_stock"
+display_name = "Ore Hold"
+slot = 1
+
+[sub_resource type="Resource" id="m2"]
+script = ExtResource("1_mod")
+id = &"hull_plating_stock"
+display_name = "Hull Plating"
+slot = 2
+hull_bonus = 60.0
+shield_bonus = 60.0
+shield_regen = 5.0
+
+[sub_resource type="Resource" id="m3"]
+script = ExtResource("1_mod")
+id = &"ion_drive_stock"
+display_name = "Ion Drive"
+slot = 3
+
+[sub_resource type="Resource" id="m4"]
+script = ExtResource("1_mod")
+id = &"survey_scanner_stock"
+display_name = "Survey Scanner"
+slot = 4
+sensor_range = 1500.0
+
+[resource]
+script = ExtResource("0_load")
+role_name = "Miner"
+base_hull = 220.0
+base_speed = 150.0
+base_acceleration = 32.0
+base_turn_rate_deg = 110.0
+base_sensor_range = 1500.0
+tool = SubResource("m0")
+cargo = SubResource("m1")
+defense = SubResource("m2")
+engine = SubResource("m3")
+sensor = SubResource("m4")

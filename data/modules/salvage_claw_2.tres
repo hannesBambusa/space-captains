@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="ShipModule" format=3]
+
+[ext_resource type="Script" path="res://scripts/ships/ship_module.gd" id="1_mod"]
+
+[resource]
+script = ExtResource("1_mod")
+id = &"salvage_claw_2"
+display_name = "Salvage Claw Mk II"
+slot = 0
+tier = 2
+cost = 420
+roles = PackedStringArray("Salvager")
+blurb = "Strips wrecks faster."
+weapon_kind = 1
+drill_mult = 0.76

@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="ShipModule" format=3]
+
+[ext_resource type="Script" path="res://scripts/ships/ship_module.gd" id="1_mod"]
+
+[resource]
+script = ExtResource("1_mod")
+id = &"reinforced_plating_2"
+display_name = "Reinforced Plating Mk II"
+slot = 2
+tier = 2
+cost = 420
+roles = PackedStringArray("Miner", "Salvager")
+blurb = "Thicker hull."
+hull_bonus = 220.0
+shield_bonus = 70.0
+shield_regen = 5.0
