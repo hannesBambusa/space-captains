@@ -63,7 +63,6 @@ func _run(view: String, has_view: bool) -> void:
 			continue
 		var p := manager.plan_placement(def, spot, false)
 		var b := manager.spawn_finished(def, spot, p.yaw)
-		print("DBG %s at %.0f m, link %s len %.0f" % [def.display_name, spot.length(), p.target.label() if p.target else "junction", p.pa.distance_to(p.pb)])
 		built.append(b)
 	if view == "building" and not built.is_empty():
 		var last := built[built.size() - 1]

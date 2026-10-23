@@ -11,6 +11,8 @@ extends Node
 ## Station-relative spot used for the demo outpost and the valid ghost.
 @export var demo_offset: Vector3 = Vector3(260.0, 0.0, 180.0)
 @export var invalid_offset: Vector3 = Vector3(70.0, 0.0, -40.0)
+## Valid ghost spot: within corridor reach of the station.
+@export var ghost_offset: Vector3 = Vector3(-90.0, 0.0, 220.0)
 @export var demo_seed: int = 7
 
 var _ghost_offset := Vector3.INF
@@ -67,7 +69,7 @@ func _run(demo: String, ghost: String, has_view: bool) -> void:
 		if not has_view and cam:
 			cam.focus_on(b, 420.0, true)
 	if not ghost.is_empty():
-		_ghost_offset = invalid_offset if ghost == "invalid" else demo_offset + Vector3(-140.0, 0.0, 260.0)
+		_ghost_offset = invalid_offset if ghost == "invalid" else ghost_offset
 		hud.placement.arm(def)
 		if not has_view and cam and manager.solar_system.home_station:
 			cam.focus_on(manager.solar_system.home_station, 900.0, true)

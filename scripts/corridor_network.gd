@@ -174,13 +174,13 @@ func setup(station_node: HomeStation) -> void:
 
 
 func _process(_delta: float) -> void:
-	for owner: Building in _looks:
-		if not is_instance_valid(owner):
+	for builder: Building in _looks:
+		if not is_instance_valid(builder):
 			continue
-		var mat: ShaderMaterial = _looks[owner]["mat"]
+		var mat: ShaderMaterial = _looks[builder]["mat"]
 		var h := global_position.y + corridor_height
 		var r := CorridorKit.TUBE_RADIUS + 1.5
-		mat.set_shader_parameter("fill_y", lerpf(h - r, h + r, owner.get_progress()))
+		mat.set_shader_parameter("fill_y", lerpf(h - r, h + r, builder.get_progress()))
 
 
 # --- Structures -----------------------------------------------------------------
@@ -441,13 +441,13 @@ func _station_info(station_node: HomeStation) -> ModelInfo:
 
 # --- Graph edits ------------------------------------------------------------------
 
-func _link(a: Anchor, b: Anchor, pa: Vector3, pb: Vector3, owner: Building) -> Corridor:
+func _link(a: Anchor, b: Anchor, pa: Vector3, pb: Vector3, builder: Building) -> Corridor:
 	var c := Corridor.new()
 	c.a = a
 	c.b = b
 	c.pa = pa
 	c.pb = pb
-	c.owner = owner
+	c.owner = builder
 	a.corridors.append(c)
 	b.corridors.append(c)
 	corridors.append(c)
@@ -461,13 +461,13 @@ func _unlink(c: Corridor) -> void:
 
 
 ## Splits [param c] at plane point [param q] with a new junction.
-func _split(c: Corridor, q: Vector3, owner: Building) -> Anchor:
+func _split(c: Corridor, q: Vector3, builder: Building) -> Anchor:
 	var j := Anchor.new()
 	j.kind = Anchor.Kind.JUNCTION
 	j.position = _flat(q)
 	j.axis = _flat(c.pb - c.pa).normalized()
 	j.radius = CorridorKit.JUNCTION_PORT
-	j.owner = owner
+	j.owner = builder
 	anchors.append(j)
 	_unlink(c)
 	var hub := j.position + Vector3.UP * corridor_height
@@ -520,11 +520,11 @@ static func corridor_pieces(pa: Vector3, pb: Vector3, collar_a: bool, collar_b: 
 	if length < 0.5:
 		return
 	var dir := span / length
-	var basis := Basis.looking_at(dir, Vector3.UP)
+	var rot := Basis.looking_at(dir, Vector3.UP)
 	var start := pa
 	var end := pb
 	if collar_a:
-		_push(out, CorridorKit.Part.COLLAR, Transform3D(basis, pa))
+		_push(out, CorridorKit.Part.COLLAR, Transform3D(rot, pa))
 		start += dir * CorridorKit.COLLAR_LENGTH
 	if collar_b:
 		_push(out, CorridorKit.Part.COLLAR, Transform3D(Basis.looking_at(-dir, Vector3.UP), pb))
@@ -534,7 +534,7 @@ static func corridor_pieces(pa: Vector3, pb: Vector3, collar_a: bool, collar_b: 
 		return
 	var n := maxi(roundi(middle / CorridorKit.SEGMENT_LENGTH), 1)
 	var s := middle / (n * CorridorKit.SEGMENT_LENGTH)
-	var seg_basis := basis * Basis.from_scale(Vector3(1.0, 1.0, s))
+	var seg_basis := rot * Basis.from_scale(Vector3(1.0, 1.0, s))
 	for i in n:
 		_push(out, CorridorKit.Part.SEGMENT, Transform3D(seg_basis, start + dir * (i * CorridorKit.SEGMENT_LENGTH * s)))
 
@@ -582,37 +582,37 @@ func _rebuild() -> void:
 			junction_piece(j.position, j.axis, solid if _is_solid(j.owner) else _bucket(building, j.owner))
 	for part: CorridorKit.Part in PARTS:
 		fill_multimesh(_solid[part], solid.get(part, []))
-	for owner: Building in _looks.keys():
-		if not building.has(owner):
-			for mmi: MultiMeshInstance3D in (_looks[owner]["mmis"] as Dictionary).values():
+	for builder: Building in _looks.keys():
+		if not building.has(builder):
+			for mmi: MultiMeshInstance3D in (_looks[builder]["mmis"] as Dictionary).values():
 				mmi.queue_free()
-			_looks.erase(owner)
-	for owner: Building in building:
-		if not _looks.has(owner):
+			_looks.erase(builder)
+	for builder: Building in building:
+		if not _looks.has(builder):
 			var mat := ShaderMaterial.new()
 			mat.shader = CONSTRUCTION_SHADER
 			mat.set_shader_parameter("grid_size", 2.5)
 			var mmis := {}
 			for part: CorridorKit.Part in PARTS:
 				mmis[part] = _make_mmi(part, mat)
-			_looks[owner] = {"mat": mat, "mmis": mmis}
-		var parts: Dictionary = building[owner]
+			_looks[builder] = {"mat": mat, "mmis": mmis}
+		var parts: Dictionary = building[builder]
 		for part: CorridorKit.Part in PARTS:
-			fill_multimesh(_looks[owner]["mmis"][part], parts.get(part, []))
+			fill_multimesh(_looks[builder]["mmis"][part], parts.get(part, []))
 	set_process(not _looks.is_empty())
 	if not _looks.is_empty():
 		_process(0.0)
 	changed.emit()
 
 
-static func _bucket(by_owner: Dictionary, owner: Building) -> Dictionary:
-	if not by_owner.has(owner):
-		by_owner[owner] = {}
-	return by_owner[owner]
+static func _bucket(by_owner: Dictionary, builder: Building) -> Dictionary:
+	if not by_owner.has(builder):
+		by_owner[builder] = {}
+	return by_owner[builder]
 
 
-static func _is_solid(owner: Building) -> bool:
-	return owner == null or not is_instance_valid(owner) or owner.is_active()
+static func _is_solid(builder: Building) -> bool:
+	return builder == null or not is_instance_valid(builder) or builder.is_active()
 
 
 func _make_mmi(part: CorridorKit.Part, mat: Material) -> MultiMeshInstance3D:

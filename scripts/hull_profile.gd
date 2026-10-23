@@ -30,7 +30,7 @@ static func build(root: Node3D, height: float, half_band: float, lateral: float,
 				w[i] = xf * verts[i]
 				if absf(w[i].y - height) <= half_band:
 					_add(prof, w[i].x, w[i].z, lateral)
-			var tri_count := idx.size() / 3 if not idx.is_empty() else w.size() / 3
+			var tri_count := int((idx.size() if not idx.is_empty() else w.size()) / 3.0)
 			for t in tri_count:
 				var a := w[idx[t * 3]] if not idx.is_empty() else w[t * 3]
 				var b := w[idx[t * 3 + 1]] if not idx.is_empty() else w[t * 3 + 1]

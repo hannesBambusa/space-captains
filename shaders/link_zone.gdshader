@@ -10,8 +10,8 @@ const int MAX_DISCS = 48;
 const int MAX_SEGS = 64;
 
 uniform vec4 zone_color : source_color = vec4(0.45, 0.85, 1.0, 1.0);
-uniform float fill = 0.03;
-uniform float edge = 0.45;
+uniform float fill = 0.02;
+uniform float edge = 0.35;
 uniform float edge_px = 1.6;
 // x, z, inner (keep-out) radius, outer (reach) radius.
 uniform vec4 discs[MAX_DISCS];

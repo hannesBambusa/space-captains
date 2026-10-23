@@ -233,7 +233,8 @@ func frame_area(target: Node3D, center_offset: Vector3, radius: float, pitch_deg
 		_apply()
 	else:
 		_follow_offset = _pos - tp
-		_pitch_goal = pitch if absf(angle_difference(deg_to_rad(now), deg_to_rad(pitch))) > deg_to_rad(0.05) else NAN
+		# Also when the pitch is kept: it holds while the zoom changes.
+		_pitch_goal = pitch
 	if had != _follow:
 		follow_changed.emit(_follow)
 
