@@ -2,7 +2,7 @@
 
 Run:
   /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
-      --python /Users/hannesalm/code/games/space-majesty/blender/gen_shield_generator.py
+      --python blender/gen_shield_generator.py
   Add `-- --no-preview` to skip the PNG renders, `-- --no-textures` for flat materials.
 Textures: one 2048 atlas baked with the station_textures surface kinds (plus "radiator"),
 saved as blender/textures/shield_*.{jpg,png} and embedded as JPEG.

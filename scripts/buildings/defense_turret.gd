@@ -262,3 +262,11 @@ func _animate(_delta: float) -> void:
 	_light_mat.albedo_color = c
 	_light_mat.emission = c
 	_light_mat.emission_energy_multiplier = energy
+
+
+func _save_extra(d: Dictionary) -> void:
+	d["extra"] = {"fire_at_will": fire_at_will, "kills": kills, "shots_fired": shots_fired}
+
+
+func _load_extra(d: Dictionary) -> void:
+	SaveUtil.apply_props(self, d)

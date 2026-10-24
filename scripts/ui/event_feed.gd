@@ -77,11 +77,14 @@ func _on_posted(e: Dictionary) -> void:
 	var clock := UIUtil.label("%02d:%02d" % [floori(t / 60.0) % 60, t % 60], &"DimLabel")
 	h.add_child(clock)
 	var tag := UIUtil.label(KIND_TAGS[kind], &"ValueLabel")
-	tag.add_theme_color_override("font_color", KIND_COLORS[kind])
+	var fid := StringName(e.get("faction", &""))
+	# Lines about a hostile faction wear its colour (scavengers keep the kind colour).
+	var tone: Color = KIND_COLORS[kind] if fid.is_empty() or fid == Factions.DEFAULT_ID else Factions.get_def(fid).color
+	tag.add_theme_color_override("font_color", tone)
 	tag.custom_minimum_size.x = 14.0
 	h.add_child(tag)
 	var l := UIUtil.label(String(e["text"]))
-	l.add_theme_color_override("font_color", KIND_COLORS[kind].lerp(Color.WHITE, 0.35))
+	l.add_theme_color_override("font_color", tone.lerp(Color.WHITE, 0.35))
 	l.add_theme_font_size_override("font_size", 14)
 	l.clip_text = true
 	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS

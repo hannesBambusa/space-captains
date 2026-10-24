@@ -10,6 +10,8 @@ extends Control
 ## big on screen. Parked ships are hidden and counted in a "n docked" badge
 ## on their outpost. Hostiles near the home station and the selected ship get
 ## an arrow at the screen edge with their distance while off screen.
+## A base being announced (DenArrivalSite) shows as a pulsing faded den
+## icon labelled "Arriving m:ss".
 ##
 ## Clicking a marker selects it and the camera follows; hovering shows a
 ## compact tooltip. M (or the minimap button) cycles the density:
@@ -173,12 +175,16 @@ func arrow_targets() -> Array[Node3D]:
 	return out
 
 
-## Role colour: player cyan/white with a role tint, hostiles red/orange.
+## Role colour: player cyan/white with a role tint, hostiles in their
+## faction's colour (scavengers red, their raiders orange).
 static func color_for(n: Node3D) -> Color:
 	if n is ScavengerDen:
-		return DEN_COLOR
+		return (n as ScavengerDen).faction_def.color
+	if n is DenArrivalSite:
+		return (n as DenArrivalSite).faction_def.color
 	if n is ScavengerShip:
-		return RAIDER_COLOR if (n as ScavengerShip).is_raider else SCAVENGER_COLOR
+		var f := (n as ScavengerShip).faction_def
+		return f.raider_color if (n as ScavengerShip).is_raider else f.color
 	var s := n as Ship
 	if s == null:
 		return Color.WHITE
@@ -244,7 +250,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func select_and_follow(target: Node3D) -> void:
 	if hud == null or not is_instance_valid(target):
 		return
-	if hud.selection:
+	if hud.selection and not target is DenArrivalSite:
 		hud.selection.select(target)
 	if hud.camera:
 		hud.camera.focus_on(target, hud.camera.get_distance())
@@ -306,6 +312,14 @@ func _process(delta: float) -> void:
 				continue
 			var e := _next_entry()
 			_fill_den(e, d, cam, sp, d == selected or d == followed)
+		for n in get_tree().get_nodes_in_group(DenArrivalSite.GROUP):
+			var site := n as DenArrivalSite
+			if site == null or not site.is_inside_tree() or cam.is_position_behind(site.global_position):
+				continue
+			var sp := cam.unproject_position(site.global_position)
+			if not screen.has_point(sp):
+				continue
+			_fill_site(_next_entry(), site, sp, site == followed)
 	if mode == Mode.ALL and hud.manager:
 		_collect_badges(cam, screen, zoom_alpha)
 	if mode == Mode.ALL:
@@ -387,7 +401,7 @@ func _fill_den(e: Entry, d: ScavengerDen, cam: Camera3D, sp: Vector2, emphasis: 
 	e.pos = sp
 	e.hostile = true
 	e.emphasis = emphasis
-	e.color = DEN_COLOR
+	e.color = d.faction_def.color
 	e.shape = Shape.DEN
 	e.hull = d.hull_fraction()
 	e.glyph = Glyph.NONE
@@ -397,6 +411,23 @@ func _fill_den(e: Entry, d: ScavengerDen, cam: Camera3D, sp: Vector2, emphasis: 
 	e.alpha = 1.0 - smoothstep(model_fade_px.x * 2.0, model_fade_px.y * 2.0, e.model_px)
 	e.heading = 0.0
 	e.priority = 0 if emphasis else 1
+
+
+func _fill_site(e: Entry, site: DenArrivalSite, sp: Vector2, emphasis: bool) -> void:
+	e.target = site
+	e.ship = null
+	e.pos = sp
+	e.hostile = true
+	e.emphasis = emphasis
+	e.color = site.faction_def.color
+	e.shape = Shape.DEN
+	e.hull = 1.0
+	e.glyph = Glyph.NONE
+	e.label = "Arriving %s" % site.countdown_text()
+	e.model_px = 0.0
+	e.alpha = 0.45 + 0.3 * sin(Time.get_ticks_msec() * 0.004)
+	e.heading = 0.0
+	e.priority = 0
 
 
 func _shape_for(s: Ship) -> Shape:
@@ -585,7 +616,7 @@ func _layout_labels(zoom_alpha: float) -> void:
 	for i in _count:
 		var e := _entries[i]
 		e.show_label = false
-		var forced := e.emphasis or e == _hover
+		var forced := e.emphasis or e == _hover or e.target is DenArrivalSite
 		e.label_alpha = 1.0 if forced else zoom_alpha
 		if e.label_alpha < 0.03 or e.label.is_empty():
 			continue
@@ -647,9 +678,12 @@ func _update_tooltip(delta: float) -> void:
 
 
 func _tooltip_text(t: Node3D) -> String:
+	if t is DenArrivalSite:
+		var a := t as DenArrivalSite
+		return "%s\n%s ships gathering near %s\n%s" % [a.get_display_name(), a.faction_def.unit_name, a.def.belt_name, a.get_status_text()]
 	if t is ScavengerDen:
 		var d := t as ScavengerDen
-		return "%s\nScavenger hideout, claims %s\n%s\nHull %d%%" % [d.get_display_name(), d.belt.def.name if d.belt else "?", d.get_status_text(), roundi(d.hull_fraction() * 100.0)]
+		return "%s\n%s %s, claims %s\n%s\nHull %d%%" % [d.get_display_name(), d.faction_def.display_name, d.faction_def.den_kind, d.belt.def.name if d.belt else "?", d.get_status_text(), roundi(d.hull_fraction() * 100.0)]
 	if t is Building:
 		var b := t as Building
 		return "%s\n%s" % [b.display_name, b.get_status_text()]
@@ -660,7 +694,7 @@ func _tooltip_text(t: Node3D) -> String:
 	if s is ScavengerShip:
 		var sc := s as ScavengerShip
 		lines.append(sc.get_display_name() + (" (raider)" if sc.is_raider else ""))
-		lines.append("Scavenger, %s" % (sc.den.get_display_name() if is_instance_valid(sc.den) else "no hideout"))
+		lines.append("%s, %s" % [sc.faction_def.display_name, sc.den.get_display_name() if is_instance_valid(sc.den) else "no base"])
 	else:
 		lines.append(s.get_display_name())
 		var role_line := s.get_role_name()

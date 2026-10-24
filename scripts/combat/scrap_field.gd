@@ -158,3 +158,25 @@ func _build() -> void:
 static func _clock(t: float) -> String:
 	var s := int(t)
 	return "%d:%02d" % [floori(s / 60.0), s % 60]
+
+
+# --- Save ---------------------------------------------------------------------
+
+func save_state() -> Dictionary:
+	var d := SaveUtil.props(self, ["amount", "initial_amount", "lifetime", "radius", "display_name", "created_at", "_age"])
+	d["id"] = SaveIds.of(self)
+	d["position"] = global_position
+	d["den_ruins"] = bool(get_meta(&"den_ruins", false))
+	return d
+
+
+## A field from [method save_state] (the chunks are rebuilt, not the same
+## scatter).
+static func restore(world: CombatWorld, d: Dictionary) -> ScrapField:
+	var f := world.spawn_scrap(d["position"] as Vector3, int(d["amount"]), float(d["lifetime"]), float(d["radius"]), String(d["display_name"]))
+	f.initial_amount = int(d.get("initial_amount", f.amount))
+	f.created_at = float(d.get("created_at", SimClock.time))
+	f._age = float(d.get("_age", 0.0))
+	if bool(d.get("den_ruins", false)):
+		f.set_meta(&"den_ruins", true)
+	return f

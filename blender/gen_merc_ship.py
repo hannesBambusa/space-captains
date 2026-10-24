@@ -2,7 +2,7 @@
 
 Run:
   /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
-      --python /Users/hannesalm/code/games/space-majesty/blender/gen_merc_ship.py
+      --python blender/gen_merc_ship.py
   Add `-- --no-preview` to skip the PNG renders.
 
 Design: functional hard sci-fi gunship in the Rocinante mould. A tall, blunt,

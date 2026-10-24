@@ -246,3 +246,14 @@ func sell(ship: Ship, m: ShipModule, context: String = "") -> ShipModule:
 	sold.emit(sale)
 	changed.emit()
 	return fitted
+
+
+# --- Save ---------------------------------------------------------------------
+
+func save_state() -> Dictionary:
+	return SaveUtil.props(self, ["sales", "total_sales", "total_income", "stockouts"])
+
+
+func load_state(d: Dictionary, _refs: SaveRefs) -> void:
+	SaveUtil.apply_props(self, d)
+	changed.emit()

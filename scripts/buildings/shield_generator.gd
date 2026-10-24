@@ -84,3 +84,12 @@ func _animate(delta: float) -> void:
 		var up := is_instance_valid(shield) and shield.is_up() and is_active()
 		var pulse := 0.85 + 0.15 * sin(SimClock.time * lerpf(1.2, 3.5, 1.0 - _shown_charge) * TAU * 0.5)
 		_glow_mat.emission_energy_multiplier = _glow_base * (lerpf(0.35, 1.0, _shown_charge) * pulse if up else 0.12)
+
+
+func _save_extra(d: Dictionary) -> void:
+	d["extra"] = {"shield": shield.save_state() if is_instance_valid(shield) else {}}
+
+
+func _load_extra(d: Dictionary) -> void:
+	if is_instance_valid(shield):
+		shield.load_state(d.get("shield", {}))

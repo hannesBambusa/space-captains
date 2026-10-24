@@ -257,3 +257,15 @@ func _trim_history() -> void:
 	var cut := SimClock.time - throughput_window
 	while not _history.is_empty() and float(_history[0]["time"]) < cut:
 		_history.remove_at(0)
+
+
+# --- Save ---------------------------------------------------------------------
+
+## The stock and counters; the shuttles are saved as ships.
+func save_state() -> Dictionary:
+	return SaveUtil.props(self, ["stock", "total_shipped", "trips", "_history", "_waiting_since", "_check_timer", "_supply_timer", "_spawned"])
+
+
+func load_state(d: Dictionary, _refs: SaveRefs) -> void:
+	SaveUtil.apply_props(self, d)
+	changed.emit()

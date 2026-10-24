@@ -13,6 +13,9 @@ const CORONA_CORE_FRACTION := 0.22
 @export var light_falloff: float = 0.18
 ## Distance at which the light has exactly the configured energy.
 @export var light_reference_distance: float = 12000.0
+## Brightness of the star's disc and of its corona glow.
+@export var disc_intensity: float = 3.2
+@export var corona_intensity: float = 0.35
 
 var radius: float = 1500.0
 var color: Color = Color.WHITE
@@ -35,7 +38,7 @@ func build(star_radius: float, star_color: Color, light_energy: float, light_ran
 	sm.shader = SUN_SHADER
 	sm.set_shader_parameter("core_color", star_color.lerp(Color.WHITE, 0.55))
 	sm.set_shader_parameter("limb_color", star_color.lerp(Color(1.0, 0.4, 0.1), 0.45))
-	sm.set_shader_parameter("intensity", 6.0)
+	sm.set_shader_parameter("intensity", disc_intensity)
 	sm.set_shader_parameter("granulation", 0.16)
 	sphere.material_override = sm
 	add_child(sphere)
@@ -55,7 +58,7 @@ func build(star_radius: float, star_color: Color, light_energy: float, light_ran
 	cm.set_shader_parameter("core_fraction", CORONA_CORE_FRACTION)
 	cm.set_shader_parameter("corona_color", star_color.lerp(Color.WHITE, 0.65))
 	cm.set_shader_parameter("outer_color", star_color.lerp(Color(1.0, 0.72, 0.45), 0.4))
-	cm.set_shader_parameter("intensity", 0.6)
+	cm.set_shader_parameter("intensity", corona_intensity)
 	cm.set_shader_parameter("falloff", 2.8)
 	cm.set_shader_parameter("ray_strength", 0.16)
 	corona.material_override = cm

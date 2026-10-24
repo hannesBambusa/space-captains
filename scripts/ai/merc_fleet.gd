@@ -3,7 +3,8 @@ extends RefCounted
 ## A group of mercenaries that band together for one bounty and split it.
 ##
 ## How strong a target is, in "default mercenaries needed" ([method need_for]):
-## a den counts its hull and shields, its guns and the scavengers it has out;
+## a den counts its hull and shields, its guns and the ships it has out
+## (scaled by their faction's guns and hulls);
 ## a scavenger ship counts itself and the hostiles flying with it. Above
 ## [constant SOLO_NEED] (scaled by the merc's own ship) a bounty is too much
 ## for one ship. Then the merc (MercenaryEvaluator) either goes alone anyway
@@ -42,8 +43,14 @@ const MAX_SIZE := 4
 ## Den hull plus shields one default mercenary is worth.
 const DEN_EHP_PER_MERC := 1600.0
 const DEN_GUN_NEED := 0.5
-## Each scavenger a den has out, or flying with a ship target.
+## Gun need of a den with [constant REF_DEN_GUN_DPS] of point defence (a
+## Scavenger Hideout's); other factions scale by their guns.
+const REF_DEN_GUN_DPS := 12.0
+## Each scavenger a den has out, or flying with a ship target; a den's
+## ships of other factions scale by their hull plus shields against
+## [constant REF_ESCORT_EHP] (a scavenger's).
 const ESCORT_NEED := 0.5
+const REF_ESCORT_EHP := 350.0
 const ESCORT_RADIUS := 900.0
 ## Reference default mercenary: hull plus shields, and damage per second.
 const REF_EHP := 560.0
@@ -111,7 +118,11 @@ static func target_need(target: Node3D) -> float:
 	if target is ScavengerDen:
 		var den := target as ScavengerDen
 		var ehp := den.durability.hull + den.durability.shields
-		return ehp / DEN_EHP_PER_MERC + DEN_GUN_NEED + ESCORT_NEED * float(den.spawns.size())
+		var need := ehp / DEN_EHP_PER_MERC + DEN_GUN_NEED * den.faction_def.den_gun_dps() / REF_DEN_GUN_DPS
+		for s in den.spawns:
+			if is_instance_valid(s) and not s.dead and s.durability:
+				need += ESCORT_NEED * (s.durability.max_hull + s.durability.max_shields) / REF_ESCORT_EHP
+		return need
 	var need := 0.6
 	var d := target.get(&"durability") as Durability
 	if d:

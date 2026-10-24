@@ -2,7 +2,7 @@
 
 Run:
   /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
-      --python /Users/hannesalm/code/games/space-majesty/blender/gen_scavenger_ship.py
+      --python blender/gen_scavenger_ship.py
   Add `-- --no-preview` to skip the PNG renders.
 
 Design: patched-together belter raider in the same functional language as the player

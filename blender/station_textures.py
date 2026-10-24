@@ -375,7 +375,7 @@ def build_solar_cells(nb):
     cell_rnd = nb.white(nb.v("FLOOR", q))
     big = nb.noise(P, 0.6, 2.0)
     tone = nb.m("ADD", 0.82, nb.m("ADD", nb.m("MULTIPLY", cell_rnd, 0.22), nb.m("MULTIPLY", big, 0.12)))
-    cell = nb.v("SCALE", (0.006, 0.016, 0.068), scale=tone)
+    cell = nb.v("SCALE", (0.008, 0.014, 0.042), scale=tone)
     metal_line = nb.m("MULTIPLY", nb.m("MAXIMUM", bus, nb.m("MULTIPLY", finger, 0.25)), nb.inv(back))
     col = nb.mixv(back, cell, (0.07, 0.075, 0.09))
     col = nb.mixv(metal_line, col, (0.32, 0.33, 0.35))
@@ -673,28 +673,424 @@ def load_saved(path, data):
     return img
 
 
-# ------------------------------------------------------------------ entry point
-def texture_station(objs, mats, pad_centres):
-    """objs: station mesh objects. mats: gen_station.MATS (key -> material)."""
-    t0 = time.time()
-    atlas_keys = [k for k in KINDS if k in mats]
-    atlas_mats = {mats[k] for k in atlas_keys}
-    solar_obj = next(o for o in objs if o.name == "station_solar")
+# ------------------------------------------------------------------ worn industrial look
+# Used by the home station and its addon modules (gen_station.py, gen_station_addons.py).
+# KINDS / build_surface above stay as they were: the factory, turret, shield generator and
+# outposts still bake with them.
+#
+# Low-saturation working-station palette: off-white and mid-grey paint, bare metal, a little
+# faded accent paint. Seams at three scales (big panels in a staggered brick layout, plates,
+# small access hatches), rivet rows along the big seams only, per-panel tone variation with
+# odd replacement panels, grime, streaks, chipped edges, scorch points, stencilled decals.
+# Colours are linear.
+WORN_KINDS = {
+    "hull": dict(big=(4.0, 3.0), plate=(2.0, 1.5),
+                 tones=[(0.50, 0.50, 0.485), (0.475, 0.478, 0.47), (0.52, 0.515, 0.495),
+                        (0.455, 0.462, 0.46), (0.49, 0.482, 0.46), (0.44, 0.448, 0.45)],
+                 plate_var=0.035, rough=(0.52, 0.12), metal=0.0, seam_big=0.36,
+                 seam_small=0.1, rivets=True, hatches=0.14, chip=(0.16, 0.165, 0.17),
+                 chip_metal=0.75, chip_k=1.0, grime_k=1.0, streak_k=0.42, bleach=0.25),
+    "hull2": dict(big=(4.0, 2.5), plate=(1.0, 1.25),
+                  tones=[(0.20, 0.21, 0.22), (0.17, 0.18, 0.19), (0.23, 0.235, 0.24),
+                         (0.15, 0.155, 0.16), (0.21, 0.20, 0.19), (0.18, 0.19, 0.205)],
+                  plate_var=0.05, rough=(0.55, 0.12), metal=0.05, seam_big=0.4,
+                  seam_small=0.14, rivets=True, hatches=0.12, chip=(0.30, 0.30, 0.31),
+                  chip_metal=0.85, chip_k=0.9, grime_k=0.9, streak_k=0.35, bleach=0.2),
+    "hull3": dict(big=(3.0, 3.0), plate=(1.5, 1.5),
+                  tones=[(0.36, 0.345, 0.31), (0.34, 0.33, 0.30), (0.375, 0.36, 0.325),
+                         (0.33, 0.322, 0.30), (0.355, 0.345, 0.32), (0.32, 0.31, 0.29)],
+                  plate_var=0.035, rough=(0.58, 0.12), metal=0.0, seam_big=0.36,
+                  seam_small=0.1, rivets=True, hatches=0.12, chip=(0.16, 0.165, 0.17),
+                  chip_metal=0.75, chip_k=1.1, grime_k=1.1, streak_k=0.45, bleach=0.25),
+    "dark": dict(big=(2.0, 2.0), plate=(1.0, 1.0),
+                 tones=[(0.055, 0.058, 0.062), (0.047, 0.05, 0.053), (0.065, 0.066, 0.068),
+                        (0.042, 0.044, 0.046), (0.06, 0.058, 0.055), (0.05, 0.052, 0.056)],
+                 plate_var=0.05, rough=(0.5, 0.14), metal=0.55, seam_big=0.35,
+                 seam_small=0.15, rivets=False, hatches=0.0, chip=(0.26, 0.26, 0.27),
+                 chip_metal=1.0, chip_k=0.8, grime_k=0.5, streak_k=0.2, bleach=0.15),
+    "metal": dict(big=(3.0, 1.0), plate=(1.5, 1.0),
+                  tones=[(0.30, 0.30, 0.31), (0.27, 0.27, 0.275), (0.33, 0.33, 0.335),
+                         (0.25, 0.255, 0.26), (0.31, 0.305, 0.30), (0.28, 0.285, 0.29)],
+                  plate_var=0.04, rough=(0.36, 0.1), metal=0.9, seam_big=0.3,
+                  seam_small=0.1, rivets=False, hatches=0.0, chip=(0.36, 0.36, 0.37),
+                  chip_metal=1.0, chip_k=0.0, grime_k=0.8, streak_k=0.3, bleach=0.0),
+    "accent": dict(big=(3.0, 2.0), plate=(1.5, 1.0),
+                   tones=[(0.29, 0.115, 0.04), (0.25, 0.10, 0.035), (0.32, 0.14, 0.055),
+                          (0.23, 0.105, 0.05), (0.27, 0.125, 0.05), (0.26, 0.11, 0.045)],
+                   plate_var=0.06, rough=(0.6, 0.1), metal=0.0, seam_big=0.4,
+                   seam_small=0.15, rivets=False, hatches=0.0, chip=(0.16, 0.165, 0.17),
+                   chip_metal=0.75, chip_k=1.5, grime_k=1.0, streak_k=0.45, bleach=0.45),
+    "hazard": dict(big=(3.0, 3.0), plate=(1.5, 1.5),
+                   tones=[(0.21, 0.165, 0.065), (0.195, 0.155, 0.06), (0.225, 0.175, 0.07),
+                          (0.19, 0.15, 0.062), (0.215, 0.168, 0.066), (0.2, 0.16, 0.064)],
+                   plate_var=0.05, rough=(0.62, 0.08), metal=0.0, seam_big=0.3,
+                   seam_small=0.1, rivets=False, hatches=0.0, chip=(0.12, 0.12, 0.125),
+                   chip_metal=0.7, chip_k=1.8, grime_k=1.1, streak_k=0.5, bleach=0.4,
+                   stripes=0.8),
+    "pad": dict(big=(3.0, 3.0), plate=(1.5, 1.5),
+                tones=[(0.095, 0.095, 0.10), (0.085, 0.087, 0.09), (0.105, 0.105, 0.11),
+                       (0.08, 0.08, 0.083), (0.10, 0.098, 0.095), (0.09, 0.09, 0.094)],
+                plate_var=0.06, rough=(0.72, 0.08), metal=0.2, seam_big=0.4,
+                seam_small=0.25, rivets=True, hatches=0.08, chip=(0.30, 0.30, 0.31),
+                chip_metal=0.9, chip_k=0.8, grime_k=1.0, streak_k=0.2, bleach=0.15, pad=True),
+    "mli": dict(big=(2.4, 1.8), plate=(1.2, 0.9),
+                tones=[(0.50, 0.49, 0.455), (0.47, 0.465, 0.44), (0.53, 0.52, 0.48),
+                       (0.45, 0.445, 0.425), (0.51, 0.50, 0.465), (0.48, 0.47, 0.44)],
+                plate_var=0.04, rough=(0.86, 0.06), metal=0.0, seam_big=0.18,
+                seam_small=0.06, rivets=False, hatches=0.0, chip=(0.5, 0.5, 0.5),
+                chip_metal=0.0, chip_k=0.0, grime_k=1.2, streak_k=0.35, bleach=0.2,
+                quilt=0.6),
+    "mli_gold": dict(big=(2.0, 1.6), plate=(1.0, 0.8),
+                     tones=[(0.60, 0.39, 0.12), (0.55, 0.35, 0.10), (0.64, 0.43, 0.15),
+                            (0.52, 0.34, 0.11), (0.58, 0.38, 0.13), (0.56, 0.36, 0.115)],
+                     plate_var=0.05, rough=(0.30, 0.10), metal=1.0, seam_big=0.2,
+                     seam_small=0.06, rivets=False, hatches=0.0, chip=(0.6, 0.6, 0.6),
+                     chip_metal=1.0, chip_k=0.0, grime_k=0.6, streak_k=0.2, bleach=0.0,
+                     quilt=0.45, foil=True),
+    "mli_silver": dict(big=(2.0, 1.6), plate=(1.0, 0.8),
+                       tones=[(0.60, 0.60, 0.61), (0.55, 0.555, 0.56), (0.64, 0.64, 0.645),
+                              (0.52, 0.525, 0.53), (0.58, 0.58, 0.585), (0.56, 0.56, 0.57)],
+                       plate_var=0.05, rough=(0.26, 0.10), metal=1.0, seam_big=0.2,
+                       seam_small=0.06, rivets=False, hatches=0.0, chip=(0.6, 0.6, 0.6),
+                       chip_metal=1.0, chip_k=0.0, grime_k=0.6, streak_k=0.2, bleach=0.0,
+                       quilt=0.45, foil=True),
+    "radiator": dict(big=(6.0, 0.6), plate=(6.0, 0.3),
+                     tones=[(0.47, 0.475, 0.48), (0.44, 0.445, 0.45), (0.50, 0.505, 0.51),
+                            (0.43, 0.435, 0.44), (0.46, 0.465, 0.47), (0.45, 0.455, 0.46)],
+                     plate_var=0.03, rough=(0.45, 0.08), metal=0.15, seam_big=0.35,
+                     seam_small=0.25, rivets=False, hatches=0.0, chip=(0.3, 0.3, 0.31),
+                     chip_metal=0.9, chip_k=0.4, grime_k=0.7, streak_k=0.3, bleach=0.2,
+                     fins=True),
+}
+WORN_GRIME = (0.46, 0.43, 0.38)
+DECAL_COLS, DECAL_ROWS = 4, 16      # decal sheet cells, 4:1 each (sheet is square)
 
-    unwrap_atlas(objs, atlas_mats)
-    set_solar_uvs(solar_obj, mats["solar"])
-    for o in objs:
-        zero_uvs(o, {mats[k] for k in EMISSIVE})
 
-    setup_cycles(8)
-    dummy = new_image("bake_dummy", 8, False)
-    for k in EMISSIVE + ("solar",):
-        add_dummy_target(mats[k], dummy)
+def worn_fields(nb, cfg, seed):
+    """Seams at three scales in panel space. Returns a dict of sockets."""
+    P = nb.v("ADD", nb.uvmap("panel"), (seed * 17.0, seed * 31.0, seed * 7.0))
+    px, py, pz = nb.sep(P)
 
-    # pass 1: masks (R ao 0.8 m, G ao 4 m, B edge) shared by every kind
-    masks = new_image("station_masks", ATLAS_RES, True)
+    def grid(sx, sy, stagger):
+        qy = nb.m("DIVIDE", py, sy)
+        row = nb.m("FLOOR", qy)
+        qx = nb.m("ADD", nb.m("DIVIDE", px, sx), nb.m("MULTIPLY", row, stagger))
+        fx, fy = nb.m("FRACT", qx), nb.m("FRACT", qy)
+        dx = nb.m("MULTIPLY", nb.m("MINIMUM", fx, nb.inv(fx)), sx)
+        dy = nb.m("MULTIPLY", nb.m("MINIMUM", fy, nb.inv(fy)), sy)
+        cell = nb.comb(nb.m("FLOOR", qx), row, pz)
+        return dx, dy, nb.m("MINIMUM", dx, dy), cell
+
+    bx, by = cfg["big"]
+    sx, sy = cfg["plate"]
+    bdx, bdy, bd, bcell = grid(bx, by, 0.37)
+    dx, dy, d, cell = grid(sx, sy, 0.5)
+    seam_big = nb.inv(nb.ss(0.018, 0.045, bd))
+    seam_small = nb.inv(nb.ss(0.006, 0.02, d))
+    rnd_big = nb.white(bcell)
+    rnd = nb.white(nb.v("ADD", cell, (0.37, 0.71, 0.0)))
+    hatch = 0.0
+    hatch_in = 0.0
+    if cfg.get("hatches"):
+        h_on = nb.ss(1.0 - cfg["hatches"] - 0.002, 1.0 - cfg["hatches"],
+                     nb.white(nb.v("ADD", cell, (3.1, 7.7, 0.0))))
+        line = nb.inv(nb.ss(0.006, 0.018, nb.m("ABSOLUTE", nb.m("SUBTRACT", d, 0.16))))
+        hatch = nb.m("MULTIPLY", h_on, line)
+        hatch_in = nb.m("MULTIPLY", h_on, nb.ss(0.15, 0.17, d))
+    rivet = 0.0
+    if cfg.get("rivets"):
+        ri, rp, rr = 0.09, 0.25, 0.028
+        ax = nb.m("ABSOLUTE", nb.m("SUBTRACT", bdx, ri))
+        ay = nb.m("MULTIPLY", nb.m("ABSOLUTE", nb.m("SUBTRACT", nb.m("FRACT", nb.m("DIVIDE", py, rp)), 0.5)), rp)
+        bxx = nb.m("MULTIPLY", nb.m("ABSOLUTE", nb.m("SUBTRACT", nb.m("FRACT", nb.m("DIVIDE", px, rp)), 0.5)), rp)
+        byy = nb.m("ABSOLUTE", nb.m("SUBTRACT", bdy, ri))
+        r1 = nb.v("LENGTH", nb.comb(ax, ay, 0.0))
+        r2 = nb.v("LENGTH", nb.comb(bxx, byy, 0.0))
+        rivet = nb.inv(nb.ss(rr * 0.35, rr, nb.m("MINIMUM", r1, r2)))
+        # hatch corner bolts
+        if cfg.get("hatches"):
+            cdx = nb.m("ABSOLUTE", nb.m("SUBTRACT", dx, 0.26))
+            cdy = nb.m("ABSOLUTE", nb.m("SUBTRACT", dy, 0.26))
+            bolt = nb.inv(nb.ss(0.012, 0.03, nb.v("LENGTH", nb.comb(cdx, cdy, 0.0))))
+            rivet = nb.m("MAXIMUM", rivet, nb.m("MULTIPLY", bolt, nb.ss(0.5, 0.6, hatch_in)))
+    return dict(P=P, seam_big=seam_big, seam_small=seam_small, rnd_big=rnd_big, rnd=rnd,
+                hatch=hatch, hatch_in=hatch_in, rivet=rivet, d=d, bd=bd, bcell=bcell)
+
+
+def decal_layer(nb, pos, nrm, decals, decal_img):
+    """Sum of projected decals. Each decal: dict(cell=(col,row), centre, euler, size (w,h,depth),
+    normal, colour, opacity). Returns list of (alpha socket, colour)."""
+    out = []
+    for dc in decals:
+        mp = nb.n("ShaderNodeMapping", vector_type="TEXTURE")
+        nb.put(mp.inputs["Vector"], pos)
+        mp.inputs["Location"].default_value = dc["centre"]
+        mp.inputs["Rotation"].default_value = dc["euler"]
+        mp.inputs["Scale"].default_value = dc["size"]
+        loc = mp.outputs[0]
+        ax, ay, az = nb.sep(nb.v("ABSOLUTE", loc))
+        inside = nb.inv(nb.ss(0.485, 0.5, nb.m("MAXIMUM", nb.m("MAXIMUM", ax, ay), az)))
+        face = nb.ss(0.45, 0.7, nb.v("DOT_PRODUCT", nrm, dc["normal"]))
+        lx, ly, _ = nb.sep(loc)
+        col, row = dc["cell"]
+        u = nb.m("DIVIDE", nb.m("ADD", lx, col + 0.5), float(DECAL_COLS))
+        v = nb.m("DIVIDE", nb.m("ADD", ly, row + 0.5), float(DECAL_ROWS))
+        img = nb.image(decal_img, nb.comb(u, v, 0.0))
+        img.extension = "EXTEND"
+        a = nb.m("MULTIPLY", nb.m("MULTIPLY", img.outputs["Color"], inside), face)
+        out.append((nb.m("MULTIPLY", a, dc.get("opacity", 0.85)), dc["colour"]))
+    return out
+
+
+def build_worn_surface(nb, kind, cfg, masks_img, seed, pad_centres, scorch=(), decals=(),
+                       decal_img=None):
+    """Worn industrial surface. Returns dict of sockets: albedo, rough, metal, height."""
+    geo = nb.n("ShaderNodeNewGeometry")
+    pos, nrm = geo.outputs["Position"], geo.outputs["Normal"]
+    f = worn_fields(nb, cfg, seed)
+    P, rnd, rnd_big = f["P"], f["rnd"], f["rnd_big"]
+
+    mk = nb.image(masks_img, nb.uvmap("UVMap"))
+    ao_n, ao_f, edge = nb.sep(mk.outputs["Color"])
+    grime = nb.m("MULTIPLY", nb.inv(ao_n), cfg["grime_k"], clamp=True)
+    grime_f = nb.m("MULTIPLY", nb.inv(ao_f), 0.6 * cfg["grime_k"], clamp=True)
+
+    # wear fields (3D position based, continuous across UV islands)
+    patch = nb.ss(0.45, 0.7, nb.noise(pos, 0.08, 3.0))
+    sx_, sy_, _ = nb.sep(P)
+    streak_vec = nb.comb(nb.m("MULTIPLY", sx_, 3.0), nb.m("MULTIPLY", sy_, 0.18), float(seed))
+    streak = nb.ss(0.5, 0.8, nb.noise(streak_vec, 1.0, 4.0, 0.6))
+    streak = nb.m("MULTIPLY", streak, nb.m("ADD", nb.m("MULTIPLY", nb.inv(ao_f), 2.0),
+                                           nb.m("ADD", 0.25, nb.m("MULTIPLY", patch, 0.6))),
+                  clamp=True)
+    pit = nb.inv(nb.ss(0.05, 0.11, nb.voronoi(pos, 6.0)))
+    pit = nb.m("MULTIPLY", pit, nb.ss(0.5, 0.68, nb.noise(pos, 0.3, 2.0)))
+    chip_n = nb.noise(pos, 2.6, 6.0, 0.62)
+    chip = nb.m("MULTIPLY", edge, nb.ss(0.46, 0.56, chip_n))
+    # scattered small chips on flat paint too, where the paint is old
+    chip2 = nb.m("MULTIPLY", nb.ss(0.66, 0.7, nb.noise(pos, 5.0, 4.0, 0.6)), patch)
+    chip = nb.m("MULTIPLY", nb.m("MAXIMUM", chip, nb.m("MULTIPLY", chip2, 0.8)), cfg["chip_k"],
+                clamp=True)
+    top = nb.ss(0.3, 0.95, nb.sep(nrm)[2])
+
+    height = nb.m("ADD", nb.m("MULTIPLY", f["seam_big"], -0.02),
+                  nb.m("MULTIPLY", f["seam_small"], -0.007))
+    height = nb.m("ADD", height, nb.m("MULTIPLY", f["rivet"], 0.006))
+    height = nb.m("SUBTRACT", height, nb.m("MULTIPLY", f["hatch"], 0.005))
+    height = nb.m("SUBTRACT", height, nb.m("MULTIPLY", pit, 0.003))
+    height = nb.m("SUBTRACT", height, nb.m("MULTIPLY", chip, 0.0015))
+
+    # tone: per big panel, nudged per plate; ~7 % of big panels are newer replacements
+    base = nb.ramp(rnd_big, cfg["tones"])
+    base = nb.v("SCALE", base, scale=nb.m("ADD", 1.0 - cfg["plate_var"] / 2,
+                                          nb.m("MULTIPLY", rnd, cfg["plate_var"])))
+    newp = nb.ss(0.925, 0.93, nb.white(nb.v("ADD", f["bcell"], (5.3, 1.9, 0.0))))
+    rough = nb.m("ADD", cfg["rough"][0], nb.m("MULTIPLY", nb.m("SUBTRACT", rnd, 0.5), cfg["rough"][1]))
+    metal = cfg["metal"]
+
+    if cfg.get("stripes"):
+        px, py, _ = nb.sep(P)
+        sfr = nb.m("FRACT", nb.m("DIVIDE", nb.m("ADD", px, py), cfg["stripes"]))
+        black = nb.m("MULTIPLY", nb.ss(0.47, 0.53, sfr), nb.inv(nb.ss(0.97, 0.995, sfr)))
+        base = nb.mixv(black, base, (0.035, 0.035, 0.037))
+
+    if cfg.get("fins"):
+        # coolant channels: raised ribs along the long panel axis
+        rib = nb.inv(nb.ss(0.02, 0.05, f["d"]))
+        height = nb.m("ADD", height, nb.m("MULTIPLY", rib, 0.02))
+        base = nb.v("SCALE", base, scale=nb.inv(nb.m("MULTIPLY", rib, 0.25)))
+
+    if cfg.get("quilt"):
+        qs = cfg["quilt"]
+        qx, qy, _ = nb.sep(nb.v("FRACTION", nb.v("DIVIDE", P, (qs, qs, 1.0))))
+
+        def pillow(t):
+            w = nb.m("SUBTRACT", nb.m("MULTIPLY", t, 2.0), 1.0)
+            return nb.inv(nb.m("POWER", nb.m("ABSOLUTE", w), 4.0))
+        pil = nb.m("MULTIPLY", pillow(qx), pillow(qy))
+        foil = cfg.get("foil")
+        crinkle = nb.noise(pos, 3.2 if foil else 1.6, 10.0, 0.66)
+        wrinkle = nb.noise(pos, 1.1, 5.0, 0.6)
+        height = nb.m("ADD", height, nb.m("MULTIPLY", pil, 0.014))
+        height = nb.m("ADD", height, nb.m("MULTIPLY", nb.m("SUBTRACT", crinkle, 0.5),
+                                          0.018 if foil else 0.005))
+        height = nb.m("ADD", height, nb.m("MULTIPLY", wrinkle, 0.025 if foil else 0.015))
+        shade = nb.m("ADD", 0.84, nb.m("ADD", nb.m("MULTIPLY", pil, 0.06),
+                                       nb.m("MULTIPLY", wrinkle, 0.16)))
+        base = nb.v("SCALE", base, scale=shade)
+        tape = nb.inv(nb.ss(0.04, 0.07, f["d"]))
+        base = nb.mixv(nb.m("MULTIPLY", tape, 0.5), base, nb.v("SCALE", base, scale=0.85))
+        if foil:
+            base = nb.v("SCALE", base, scale=nb.m("ADD", 0.7, nb.m("MULTIPLY", crinkle, 0.6)))
+            rough = nb.m("ADD", rough, nb.m("MULTIPLY", nb.m("SUBTRACT", crinkle, 0.5), 0.6))
+        else:
+            rough = nb.m("SUBTRACT", rough, nb.m("MULTIPLY", tape, 0.25))
+
+    dark = 0.0
+    if cfg.get("pad"):
+        px, py, _ = nb.sep(pos)
+        dists = [nb.v("LENGTH", nb.comb(nb.m("SUBTRACT", px, c[0]), nb.m("SUBTRACT", py, c[1]), 0.0))
+                 for c in pad_centres]
+        dd = nb.m("MINIMUM", *dists[:2]) if len(dists) > 1 else dists[0]
+        ring1 = nb.inv(nb.ss(0.10, 0.16, nb.m("ABSOLUTE", nb.m("SUBTRACT", dd, 4.0))))
+        ring2 = nb.inv(nb.ss(0.04, 0.08, nb.m("ABSOLUTE", nb.m("SUBTRACT", dd, 2.4))))
+        paint = nb.m("MAXIMUM", ring1, ring2)
+        paint = nb.m("MULTIPLY", paint, nb.ss(0.32, 0.5, nb.noise(pos, 2.5, 4.0)))
+        base = nb.mixv(nb.m("MULTIPLY", paint, 0.75), base, (0.42, 0.42, 0.39))
+        rough = nb.mixf(paint, rough, 0.55)
+        grain = nb.noise(pos, 40.0, 2.0)
+        rough = nb.m("ADD", rough, nb.m("MULTIPLY", nb.m("SUBTRACT", grain, 0.5), 0.2))
+        height = nb.m("ADD", height, nb.m("MULTIPLY", grain, 0.0015))
+        dark = nb.m("MULTIPLY", nb.inv(nb.ss(0.5, 3.8, dd)),
+                    nb.m("ADD", 0.5, nb.m("MULTIPLY", nb.noise(pos, 1.2, 3.0), 0.5)))
+    # thruster / exhaust scorch points (x, y, z, radius)
+    for c in scorch:
+        dsc = nb.m("DIVIDE", nb.v("DISTANCE", pos, c[:3]), c[3])
+        s = nb.m("MULTIPLY", nb.inv(nb.ss(0.1, 1.0, dsc)),
+                 nb.m("ADD", 0.45, nb.m("MULTIPLY", nb.noise(pos, 1.5, 3.0), 0.6)), clamp=True)
+        dark = nb.m("MAXIMUM", dark, s) if dark != 0.0 else s
+
+    # newer replacement panels: cleaner and a shade lighter, less weathered
+    base = nb.mixv(nb.m("MULTIPLY", newp, 0.8), base, nb.v("SCALE", base, scale=1.12))
+    # seams, hatches, rivets
+    base = nb.v("SCALE", base, scale=nb.inv(nb.m("MULTIPLY", f["seam_big"], cfg["seam_big"])))
+    base = nb.v("SCALE", base, scale=nb.inv(nb.m("MULTIPLY", f["seam_small"], cfg["seam_small"])))
+    base = nb.v("SCALE", base, scale=nb.inv(nb.m("MULTIPLY", f["hatch"], 0.3)))
+    base = nb.v("SCALE", base, scale=nb.inv(nb.m("MULTIPLY", f["hatch_in"], 0.05)))
+    base = nb.v("SCALE", base, scale=nb.inv(nb.m("MULTIPLY", f["rivet"], 0.2)))
+    # stencilled decals (paint, so they chip and get grimy with the rest)
+    if decals and decal_img is not None:
+        flake = nb.ss(0.5, 0.72, nb.noise(pos, 4.0, 5.0, 0.6))
+        for a, col in decal_layer(nb, pos, nrm, decals, decal_img):
+            a = nb.m("MULTIPLY", a, nb.inv(nb.m("MULTIPLY", flake, 0.7)))
+            base = nb.mixv(a, base, col)
+            rough = nb.mixf(a, rough, 0.6)
+    # edge chipping to darker bare metal
+    base = nb.mixv(chip, base, cfg["chip"])
+    # sun bleaching on up-facing surfaces
+    l = nb.lum(base)
+    bleached = nb.mixv(0.35, base, nb.comb(*(nb.m("ADD", nb.m("MULTIPLY", l, 1.05), 0.01),) * 3))
+    base = nb.mixv(nb.m("MULTIPLY", top, cfg["bleach"]), base, bleached)
+    # grime in crevices, broad dirt film, streaks, pitting, scorch
+    weather = nb.inv(nb.m("MULTIPLY", newp, 0.6))
+    base = nb.v("MULTIPLY", base, nb.mixv(nb.m("MULTIPLY", grime, weather), (1.0, 1.0, 1.0), WORN_GRIME))
+    base = nb.v("MULTIPLY", base, nb.mixv(nb.m("MULTIPLY", grime_f, weather), (1.0, 1.0, 1.0), (0.8, 0.77, 0.72)))
+    base = nb.v("SCALE", base, scale=nb.inv(nb.m("MULTIPLY", nb.m("MULTIPLY", streak, weather), cfg["streak_k"])))
+    base = nb.v("SCALE", base, scale=nb.inv(nb.m("MULTIPLY", pit, 0.3)))
+    mottle = nb.noise(pos, 0.05, 4.0, 0.55)
+    base = nb.v("SCALE", base, scale=nb.m("ADD", 0.86, nb.m("MULTIPLY", nb.m("SUBTRACT", mottle, 0.5), 0.5)))
+    if dark != 0.0:
+        base = nb.v("SCALE", base, scale=nb.inv(nb.m("MULTIPLY", dark, 0.8)))
+
+    rough = nb.m("ADD", rough, nb.m("MULTIPLY", f["seam_big"], 0.15))
+    rough = nb.m("ADD", rough, nb.m("MULTIPLY", grime, 0.12))
+    rough = nb.m("ADD", rough, nb.m("MULTIPLY", streak, 0.1))
+    rough = nb.m("SUBTRACT", rough, nb.m("MULTIPLY", newp, 0.1))
+    rough = nb.m("ADD", rough, nb.m("MULTIPLY", nb.m("MAXIMUM", pit, dark) if dark != 0.0 else pit, 0.15))
+    rough = nb.mixf(chip, rough, 0.34)
+    rough = nb.m("MAXIMUM", nb.m("MINIMUM", rough, 0.95), 0.08)
+    metal = nb.mixf(chip, metal, cfg["chip_metal"])
+    if dark != 0.0:
+        metal = nb.mixf(dark, metal, 0.0)
+    return dict(albedo=base, rough=rough, metal=metal, height=height)
+
+
+def make_decal_sheet(labels, path, res=2048):
+    """Render stencil labels (white on black) into a DECAL_COLS x DECAL_ROWS sheet, one per
+    cell, cell (i % cols, i // cols). "#BAR" is a filled band, "#CHEV" chevrons."""
+    sc = bpy.data.scenes.new("decal_sheet")
+    sc.render.engine = "BLENDER_EEVEE"
+    sc.render.resolution_x = sc.render.resolution_y = res
+    sc.view_settings.view_transform = "Standard"
+    sc.render.image_settings.file_format = "PNG"
+    sc.render.image_settings.color_mode = "BW"
+    w = bpy.data.worlds.new("decal_world")
+    w.use_nodes = True
+    w.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.0
+    sc.world = w
+    mat = bpy.data.materials.new("decal_white")
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    em = nt.nodes.new("ShaderNodeEmission")
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    nt.links.new(em.outputs[0], out.inputs[0])
+    W, H = DECAL_COLS * 4.0, DECAL_ROWS * 1.0
+    made = []
+    for i, text in enumerate(labels):
+        cx = (i % DECAL_COLS) * 4.0 + 2.0 - W / 2
+        cy = (i // DECAL_COLS) * 1.0 + 0.5 - H / 2
+        if text.startswith("#"):
+            me = bpy.data.meshes.new("decal_shape")
+            if text == "#BAR":
+                quads = [[(-1.9, -0.4), (1.9, -0.4), (1.9, 0.4), (-1.9, 0.4)]]
+            else:  # chevrons
+                quads = []
+                for k in range(-3, 4):
+                    x = k * 0.55
+                    quads.append([(x - 0.18, -0.42), (x + 0.04, -0.42), (x + 0.26, 0.0), (x + 0.04, 0.42),
+                                  (x - 0.18, 0.42), (x + 0.04, 0.0)])
+            verts, faces = [], []
+            for q in quads:
+                b = len(verts)
+                verts += [(x, y, 0.0) for x, y in q]
+                faces.append(list(range(b, b + len(q))))
+            me.from_pydata(verts, [], faces)
+            ob = bpy.data.objects.new("decal_shape", me)
+        else:
+            cu = bpy.data.curves.new("decal_text", "FONT")
+            cu.body = text
+            cu.align_x = "CENTER"
+            cu.align_y = "CENTER"
+            cu.size = 0.78
+            cu.space_character = 1.12
+            cu.offset_y = -0.02
+            cu.offset = 0.018          # heavier strokes, reads like stencil paint
+            ob = bpy.data.objects.new("decal_text", cu)
+            # fit the 4:1 cell
+            n = max(1, len(text))
+            ob.scale = (min(1.0, 3.6 / (0.524 * n)),) * 2 + (1.0,)
+        ob.data.materials.append(mat)
+        ob.location = (cx, cy, 0.0)
+        sc.collection.objects.link(ob)
+        made.append(ob)
+    cam = bpy.data.cameras.new("decal_cam")
+    cam.type = "ORTHO"
+    cam.ortho_scale = W
+    co = bpy.data.objects.new("decal_cam", cam)
+    co.location = (0, 0, 10)
+    sc.collection.objects.link(co)
+    sc.camera = co
+    sc.render.filepath = path
+    bpy.ops.render.render(write_still=True, scene=sc.name)
+    for ob in made:
+        bpy.data.objects.remove(ob)
+    bpy.data.objects.remove(co)
+    bpy.data.scenes.remove(sc)
+    img = bpy.data.images.load(path, check_existing=False)
+    img.colorspace_settings.name = "Non-Color"
+    print("DECALS sheet", path, len(labels))
+    return img
+
+
+def decal(cell_index, centre, normal, up, height, colour, opacity=0.85, depth=0.6):
+    """Decal spec for build_worn_surface: 4:1 cell `cell_index`, `height` m tall, on the face
+    through `centre` with outward `normal`, text up along `up`."""
+    from mathutils import Matrix
+    n = Vector(normal).normalized()
+    u = (Vector(up) - n * Vector(up).dot(n)).normalized()
+    r = u.cross(n)
+    m = Matrix((r, u, n)).transposed()
+    return dict(cell=(cell_index % DECAL_COLS, cell_index // DECAL_COLS),
+                centre=tuple(centre), euler=tuple(m.to_euler("XYZ")),
+                size=(height * 4.0, height, depth), normal=tuple(n), colour=tuple(colour),
+                opacity=opacity)
+
+
+def bake_masks(objs, mats, keys, res, name):
+    masks = new_image(name, res, True)
     bms = {}
-    for k in atlas_keys:
+    for k in keys:
         nb = NB(mats[k])
         geo = nb.n("ShaderNodeNewGeometry")
         aon = nb.n("ShaderNodeAmbientOcclusion", samples=16)
@@ -710,27 +1106,58 @@ def texture_station(objs, mats, pad_centres):
         bm.set_pass("masks", masks)
         bms[k] = bm
     bake(objs, "EMIT", 16, masks)
+    return masks
 
-    # passes 2-4: full procedural surfaces
-    albedo = new_image("station_hull_albedo", ATLAS_RES, False)
-    mr = new_image("station_hull_mr", ATLAS_RES, True)
-    normal = new_image("station_hull_normal", ATLAS_RES, True)
-    for i, k in enumerate(atlas_keys):
+
+def bake_worn_atlas(objs, mats, prefix, res, pad_centres, scorch=(), decals=(), labels=(),
+                    seed0=1, jpeg=True):
+    """Unwrap, bake masks + albedo / metal-rough / normal for every WORN_KINDS material in
+    `mats` and return (albedo_path, mr_path, normal_path, atlas_mats).
+    Materials not in WORN_KINDS (and not "solar") are flat: zero UVs, untouched."""
+    global ATLAS_RES
+    ATLAS_RES = res
+    keys = [k for k in WORN_KINDS if k in mats]
+    atlas_mats = {mats[k] for k in keys}
+    flat = [k for k in mats if k not in WORN_KINDS and k != "solar"]
+    unwrap_atlas(objs, atlas_mats)
+    for o in objs:
+        zero_uvs(o, {mats[k] for k in flat})
+    decal_img = None
+    if labels:
+        decal_img = make_decal_sheet(list(labels), os.path.join(TEX_DIR, f"{prefix}_decals.png"))
+    setup_cycles(8)
+    dummy = new_image(f"{prefix}_dummy", 8, False)
+    for k in flat + (["solar"] if "solar" in mats else []):
+        add_dummy_target(mats[k], dummy)
+    masks = bake_masks(objs, mats, keys, res, f"{prefix}_masks")
+    albedo = new_image(f"{prefix}_albedo", res, False)
+    mr = new_image(f"{prefix}_mr", res, True)
+    normal = new_image(f"{prefix}_normal", res, True)
+    bms = {}
+    for i, k in enumerate(keys):
         nb = NB(mats[k])
-        outs = build_surface(nb, k, KINDS[k], masks, i + 1, pad_centres)
+        use_dec = decals if k in ("hull", "hull2", "hull3", "pad", "dark", "metal", "mli") else ()
+        outs = build_worn_surface(nb, k, WORN_KINDS[k], masks, seed0 + i, pad_centres,
+                                  scorch, use_dec, decal_img)
         bms[k] = BakeMat(mats[k], outs, nb)
-    for name, img, kind, spp in (("albedo", albedo, "EMIT", 8), ("mr", mr, "EMIT", 8),
-                                 ("normal", normal, "NORMAL", 8)):
+    for name, img, kind in (("albedo", albedo, "EMIT"), ("mr", mr, "EMIT"),
+                            ("normal", normal, "NORMAL")):
         for bm in bms.values():
             bm.set_pass(name, img)
-        bake(objs, kind, spp, img)
-    p_alb = save_image(albedo, "station_hull_albedo.jpg", "JPEG", 92)
-    p_mr = save_image(mr, "station_hull_mr.png", "PNG")
-    p_nrm = save_image(normal, "station_hull_normal.png", "PNG")
-
-    # solar cell tile on a temporary 3 x 3 m plate
-    for k in EMISSIVE:
+        bake(objs, kind, 8, img)
+    ext, fmt = (".jpg", "JPEG") if jpeg else (".png", "PNG")
+    p_alb = save_image(albedo, f"{prefix}_albedo.jpg", "JPEG", 92)
+    p_mr = save_image(mr, f"{prefix}_mr{ext}", fmt, 92)
+    p_nrm = save_image(normal, f"{prefix}_normal{ext}", fmt, 95)
+    for k in flat + (["solar"] if "solar" in mats else []):
         remove_dummy_target(mats[k])
+    for img in (dummy, masks, albedo, mr, normal) + ((decal_img,) if decal_img else ()):
+        bpy.data.images.remove(img)
+    return p_alb, p_mr, p_nrm, atlas_mats
+
+
+def bake_solar_tile(res=SOLAR_RES):
+    """The tiling 3 x 3 m photovoltaic plate (UV 0..1). Returns the three saved paths."""
     me = bpy.data.meshes.new("solar_tile")
     me.from_pydata([(0, 0, 0), (SOLAR_PLATE, 0, 0), (SOLAR_PLATE, SOLAR_PLATE, 0), (0, SOLAR_PLATE, 0)],
                    [], [(0, 1, 2, 3)])
@@ -743,31 +1170,41 @@ def texture_station(objs, mats, pad_centres):
     bpy.context.scene.collection.objects.link(tile)
     nb = NB(tile_mat)
     sbm = BakeMat(tile_mat, build_solar_cells(nb), nb)
-    s_alb = new_image("station_solar_albedo", SOLAR_RES, False)
-    s_mr = new_image("station_solar_mr", SOLAR_RES, True)
-    s_nrm = new_image("station_solar_normal", SOLAR_RES, True)
-    for name, img, kind in (("albedo", s_alb, "EMIT"), ("mr", s_mr, "EMIT"), ("normal", s_nrm, "NORMAL")):
+    imgs = [new_image(f"station_solar_{n}", res, n != "albedo") for n in ("albedo", "mr", "normal")]
+    for name, img, kind in (("albedo", imgs[0], "EMIT"), ("mr", imgs[1], "EMIT"),
+                            ("normal", imgs[2], "NORMAL")):
         sbm.set_pass(name, img)
         bake([tile], kind, 8, img)
-    ps_alb = save_image(s_alb, "station_solar_albedo.jpg", "JPEG", 92)
-    ps_mr = save_image(s_mr, "station_solar_mr.png", "PNG")
-    ps_nrm = save_image(s_nrm, "station_solar_normal.png", "PNG")
+    paths = (save_image(imgs[0], "station_solar_albedo.jpg", "JPEG", 92),
+             save_image(imgs[1], "station_solar_mr.jpg", "JPEG", 92),
+             save_image(imgs[2], "station_solar_normal.jpg", "JPEG", 95))
     bpy.data.objects.remove(tile)
     bpy.data.meshes.remove(me)
     bpy.data.materials.remove(tile_mat)
+    for img in imgs:
+        bpy.data.images.remove(img)
+    return paths
 
-    # final glTF materials from the saved files
+
+# ------------------------------------------------------------------ entry point
+def texture_station(objs, mats, pad_centres, scorch=(), decals=(), labels=(), res=4096):
+    """objs: station mesh objects. mats: gen_station.MATS (key -> material)."""
+    t0 = time.time()
+    solar_obj = next(o for o in objs if o.name == "station_solar")
+    # solar plate tops need their own UVs; set them after the atlas unwrap
+    p_alb, p_mr, p_nrm, atlas_mats = bake_worn_atlas(
+        objs, mats, "station_hull", res, pad_centres, scorch, decals, labels)
+    set_solar_uvs(solar_obj, mats["solar"])
+    ps = bake_solar_tile()
     hull = pbr_material("station_hull", load_saved(p_alb, False), load_saved(p_mr, True),
                         load_saved(p_nrm, True))
-    solar = pbr_material("station_solar_panel_cells", load_saved(ps_alb, False),
-                         load_saved(ps_mr, True), load_saved(ps_nrm, True))
+    solar = pbr_material("station_solar_panel_cells", load_saved(ps[0], False),
+                         load_saved(ps[1], True), load_saved(ps[2], True))
     mapping = {m: hull for m in atlas_mats}
     mapping[mats["solar"]] = solar
     for o in objs:
         remap_materials(o, mapping)
         o.data.uv_layers.remove(o.data.uv_layers["panel"])
-    for img in (dummy, masks, albedo, mr, normal, s_alb, s_mr, s_nrm):
-        bpy.data.images.remove(img)
     for m in list(atlas_mats) + [mats["solar"]]:
         if m.users == 0:
             bpy.data.materials.remove(m)

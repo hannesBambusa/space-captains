@@ -49,10 +49,35 @@ var _last_time: float = 0.0
 
 
 func _ready() -> void:
+	reset()
+
+
+## Start values (a new game).
+func reset() -> void:
 	credits = start_credits
+	ore = PackedInt32Array([0, 0, 0])
 	for i in ore.size():
 		ore[i] = start_ore[i] if i < start_ore.size() else 0
+	total_fees = 0
+	total_grants = 0
+	_grant_clock = 0.0
 	_last_time = SimClock.time
+	changed.emit(credits, materials)
+
+
+func save_state() -> Dictionary:
+	return {"credits": credits, "ore": ore, "total_fees": total_fees, "total_grants": total_grants, "grant_clock": _grant_clock}
+
+
+## Call after SimClock is restored (the grant counts from its time).
+func load_state(d: Dictionary) -> void:
+	credits = int(d.get("credits", start_credits))
+	ore = PackedInt32Array(d.get("ore", start_ore))
+	total_fees = int(d.get("total_fees", 0))
+	total_grants = int(d.get("total_grants", 0))
+	_grant_clock = float(d.get("grant_clock", 0.0))
+	_last_time = SimClock.time
+	changed.emit(credits, materials)
 
 
 func _process(_delta: float) -> void:

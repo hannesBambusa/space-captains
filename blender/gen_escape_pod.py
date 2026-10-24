@@ -2,7 +2,7 @@
 
 Run:
   /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
-      --python /Users/hannesalm/code/games/space-majesty/blender/gen_escape_pod.py
+      --python blender/gen_escape_pod.py
   Add `-- --no-preview` to skip the PNG renders.
 
 Design: Soyuz/Orion-style re-entry capsule lying on its side. A truncated-cone crew

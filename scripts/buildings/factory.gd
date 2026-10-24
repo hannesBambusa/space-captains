@@ -618,3 +618,38 @@ func _short_ore(cost: PackedInt32Array) -> String:
 		if float(cost[i]) > market.stock[i]:
 			parts.append(Economy.ORE_NAMES[i].to_lower())
 	return " and ".join(parts)
+
+
+# --- Save ---------------------------------------------------------------------
+
+## Orders, stock and the job; captains by save id, modules by id.
+func save_state() -> Dictionary:
+	var orders := []
+	for o in backorders:
+		orders.append({"module": (o["module"] as ShipModule).id, "captain": SaveIds.of(o["captain"]), "time": o["time"],
+				"paid": o["paid"], "blocked": o["blocked"], "notified": o["notified"]})
+	return {"tooling_tier": tooling_tier, "warehouse": warehouse, "job": job.id if job else &"", "job_time": job_time,
+			"backorders": orders, "rare_parts": rare_parts, "misses": misses, "log_lines": log_lines, "total_built": total_built,
+			"market": market.save_state()}
+
+
+func load_state(d: Dictionary, refs: SaveRefs) -> void:
+	var catalog := ModuleCatalog.shared()
+	tooling_tier = int(d.get("tooling_tier", 1))
+	warehouse = (d.get("warehouse", {}) as Dictionary).duplicate()
+	job = catalog.find(StringName(d.get("job", &""))) if not StringName(d.get("job", &"")).is_empty() else null
+	job_time = float(d.get("job_time", 0.0)) if job else 0.0
+	backorders.clear()
+	for s: Dictionary in d.get("backorders", []):
+		var m := catalog.find(StringName(s["module"]))
+		var c := refs.captain(int(s["captain"]))
+		if m == null or c == null:
+			continue
+		backorders.append({"module": m, "captain": c, "time": float(s["time"]), "paid": int(s["paid"]), "blocked": float(s["blocked"]), "notified": bool(s["notified"])})
+	rare_parts = (d.get("rare_parts", {}) as Dictionary).duplicate()
+	misses = (d.get("misses", {}) as Dictionary).duplicate()
+	log_lines.assign(d.get("log_lines", []))
+	total_built = int(d.get("total_built", 0))
+	market.load_state(d.get("market", {}))
+	_update_need()
+	changed.emit()

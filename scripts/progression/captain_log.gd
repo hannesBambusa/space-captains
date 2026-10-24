@@ -137,3 +137,34 @@ func _to_newest(e: Entry) -> void:
 		return
 	entries.erase(e)
 	entries.append(e)
+
+
+# --- Save ---------------------------------------------------------------------
+
+func save_state() -> Dictionary:
+	var list := []
+	for e in entries:
+		list.append({"serial": e.serial, "time": e.time, "last_time": e.last_time, "kind": e.kind, "outcome": e.outcome,
+				"headline": e.headline, "why": e.why, "detail": e.detail, "key": e.key, "count": e.count})
+	return {"serial": _serial, "entries": list}
+
+
+func load_state(d: Dictionary) -> void:
+	entries.clear()
+	_by_key.clear()
+	_serial = int(d.get("serial", 0))
+	for s: Dictionary in d.get("entries", []):
+		var e := Entry.new()
+		e.serial = int(s["serial"])
+		e.time = float(s["time"])
+		e.last_time = float(s["last_time"])
+		e.kind = int(s["kind"]) as Kind
+		e.outcome = int(s["outcome"]) as Outcome
+		e.headline = String(s["headline"])
+		e.why = String(s["why"])
+		e.detail = String(s["detail"])
+		e.key = String(s["key"])
+		e.count = int(s["count"])
+		entries.append(e)
+		if not e.key.is_empty():
+			_by_key[e.key] = e

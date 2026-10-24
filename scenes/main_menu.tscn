@@ -1,0 +1,51 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Shader" path="res://shaders/space_sky.gdshader" id="1_sky"]
+[ext_resource type="Script" path="res://scripts/ui/menu_backdrop.gd" id="2_backdrop"]
+[ext_resource type="Resource" path="res://data/systems/home_system.tres" id="3_def"]
+[ext_resource type="Script" path="res://scripts/ui/main_menu.gd" id="4_menu"]
+
+[sub_resource type="ShaderMaterial" id="sky_mat"]
+shader = ExtResource("1_sky")
+
+[sub_resource type="Sky" id="sky"]
+sky_material = SubResource("sky_mat")
+radiance_size = 3
+
+[sub_resource type="Environment" id="env"]
+background_mode = 2
+sky = SubResource("sky")
+ambient_light_source = 3
+ambient_light_color = Color(0.46, 0.5, 0.6, 1)
+ambient_light_sky_contribution = 0.3
+ambient_light_energy = 1.1
+reflected_light_source = 2
+tonemap_mode = 3
+tonemap_exposure = 1.1
+tonemap_white = 6.0
+glow_enabled = true
+glow_intensity = 0.32
+glow_hdr_threshold = 1.8
+adjustment_enabled = true
+adjustment_contrast = 1.06
+adjustment_saturation = 1.1
+
+[node name="MainMenu" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("env")
+
+[node name="Backdrop" type="Node3D" parent="."]
+script = ExtResource("2_backdrop")
+system_def = ExtResource("3_def")
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="Menu" type="Control" parent="UI"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("4_menu")

@@ -1,13 +1,15 @@
 class_name ScavengerShip
 extends Ship
-## A scavenger raider launched by a ScavengerDen. Hostile faction, junk
-## cannons (scavenger default loadout), driven by a ScavengerBrain instead of
-## a CaptainBrain: roam the den's belt, hunt miners, steal cargo, flee home
-## when hurt, raid the colony when sent by the RaidDirector.
+## A hostile raider launched by a ScavengerDen: a scavenger, corsair or
+## syndicate gunship, by its [FactionDef] (model, loadout, hit radius,
+## behaviour). Driven by a ScavengerBrain instead of a CaptainBrain: roam the
+## den's belt, hunt prey, steal cargo, flee home when hurt, raid the colony
+## when sent by the RaidDirector.
 
-const MODEL_PATH := "res://assets/models/ships/scavenger.glb"
+const MODEL_PATH := FactionDef.SCAVENGER_SHIP_MODEL
 
 var den: ScavengerDen
+var faction_def: FactionDef
 var callsign: String = ""
 var is_raider: bool = false
 ## Share of a miner's load aboard (stolen).
@@ -22,13 +24,26 @@ func _init() -> void:
 	hit_radius = 9.0
 
 
-## Call before adding to the tree.
-func setup_scavenger(from_den: ScavengerDen, call_sign: String, raider: bool) -> void:
+## Call before adding to the tree. [param fdef] null = the den's faction
+## (the scavengers when the den is gone).
+func setup_scavenger(from_den: ScavengerDen, call_sign: String, raider: bool, fdef: FactionDef = null) -> void:
 	den = from_den
 	callsign = call_sign
 	is_raider = raider
-	_model_path = MODEL_PATH
-	name = StringName(("Scavenger_%s" % call_sign).validate_node_name().replace(" ", ""))
+	faction_def = fdef if fdef else (from_den.faction_def if is_instance_valid(from_den) else Factions.scavengers())
+	_model_path = FactionDef.pick_model(faction_def.ship_model_path, MODEL_PATH)
+	hit_radius = faction_def.hit_radius
+	if faction_def.loadout:
+		loadout = faction_def.loadout.duplicate(true) as ShipLoadout
+	name = StringName(("%s_%s" % [faction_def.unit_name, call_sign]).validate_node_name().replace(" ", ""))
+
+
+## Stand-in scavenger model: faction tint and scale.
+func _prepare_model(model: Node3D) -> void:
+	if _model_path == faction_def.ship_model_path:
+		return
+	ModelLoader.tint(model, faction_def.color, faction_def.fallback_tint)
+	model.scale *= faction_def.ship_fallback_scale
 
 
 func _on_ready_ship() -> void:
@@ -46,7 +61,7 @@ func sim_step(dt: float) -> void:
 
 
 func get_display_name() -> String:
-	return "Scavenger %s" % callsign
+	return "%s %s" % [faction_def.unit_name if faction_def else "Scavenger", callsign]
 
 
 func get_status_text() -> String:
@@ -112,9 +127,9 @@ func _on_destroyed(killer: Node3D) -> void:
 		if c is BountyContract:
 			has_bounty = true
 	if not has_bounty and k:
-		EventLog.post("%s destroyed by %s" % [get_display_name(), k.get_display_name()], EventLog.Kind.REWARD, null, global_position)
+		EventLog.post("%s destroyed by %s" % [get_display_name(), k.get_display_name()], EventLog.Kind.REWARD, null, global_position, "", faction_def.id)
 	elif not has_bounty and killer is DefenseTurret:
-		EventLog.post("%s shot down by %s" % [get_display_name(), (killer as DefenseTurret).get_display_name()], EventLog.Kind.REWARD, null, global_position)
+		EventLog.post("%s shot down by %s" % [get_display_name(), (killer as DefenseTurret).get_display_name()], EventLog.Kind.REWARD, null, global_position, "", faction_def.id)
 
 
 ## Docked at its den: leaves without an explosion.

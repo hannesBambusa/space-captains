@@ -21,6 +21,18 @@ extends Resource
 ## Scavenger Dens, each claiming a belt (its danger includes the den).
 @export var dens: Array[DenDef] = []
 
+@export_group("Threat escalation")
+## A den arrives at the latest at its min arrival time times this, growth or not.
+@export var arrival_max_wait_mult: float = 1.5
+## Sim seconds between the long-range scan warning and the arrival.
+@export var arrival_warning_time: float = 75.0
+## Sim seconds at least between two arrivals.
+@export var arrival_min_gap: float = 180.0
+## Extra threat-clock speed while every arrived base is destroyed (0.5 = 1.5x).
+@export var cleared_speedup: float = 0.5
+## Sim seconds after its arrival before a base sends raids.
+@export var arrival_raid_grace: float = 240.0
+
 @export_group("Home station")
 ## Name of the planet the station orbits. Empty = no station.
 @export var station_planet: String = ""

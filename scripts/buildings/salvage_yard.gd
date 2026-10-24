@@ -264,3 +264,31 @@ func _auto_buy() -> void:
 ## "Reprocessing 34 scrap" / "Idle".
 func status_text() -> String:
 	return "Reprocessing %d scrap" % ceili(scrap) if scrap > 0.0 else "Idle, no scrap"
+
+
+# --- Save ---------------------------------------------------------------------
+
+const SAVE_FIELDS: PackedStringArray = [
+	"funds", "scrap", "mix", "stock", "deliveries", "total_scrap", "delivery_count", "total_paid", "total_sold",
+	"total_sales", "auto_buy", "_ore_acc", "_buy_timer",
+]
+
+
+## Funds, scrap, stock and the debts (captains by save id).
+func save_state() -> Dictionary:
+	var d := SaveUtil.props(self, SAVE_FIELDS)
+	var debts := []
+	for o in owed:
+		debts.append({"captain": SaveIds.of(o["captain"]), "amount": o["amount"]})
+	d["owed"] = debts
+	return d
+
+
+func load_state(d: Dictionary, refs: SaveRefs) -> void:
+	var fields := d.duplicate()
+	fields.erase("owed")
+	SaveUtil.apply_props(self, fields)
+	owed.clear()
+	for o: Dictionary in d.get("owed", []):
+		owed.append({"captain": refs.captain(int(o["captain"])), "amount": int(o["amount"])})
+	changed.emit()

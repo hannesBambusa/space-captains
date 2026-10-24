@@ -3,8 +3,10 @@ extends VBoxContainer
 ## Left-side system overview. Lists everything in the SolarSystem, grouped:
 ## star, planets (moons nested), asteroid belts, posted contracts (with
 ## cancel), jump gates, stations and structures (player buildings and their
-## hired ships with live status, updated live), threats (Scavenger Dens
-## with their status and the scavengers out, raiders included), scrap
+## hired ships with live status, updated live), threats (the bases that
+## have arrived, grouped by faction, with their status and the ships out,
+## raiders included; a base being announced as "arriving in m:ss"; a vague
+## "Next: unknown signals, ~6 min" outlook line from the ThreatDirector), scrap
 ## fields and the captain roster (grouped by role, rank badge, live status;
 ## captains without a ship included). Mercenaries flying in a fleet are
 ## grouped under a fleet line (leader first).
@@ -41,6 +43,7 @@ var _scrap: VBoxContainer
 var _scrap_header: Label
 var _scrap_rows: Array[OverviewRow] = []
 var _threats_dirty := false
+var _outlook: Label
 var _roster: VBoxContainer
 var _roster_header: Label
 var _roster_rows: Array[OverviewRow] = []
@@ -99,6 +102,10 @@ func setup(owner_hud: HUD) -> void:
 		world.combatant_spawned.connect(func(_n: Node3D) -> void: _threats_dirty = true)
 		world.combatant_destroyed.connect(func(_n: Node3D, _k: Node3D) -> void: _threats_dirty = true)
 		world.scrap_changed.connect(func() -> void: _rebuild_scrap.call_deferred())
+		if world.threats:
+			world.threats.changed.connect(func() -> void: _threats_dirty = true)
+	if hud.solar_system:
+		hud.solar_system.den_added.connect(func(_d: ScavengerDen) -> void: _threats_dirty = true)
 	_rebuild()
 
 
@@ -227,44 +234,125 @@ func _rebuild_threats() -> void:
 	var dens: Array[ScavengerDen] = []
 	if hud.solar_system:
 		dens = hud.solar_system.dens
-	var count := 0
+	# Grouped by faction, in the order their first base appears.
+	var groups: Array[FactionDef] = []
+	var by_faction: Dictionary = {}
 	for d in dens:
 		if not is_instance_valid(d):
 			continue
-		var row := _add_row(_threats, d, d.get_display_name(), _den_subtitle(d))
-		row.title_label.add_theme_color_override("font_color", Color(1.0, 0.55, 0.45) if d.is_alive() else Color(0.55, 0.55, 0.58))
-		var bar := PipMeter.new()
-		bar.style = PipMeter.Style.BAR
-		bar.max_value = 1.0
-		bar.value = d.hull_fraction()
-		bar.custom_minimum_size = Vector2(36.0, 4.0)
-		bar.color = Combat.HOSTILE_COLOR
-		bar.name = "Hull"
-		row.add_right(bar)
-		row.tooltip_text = "%s\nClaims %s\nSelect it to post a bounty." % [d.get_display_name(), d.belt.def.name if d.belt else "?"]
-		_threat_rows.append(row)
-		var ships: Array[ScavengerShip] = []
-		ships.append_array(d.spawns)
-		ships.append_array(d.raiders)
-		for sc in ships:
-			if not is_instance_valid(sc) or sc.dead:
-				continue
-			var sr := _add_row(_threats, sc, sc.callsign + (" (raider)" if sc.is_raider else ""), sc.get_status_text().to_lower(), 1)
-			sr.title_label.add_theme_color_override("font_color", Color(1.0, 0.62, 0.52))
-			_threat_rows.append(sr)
-			count += 1
+		if not by_faction.has(d.faction_def):
+			by_faction[d.faction_def] = [] as Array[ScavengerDen]
+			groups.append(d.faction_def)
+		(by_faction[d.faction_def] as Array[ScavengerDen]).append(d)
+	var world := CombatWorld.of(get_tree())
+	var threats := world.threats if world else null
+	var site: DenArrivalSite = threats.site if threats and is_instance_valid(threats.site) else null
+	if site and not by_faction.has(site.faction_def):
+		by_faction[site.faction_def] = [] as Array[ScavengerDen]
+		groups.append(site.faction_def)
+	var count := 0
+	for f in groups:
+		var group: Array[ScavengerDen] = by_faction[f]
+		var head := _faction_header(f)
+		var live := 0
+		var out := 0
+		for d in group:
+			if d.is_alive():
+				live += 1
+			count += _add_den_rows(d, f)
+			out += _live_ships(d).size()
+		var arriving := ""
+		if site and site.faction_def == f:
+			_add_site_row(site, f)
+			arriving = ", 1 arriving"
+		(head.get_node(^"Count") as Label).text = "%d/%d bases, %d ships%s" % [live, group.size(), out, arriving]
 	if _threats_header:
 		_threats_header.text = str(count)
+	_outlook = UIUtil.label("", &"DimLabel")
+	_outlook.name = "Outlook"
+	_threats.add_child(_outlook)
+	_update_outlook()
 	_sync_pressed(hud.camera.get_follow_target() if hud.camera else null)
 	_fit_height.call_deferred()
 
 
+## A small coloured faction line above its bases in the threats list.
+func _faction_header(f: FactionDef) -> HBoxContainer:
+	var h := HBoxContainer.new()
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(UIUtil.spacer(8.0))
+	var swatch := ColorRect.new()
+	swatch.color = f.color
+	swatch.custom_minimum_size = Vector2(8.0, 8.0)
+	swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	swatch.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(swatch)
+	var l := UIUtil.label(f.display_name.to_upper(), &"DimLabel")
+	l.add_theme_color_override("font_color", f.color.lerp(Color.WHITE, 0.2))
+	h.add_child(l)
+	var c := UIUtil.label("", &"DimLabel")
+	c.name = "Count"
+	h.add_child(c)
+	_threats.add_child(h)
+	return h
+
+
+## The base's row and one per ship it has out. Returns the ships listed.
+func _add_den_rows(d: ScavengerDen, f: FactionDef) -> int:
+	var row := _add_row(_threats, d, d.get_display_name(), _den_subtitle(d))
+	row.title_label.add_theme_color_override("font_color", f.color.lerp(Color.WHITE, 0.3) if d.is_alive() else Color(0.55, 0.55, 0.58))
+	var bar := PipMeter.new()
+	bar.style = PipMeter.Style.BAR
+	bar.max_value = 1.0
+	bar.value = d.hull_fraction()
+	bar.custom_minimum_size = Vector2(36.0, 4.0)
+	bar.color = f.color
+	bar.name = "Hull"
+	row.add_right(bar)
+	row.tooltip_text = "%s\n%s %s, claims %s\nSelect it to post a bounty." % [d.get_display_name(), f.display_name, f.den_kind, d.belt.def.name if d.belt else "?"]
+	_threat_rows.append(row)
+	var ships := _live_ships(d)
+	for sc in ships:
+		var sr := _add_row(_threats, sc, sc.callsign + (" (raider)" if sc.is_raider else ""), sc.get_status_text().to_lower(), 1)
+		sr.title_label.add_theme_color_override("font_color", f.color.lerp(Color.WHITE, 0.4))
+		_threat_rows.append(sr)
+	return ships.size()
+
+
+## A base being announced: no hull, a countdown.
+func _add_site_row(site: DenArrivalSite, f: FactionDef) -> void:
+	var row := _add_row(_threats, site, site.get_display_name(), site.get_status_text().to_lower())
+	row.title_label.add_theme_color_override("font_color", Color(f.color.lerp(Color.WHITE, 0.3), 0.75))
+	row.tooltip_text = "%s\nLong-range scans: %s ships gathering near %s.\nArrives in %s." % [site.get_display_name(), f.unit_name, site.def.belt_name, site.countdown_text()]
+	_threat_rows.append(row)
+
+
+func _update_outlook() -> void:
+	if not is_instance_valid(_outlook):
+		return
+	var world := CombatWorld.of(get_tree())
+	var text := world.threats.outlook_text() if world and world.threats else ""
+	_outlook.text = "   " + text
+	_outlook.visible = not text.is_empty()
+
+
+func _live_ships(d: ScavengerDen) -> Array[ScavengerShip]:
+	var out: Array[ScavengerShip] = []
+	for sc in d.spawns + d.raiders:
+		if is_instance_valid(sc) and not sc.dead:
+			out.append(sc)
+	return out
+
+
 func _refresh_threats() -> void:
+	_update_outlook()
 	for r in _threat_rows:
 		if not is_instance_valid(r.target):
 			_threats_dirty = true
 			continue
-		if r.target is ScavengerDen:
+		if r.target is DenArrivalSite:
+			r.set_subtitle((r.target as DenArrivalSite).get_status_text().to_lower())
+		elif r.target is ScavengerDen:
 			var d := r.target as ScavengerDen
 			r.set_subtitle(_den_subtitle(d))
 			var bar := r.right_box.get_node_or_null(^"Hull") as PipMeter

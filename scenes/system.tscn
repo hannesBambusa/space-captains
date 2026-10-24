@@ -73,14 +73,14 @@ max_camera_distance = 2600.0
 
 [node name="RTSCamera" parent="." instance=ExtResource("5_cam")]
 min_distance = 80.0
-max_distance = 62000.0
+max_distance = 120000.0
 default_distance = 2600.0
 zoom_step = 0.16
 pitch_near_deg = 30.0
 pitch_far_deg = 80.0
 pitch_curve = 2.6
-fit_distance = 58000.0
-bounds_radius = 27000.0
+fit_distance = 112000.0
+bounds_radius = 52000.0
 
 [node name="ScreenshotMode" type="Node" parent="."]
 script = ExtResource("6_shot")

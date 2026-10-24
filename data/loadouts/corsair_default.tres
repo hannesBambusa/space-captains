@@ -1,0 +1,60 @@
+[gd_resource type="Resource" script_class="ShipLoadout" load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/ships/ship_loadout.gd" id="0_load"]
+[ext_resource type="Script" path="res://scripts/ships/ship_module.gd" id="1_mod"]
+
+[sub_resource type="Resource" id="m0"]
+script = ExtResource("1_mod")
+id = &"needle_cannons"
+display_name = "Needle Cannons"
+slot = 0
+weapon_kind = 2
+weapon_damage = 7.0
+weapon_range = 520.0
+fire_rate = 3.0
+
+[sub_resource type="Resource" id="m1"]
+script = ExtResource("1_mod")
+id = &"grab_hold"
+display_name = "Grab Hold"
+slot = 1
+cargo_bonus = 0.8
+
+[sub_resource type="Resource" id="m2"]
+script = ExtResource("1_mod")
+id = &"skin_plating"
+display_name = "Skin Plating"
+slot = 2
+hull_bonus = 30.0
+shield_bonus = 40.0
+shield_regen = 6.0
+
+[sub_resource type="Resource" id="m3"]
+script = ExtResource("1_mod")
+id = &"sprint_drive"
+display_name = "Sprint Drive"
+slot = 3
+speed_mult = 1.32
+accel_mult = 1.45
+turn_mult = 1.35
+
+[sub_resource type="Resource" id="m4"]
+script = ExtResource("1_mod")
+id = &"prowler_scanner"
+display_name = "Prowler Scanner"
+slot = 4
+sensor_range = 3600.0
+
+[resource]
+script = ExtResource("0_load")
+role_name = "Corsair"
+base_hull = 150.0
+base_speed = 170.0
+base_acceleration = 38.0
+base_turn_rate_deg = 125.0
+base_sensor_range = 2400.0
+tool = SubResource("m0")
+cargo = SubResource("m1")
+defense = SubResource("m2")
+engine = SubResource("m3")
+sensor = SubResource("m4")

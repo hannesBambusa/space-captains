@@ -2,7 +2,7 @@
 
 Run:
   /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
-      --python /Users/hannesalm/code/games/space-majesty/blender/gen_salvager_ship.py
+      --python blender/gen_salvager_ship.py
   Add `-- --no-preview` to skip the PNG renders.
 
 Design: salvage tug, functional hard sci-fi. A pressurised crew module (cylinder with

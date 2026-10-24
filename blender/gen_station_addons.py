@@ -2,7 +2,7 @@
 
 Run:
   /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
-      --python /Users/hannesalm/code/games/space-majesty/blender/gen_station_addons.py
+      --python blender/gen_station_addons.py
   Options after `--`:
     --only=factory,outfitter,science   build a subset
     --no-textures                      flat materials, no Cycles bake
@@ -44,43 +44,69 @@ ALONG_X = parts.ALONG_X
 OUTWARD = Matrix.Rotation(math.pi / 2, 4, "X")   # lathe/cylinder local +Z -> Blender -Y
 
 MATS = {}
-EXTRA_KINDS = {
-    "radiator": dict(panel=(0.6, 3.0), tones=[(0.13, 0.14, 0.15), (0.11, 0.12, 0.13),
-                                              (0.15, 0.155, 0.16), (0.12, 0.125, 0.13)],
-                     rough=(0.38, 0.12), metal=0.7, seam_dark=0.5, rivets=False,
-                     chip=(0.45, 0.45, 0.46), chip_metal=1.0, chip_k=0.6, grime_k=0.6,
-                     bleach=0.25),
-}
 
 H = G = L = None   # parts: hull (atlas), furnace glow, lights
+RNG = random.Random(1)
+LABELS = ["FAB-01", "SMELT 1", "OUTFIT 2", "PARTS", "LAB 3", "#BAR", "#CHEV", "NO STEP"]
+DECALS = []
+INK_DARK = (0.035, 0.035, 0.038)
+INK_LIGHT = (0.42, 0.42, 0.39)
 
 
 def build_materials(pre):
+    """Same material language as the station (station_textures.WORN_KINDS)."""
     m = common.make_material
     MATS.clear()
-    MATS["hull"] = m(f"{pre}_hull_white", (0.78, 0.78, 0.76), roughness=0.45, metallic=0.1)
-    MATS["hull2"] = m(f"{pre}_hull_grey", (0.50, 0.52, 0.55), roughness=0.5, metallic=0.15)
-    MATS["dark"] = m(f"{pre}_structure_dark", (0.06, 0.065, 0.07), roughness=0.55, metallic=0.5)
-    MATS["orange"] = m(f"{pre}_accent_orange", (0.85, 0.28, 0.03), roughness=0.45)
-    MATS["hazard"] = m(f"{pre}_hazard", (0.8, 0.55, 0.02), roughness=0.5)
-    MATS["mli"] = m(f"{pre}_mli_white", (0.8, 0.8, 0.78), roughness=0.85)
-    MATS["mli_gold"] = m(f"{pre}_mli_gold", (0.8, 0.52, 0.15), roughness=0.4, metallic=0.9)
-    MATS["pad"] = m(f"{pre}_deck", (0.15, 0.15, 0.16), roughness=0.7, metallic=0.2)
-    MATS["radiator"] = m(f"{pre}_radiator", (0.12, 0.13, 0.14), roughness=0.4, metallic=0.7)
-    MATS["window"] = m(f"{pre}_window_warm", (1.0, 0.85, 0.6), roughness=0.3,
-                       emission=(1.0, 0.78, 0.5), emission_strength=3.0)
-    MATS["light"] = m(f"{pre}_light_orange", (1.0, 0.45, 0.1), roughness=0.3,
-                      emission=(1.0, 0.42, 0.08), emission_strength=4.0)
-    MATS["red"] = m(f"{pre}_light_red", (1.0, 0.12, 0.05), roughness=0.3,
-                    emission=(1.0, 0.1, 0.04), emission_strength=4.0)
-    MATS["cyan"] = m(f"{pre}_light_cyan", (0.35, 0.8, 1.0), roughness=0.3,
-                     emission=(0.3, 0.75, 1.0), emission_strength=3.0)
-    MATS["glow"] = m("factory_furnace_glow", (1.0, 0.36, 0.05), roughness=0.4,
-                     emission=(1.0, 0.34, 0.05), emission_strength=5.0)
+    MATS["hull"] = m(f"{pre}_hull_white", (0.5, 0.5, 0.48), roughness=0.5)
+    MATS["hull2"] = m(f"{pre}_hull_grey", (0.2, 0.21, 0.22), roughness=0.55)
+    MATS["hull3"] = m(f"{pre}_hull_warm", (0.33, 0.32, 0.29), roughness=0.58)
+    MATS["dark"] = m(f"{pre}_structure_dark", (0.055, 0.058, 0.062), roughness=0.5, metallic=0.55)
+    MATS["metal"] = m(f"{pre}_bare_metal", (0.3, 0.3, 0.31), roughness=0.36, metallic=0.9)
+    MATS["accent"] = m(f"{pre}_accent_paint", (0.28, 0.12, 0.045), roughness=0.6)
+    MATS["hazard"] = m(f"{pre}_hazard", (0.21, 0.165, 0.065), roughness=0.62)
+    MATS["mli"] = m(f"{pre}_mli_white", (0.5, 0.49, 0.455), roughness=0.86)
+    MATS["mli_gold"] = m(f"{pre}_mli_gold", (0.6, 0.39, 0.12), roughness=0.3, metallic=1.0)
+    MATS["mli_silver"] = m(f"{pre}_mli_silver", (0.6, 0.6, 0.61), roughness=0.26, metallic=1.0)
+    MATS["pad"] = m(f"{pre}_deck", (0.095, 0.095, 0.1), roughness=0.72, metallic=0.2)
+    MATS["radiator"] = m(f"{pre}_radiator", (0.47, 0.475, 0.48), roughness=0.45, metallic=0.15)
+    # emissive: near-black base so only the emission shows (Godot dims it by 0.35)
+    glow = (0.03, 0.028, 0.025)
+    MATS["window"] = m(f"{pre}_window_warm", glow, roughness=0.25,
+                       emission=(1.0, 0.6, 0.28), emission_strength=2.0)
+    MATS["window_dim"] = m(f"{pre}_window_amber", glow, roughness=0.25,
+                           emission=(1.0, 0.5, 0.18), emission_strength=1.1)
+    MATS["window_cool"] = m(f"{pre}_window_cool", glow, roughness=0.25,
+                            emission=(0.7, 0.82, 1.0), emission_strength=1.5)
+    MATS["glass"] = m(f"{pre}_glass_dark", (0.012, 0.016, 0.02), roughness=0.1)
+    MATS["light"] = m(f"{pre}_light_amber", glow, roughness=0.3,
+                      emission=(1.0, 0.55, 0.2), emission_strength=3.5)
+    MATS["red"] = m(f"{pre}_light_red", glow, roughness=0.3,
+                    emission=(1.0, 0.08, 0.03), emission_strength=6.0)
+    MATS["cyan"] = m(f"{pre}_light_white", glow, roughness=0.3,
+                     emission=(0.85, 0.92, 1.0), emission_strength=4.0)
+    MATS["glow"] = m("factory_furnace_glow", (0.05, 0.02, 0.01), roughness=0.4,
+                     emission=(1.0, 0.34, 0.05), emission_strength=4.0)
+    for k in ("window", "window_dim", "window_cool", "glass", "light", "red", "cyan", "glow"):
+        MATS[k].use_backface_culling = False
 
 
 def lamp(pos, s=0.7, mat="light"):
+    """Small marker light (kept small: point lights, not glowing blocks)."""
+    s = min(s, 0.4)
     L.box(V(pos), (s, s, s * 0.6), mat, bevel=0.0)
+
+
+def win_row(c0, c1, normal, n, w=0.5, h=0.6, mode="hab"):
+    """Row of n portholes from c0 to c1 on a face with outward `normal`."""
+    c0, c1 = V(c0), V(c1)
+    for k in range(n):
+        c = c0.lerp(c1, (k + 0.5) / n)
+        up = V((0, 0, 1)) if abs(V(normal).z) < 0.9 else V((0, -1, 0))
+        parts.window(L, c, normal, up, w, h, parts.pick_lit(RNG, mode))
+
+
+def label(text, centre, normal, up, h, colour, opacity=0.85):
+    DECALS.append(st.decal(LABELS.index(text), centre, normal, up, h, colour, opacity))
 
 
 def beacon(pos, r=0.6, mat="light"):
@@ -94,7 +120,7 @@ def out_m(y, x=0.0, z=0.0):
     return Matrix.Translation((x, y, z)) @ OUTWARD
 
 
-def tank_v(c, r, h, mat_body, band="orange"):
+def tank_v(c, r, h, mat_body, band="accent"):
     """Vertical tank with domes, base at c.z."""
     x, y, z0 = c
     dome = r * 0.6
@@ -120,7 +146,7 @@ def mating_collar(neck_len=4.0, neck_r=3.6):
             (neck_r, 1.0), (neck_r, 1.0 + neck_len * 0.45), (neck_r, 1.0 + neck_len * 0.6),
             (neck_r, 1.0 + neck_len), (0.0, 1.0 + neck_len)]
     fm = {0: "dark", 1: "dark", 2: "hazard", 3: "hull", 4: "hull2", 5: "dark", 6: "hull2",
-          7: "orange", 8: "hull2", 9: "dark"}
+          7: "accent", 8: "hull2", 9: "dark"}
     H.lathe(prof, 24, lambda i, j: fm[j], matrix=out_m(0.0), start=math.pi / 24)
     for k in range(4):   # latch blocks, outside the station's latches
         ang = k * math.pi / 2
@@ -149,10 +175,11 @@ def build_factory(rng):
         H.box(V((0, y0 - 2.5 - k * 4.6, 7.0)), (15.0, 0.6, 0.5), "dark", bevel=0.0)
     H.box(V((-3.5, yc + 1.0, 7.4)), (5.0, 9.0, 1.2), "mli", bevel=0.08)
     H.box(V((3.5, yc - 3.0, 7.3)), (4.0, 5.0, 1.0), "hull2", bevel=0.08)
-    H.box(V((3.5, yc - 3.0, 7.85)), (4.2, 0.8, 0.1), "orange", bevel=0.0)
+    H.box(V((3.5, yc - 3.0, 7.85)), (4.2, 0.8, 0.1), "accent", bevel=0.0)
     for sx in (-1, 1):
-        L.box(V((sx * 8.03, yc, 3.0)), (0.08, ln - 3.0, 0.45), "window", bevel=0.0)
-        H.box(V((sx * 8.1, yc, -2.0)), (0.5, ln - 1.0, 0.5), "orange", bevel=0.0)
+        win_row((sx * 8.0, y0 - 1.5, 3.0), (sx * 8.0, y1 + 1.5, 3.0), (sx, 0, 0), 11, 0.5, 0.55,
+                "work")
+        H.box(V((sx * 8.1, yc, -2.0)), (0.5, ln - 1.0, 0.5), "accent", bevel=0.0)
         for k in range(5):
             H.box(V((sx * 8.3, y0 - 1.0 - k * 4.2, 0.0)), (0.6, 0.8, 12.0), "dark", bevel=0.0)
     H.box(V((0, yc, -6.6)), (16.6, ln + 0.4, 1.4), "dark", bevel=0.05)
@@ -182,7 +209,7 @@ def build_factory(rng):
     for k in range(9):
         y = ry0 - 1.0 - k * (ry0 - ry1 - 2.0) / 8
         H.box(V(((rx0 + rx1) / 2, y, rz + 0.5)), (rx1 - rx0, 0.25, 0.14), "hull2", bevel=0.0)
-    H.tube(V((rx0 + 0.3, ry0, rz + 0.6)), V((rx0 + 0.3, ry1, rz + 0.6)), 0.35, 0.35, "orange", 8)
+    H.tube(V((rx0 + 0.3, ry0, rz + 0.6)), V((rx0 + 0.3, ry1, rz + 0.6)), 0.35, 0.35, "accent", 8)
     H.tube(V((rx1 - 0.2, ry0, rz + 0.6)), V((rx1 - 0.2, ry1, rz + 0.6)), 0.3, 0.3, "hull", 8)
     lamp((rx1, ry0, rz + 0.9), 0.55, "red")
     lamp((rx1, ry1, rz + 0.9), 0.55, "red")
@@ -198,7 +225,8 @@ def build_factory(rng):
     for sx in (-1, 1):
         for k in range(4):
             H.box(V((sx * 10.35, s0 - 2.0 - k * 4.8, 0.0)), (0.8, 1.0, 16.0), "dark", bevel=0.0)
-        L.box(V((sx * 10.03, sc, 6.5)), (0.08, sl - 3.0, 0.5), "window", bevel=0.0)
+        win_row((sx * 10.0, s0 - 1.5, 6.5), (sx * 10.0, s1 + 1.5, 6.5), (sx, 0, 0), 10, 0.45,
+                0.5, "store")
     # front furnace slot on the outer face under a hood
     G.box(V((0, s1 - 0.1, 3.0)), (13.0, 0.4, 1.6), "glow", bevel=0.0)
     H.box(V((0, s1 - 0.9, 4.3)), (14.0, 1.8, 0.6), "dark", bevel=0.05)
@@ -218,7 +246,7 @@ def build_factory(rng):
     sx_, sy_ = 5.0, -37.5
     prof = [(0.0, zr), (2.8, zr), (2.8, zr + 0.8), (2.2, zr + 1.4), (2.2, 10.6), (2.2, 11.2),
             (2.5, 11.4), (2.5, 12.3), (1.9, 12.3), (1.9, 11.9), (0.0, 11.9)]
-    pm = {0: "dark", 1: "hull2", 2: "dark", 3: "hull", 4: "orange", 5: "dark", 6: "dark",
+    pm = {0: "dark", 1: "hull2", 2: "dark", 3: "hull", 4: "accent", 5: "dark", 6: "dark",
           7: "dark", 8: "dark", 9: "dark"}
     H.lathe(prof, 16, lambda i, j: pm[j], matrix=Matrix.Translation((sx_, sy_, 0)))
     G.cyl(V((sx_, sy_, 12.0)), 1.85, 1.85, 0.2, "glow", segs=16)
@@ -234,6 +262,23 @@ def build_factory(rng):
         lamp((x, y1 + 0.6, 6.8), 0.7)
     # tanks tucked between hall and smelter on -X
     tank_v((-11.5, -27.0, -6.0), 2.2, 9.0, "mli_gold")
+    # service pipes along the smelter and hall flanks, roof handrail
+    for sx in (-1, 1):
+        for zz, rad, mat in ((-3.0, 0.28, "metal"), (1.2, 0.18, "accent")):
+            parts.pipe(H, V((sx * 10.95, s0 - 0.6, zz)), V((sx * 10.95, s1 + 0.6, zz)), rad, mat)
+        parts.pipe(H, V((sx * 8.8, y0 - 0.5, -4.0)), V((sx * 8.8, y1 + 0.5, -4.0)), 0.22, "metal")
+    rail = [V((x, y, 9.75)) for x, y in ((-9.6, s0 - 0.6), (-9.6, s1 + 0.6), (9.6, s1 + 0.6))]
+    for a_, b_ in zip(rail, rail[1:]):
+        parts.strut(H, a_ + V((0, 0, 0.8)), b_ + V((0, 0, 0.8)), 0.07, 0.07, "metal")
+    for k in range(9):
+        pt = V((-9.6, s0 - 0.6 - k * (sl - 1.2) / 8, 9.75))
+        parts.strut(H, pt, pt + V((0, 0, 0.8)), 0.07, 0.07, "metal")
+    for k in range(2):
+        H.box(V((-6.5 + k * 3.0, s1 + 2.2, 10.2)), (2.0, 1.6, 0.9), "hull2", bevel=0.06)
+    UPZ = (0, 0, 1)
+    label("SMELT 1", (-4.5, -40.5, 9.75), UPZ, (0, 1, 0), 1.0, INK_DARK)
+    label("FAB-01", (3.5, -9.5, 6.8), UPZ, (0, 1, 0), 0.9, INK_LIGHT)
+    label("#BAR", (-4.5, -42.2, 9.75), UPZ, (0, 1, 0), 0.35, (0.2, 0.045, 0.035))
     H.tube(V((-11.5, -27.0, -1.0)), V((-9.5, -27.0, -1.0)), 0.4, 0.4, "hull", 8)
 
 
@@ -245,15 +290,16 @@ def build_outfitter(rng):
     def wm(i, j):
         return "mli" if j in (3, 4) else ("hull" if j == 2 else "hull2")
     parts.capsule(H, -20.0, -3.5, 6.0, wm, segs=20, dome0=0.35, dome1=0.25, steps=2)
-    for y, mat in ((-8.0, "dark"), (-16.5, "orange")):
+    for y, mat in ((-8.0, "dark"), (-16.5, "accent")):
         H.cyl(V((0, y, 0)), 6.25, 6.25, 0.8, mat, segs=20, axis_rot=parts.ALONG_Y)
     for sx in (-1, 1):
-        L.box(V((sx * 6.05, -11.5, 1.5)), (0.12, 9.0, 0.45), "window", bevel=0.0)
+        win_row((sx * 5.97, -7.0, 1.0), (sx * 5.97, -16.0, 1.0), (sx, 0, 0.17), 6, 0.5, 0.6,
+                "hab")
     # roof workshop annex with a big hangar door
     H.box(V((0, -12.0, 6.2)), (8.0, 10.0, 3.4), "hull", bevel=0.06)
     H.box(V((0, -12.0, 8.0)), (8.4, 10.4, 0.4), "hull2", bevel=0.0)
-    H.box(V((0, -12.0, 8.25)), (8.6, 1.2, 0.12), "orange", bevel=0.0)
-    L.box(V((0, -6.95, 6.2)), (5.0, 0.08, 0.4), "window", bevel=0.0)
+    H.box(V((0, -12.0, 8.25)), (8.6, 1.2, 0.12), "accent", bevel=0.0)
+    win_row((-2.5, -6.98, 6.3), (2.5, -6.98, 6.3), (0, 1, 0), 4, 0.6, 0.5, "work")
     # parts deck (y -19..-43): flat open grid platform
     d0, d1, dz = -19.0, -43.0, -3.0
     dc, dl = (d0 + d1) / 2, d0 - d1
@@ -277,17 +323,17 @@ def build_outfitter(rng):
             for (ax, ay, bx, by) in ((-1.6, -1.6, 1.6, -1.6), (-1.6, 1.6, 1.6, 1.6),
                                      (-1.6, -1.6, -1.6, 1.6), (1.6, -1.6, 1.6, 1.6)):
                 H.beam(V((xr + ax, yr + ay, dz + 7.5)), V((xr + bx, yr + by, dz + 7.5)),
-                       0.35, 0.35, "orange")
+                       0.35, 0.35, "metal")
             for lvl, zz in enumerate((dz + 0.8, dz + 4.1)):
                 if rng.random() < 0.85:
-                    mat = rng.choice(["hull", "orange", "hull", "hull2", "mli_gold", "orange"])
+                    mat = rng.choice(["hull", "accent", "hull", "hull2", "mli_gold", "accent"])
                     h = rng.uniform(2.0, 3.0)
                     H.box(V((xr, yr, zz + h / 2)), (2.9, 2.9, h), mat, bevel=0.08)
             if k % 2 == 0:
                 lamp((xr + sx * 1.8, yr, dz + 7.6), 0.5)
     # loose crates and a parts pallet on the centre lane
     for (x, y, w, d, h, mat) in ((0.0, -28.0, 4.0, 2.5, 1.6, "hull"),
-                                 (-1.5, -33.5, 2.4, 2.4, 2.2, "orange"),
+                                 (-1.5, -33.5, 2.4, 2.4, 2.2, "accent"),
                                  (1.6, -34.0, 2.0, 3.0, 1.4, "hull2")):
         H.box(V((x, y, dz + 0.5 + h / 2)), (w, d, h), mat, bevel=0.08)
     # thruster/engine part on a cradle: a recognisable "module" being fitted
@@ -296,24 +342,29 @@ def build_outfitter(rng):
     # slewing crane: pedestal at the deck root, boom reaching out over the racks
     px, py = -5.0, -21.5
     H.cyl(V((px, py, dz + 3.0)), 1.6, 1.3, 5.0, "hull2", segs=12)
-    H.cyl(V((px, py, dz + 5.8)), 1.9, 1.9, 0.8, "orange", segs=12)
+    H.cyl(V((px, py, dz + 5.8)), 1.9, 1.9, 0.8, "accent", segs=12)
     H.box(V((px, py, dz + 7.2)), (3.0, 3.0, 2.2), "hull", bevel=0.08)
-    L.box(V((px, py - 1.53, dz + 7.4)), (2.0, 0.08, 0.6), "window", bevel=0.0)
+    win_row((px - 0.8, py - 1.51, dz + 7.4), (px + 0.8, py - 1.51, dz + 7.4), (0, -1, 0), 2,
+            0.6, 0.5, "work")
     tip = V((10.0, -34.5, 10.0))
     base = V((px, py, dz + 7.8))
-    H.beam(base, tip, 1.0, 1.1, "orange")
+    H.beam(base, tip, 1.0, 1.1, "accent")
     H.beam(base + V((0, 0, 0.9)), tip + V((0, 0, 0.7)), 0.35, 0.35, "dark")
     H.beam(V((px - 1.2, py + 1.2, dz + 8.0)), V((px - 3.4, py + 3.6, dz + 7.0)), 0.8, 0.8, "dark")
     H.box(V((px - 3.6, py + 3.8, dz + 6.8)), (2.0, 2.0, 1.4), "hull2", bevel=0.05)
     H.beam(tip, tip - V((0, 0, 5.0)), 0.12, 0.12, "dark")
     H.box(tip - V((0, 0, 5.4)), (0.8, 0.8, 0.5), "hazard", bevel=0.0)
-    H.box(tip - V((0, 0, 6.9)), (3.0, 2.0, 2.2), "orange", bevel=0.08)
+    H.box(tip - V((0, 0, 6.9)), (3.0, 2.0, 2.2), "accent", bevel=0.08)
     lamp(tip + V((0, 0, 0.7)), 0.6, "red")
     # deck corner beacons and a small parts dock sign on the outer edge
     for x in (-12.5, 12.5):
         beacon((x, d1 + 0.6, dz + 1.2), 0.5)
     for sx in (-1, 1):
-        lamp((sx * 12.5, d0 - 0.6, dz + 0.7), 0.5, "window")
+        lamp((sx * 12.5, d0 - 0.6, dz + 0.7), 0.5, "window_dim")
+    UPZ = (0, 0, 1)
+    label("PARTS", (0.0, -21.6, dz + 0.5), UPZ, (0, 1, 0), 1.1, INK_LIGHT)
+    label("OUTFIT 2", (0.0, -9.3, 8.2), UPZ, (0, 1, 0), 0.8, INK_LIGHT)
+    label("#CHEV", (0.0, d1 + 1.5, dz + 0.5), UPZ, (0, 1, 0), 0.6, (0.3, 0.23, 0.06))
 
 
 # ---------------------------------------------------------------- science
@@ -324,10 +375,11 @@ def build_science(rng):
     def lm(i, j):
         return "mli" if j in (3, 4) else ("hull" if j == 2 else "hull2")
     parts.capsule(H, -24.0, -3.5, 5.2, lm, segs=20, dome0=0.3, dome1=0.25, steps=2)
-    for y, mat in ((-6.5, "dark"), (-21.0, "orange")):
+    for y, mat in ((-6.5, "dark"), (-21.0, "accent")):
         H.cyl(V((0, y, 0)), 5.45, 5.45, 0.7, mat, segs=20, axis_rot=parts.ALONG_Y)
     for sx in (-1, 1):
-        L.box(V((sx * 5.25, -9.0, 1.2)), (0.12, 7.0, 0.4), "window", bevel=0.0)
+        win_row((sx * 5.17, -5.5, 1.2), (sx * 5.17, -12.5, 1.2), (sx, 0, 0.23), 5, 0.5, 0.6,
+                "work")
     # cross module along X at y -15: lab wings with gold MLI end caps
     cx_prof = [(0.0, -13.5), (2.0, -13.3), (3.2, -12.6), (3.2, -10.5), (3.4, -10.2),
                (3.4, 10.2), (3.2, 10.5), (3.2, 12.6), (2.0, 13.3), (0.0, 13.5)]
@@ -335,8 +387,9 @@ def build_science(rng):
            6: "hull2", 7: "mli_gold", 8: "mli_gold"}
     H.lathe(cx_prof, 16, lambda i, j: cxm[j], matrix=Matrix.Translation((0, -15.0, 0)) @ ALONG_X)
     for sx in (-1, 1):
-        H.cyl(V((sx * 7.5, -15.0, 0)), 3.6, 3.6, 0.6, "orange", segs=16, axis_rot=ALONG_X)
-        L.box(V((sx * 9.0, -15.0, 3.42)), (4.0, 0.8, 0.08), "cyan", bevel=0.0)
+        H.cyl(V((sx * 7.5, -15.0, 0)), 3.6, 3.6, 0.6, "accent", segs=16, axis_rot=ALONG_X)
+        win_row((sx * 7.2, -15.0, 3.42), (sx * 10.8, -15.0, 3.42), (0, 0, 1), 3, 0.5, 0.5,
+                "work")
     # small radiator fins on the cross module ends (edge-on, vertical)
     for sx in (-1, 1):
         H.box(V((sx * 11.0, -15.0, -5.8)), (3.0, 0.2, 5.0), "radiator", bevel=0.0)
@@ -345,10 +398,17 @@ def build_science(rng):
     dc = -29.0
     prof = [(0.0, -4.5), (6.0, -4.5), (7.0, -3.5), (7.0, -1.0), (7.0, 1.0), (7.0, 2.6),
             (6.0, 3.6), (4.2, 3.9), (0.0, 3.9)]
-    dm = {0: "dark", 1: "hull2", 2: "hull", 3: "window", 4: "hull", 5: "hull2", 6: "dark",
+    dm = {0: "dark", 1: "hull2", 2: "hull", 3: "hull2", 4: "hull", 5: "hull2", 6: "dark",
           7: "dark"}
     H.lathe(prof, 8, lambda i, j: dm[j], matrix=Matrix.Translation((0, dc, 0)),
             start=math.pi / 8)
+    for i in range(8):   # observation portholes round the drum
+        fa = math.pi / 4 + i * math.pi / 4
+        nrm = V((math.cos(fa), math.sin(fa), 0.0))
+        tan = V((-math.sin(fa), math.cos(fa), 0.0))
+        for o in (-1.3, 0.0, 1.3):
+            parts.window(L, V((0, dc, 0)) + nrm * 6.47 + tan * o, nrm, V((0, 0, 1)), 0.55, 0.7,
+                         parts.pick_lit(RNG, "work"))
     parts.box_truss(H, -23.0, -31.0, 1.6, 1.6, 2, "dark", "dark", chord=0.35, brace=0.22)
     # telescope: long tube on a fork, raked up and outward
     tb = V((0.0, dc - 1.0, 5.5))
@@ -359,7 +419,7 @@ def build_science(rng):
     t0, t1 = tb - td * 3.0, tb + td * 6.3
     H.tube(t0, t1, 1.7, 1.7, "hull", segs=16)
     H.tube(t1 - td * 0.6, t1 + td * 0.2, 1.95, 1.95, "dark", segs=16)
-    H.tube(t0 + td * 2.2, t0 + td * 3.0, 1.85, 1.85, "orange", segs=16)
+    H.tube(t0 + td * 2.2, t0 + td * 3.0, 1.85, 1.85, "accent", segs=16)
     H.tube(t0 - td * 0.2, t0 + td * 0.5, 1.2, 1.2, "dark", segs=12)
     # sensor mast on the lab can (tall, thin, reads as a spike)
     mx, my = 0.0, -7.0
@@ -381,7 +441,7 @@ def build_science(rng):
     dm_ = Matrix.Translation((0.0, dy, 2.6)) @ q
     dish_prof = [(0.0, 0.0), (1.8, 0.15), (3.6, 0.6), (5.4, 1.4), (5.7, 1.45), (5.5, 1.2),
                  (3.6, 0.35), (1.4, -0.2), (0.0, -0.3)]
-    dmats = {0: "hull", 1: "hull", 2: "hull", 3: "orange", 4: "dark", 5: "dark", 6: "dark",
+    dmats = {0: "hull", 1: "hull", 2: "hull", 3: "accent", 4: "dark", 5: "dark", 6: "dark",
              7: "dark"}
     H.lathe(dish_prof, 24, lambda i, j: dmats[j], matrix=dm_)
     tip = dm_ @ V((0, 0, 4.2))
@@ -395,6 +455,10 @@ def build_science(rng):
         lamp((0.0, y, 5.0), 0.5, "light")
     for sx in (-1, 1):
         lamp((sx * 7.0, dc, 2.8), 0.6, "cyan")
+    UPZ = (0, 0, 1)
+    label("LAB 3", (0.0, -11.5, 5.2), UPZ, (0, 1, 0), 0.8, INK_DARK)
+    label("#BAR", (0.0, -13.2, 5.2), UPZ, (0, 1, 0), 0.35, (0.045, 0.085, 0.17))
+    label("NO STEP", (0.0, -18.0, 5.2), UPZ, (0, 1, 0), 0.3, INK_DARK, 0.7)
 
 
 KINDS = {
@@ -407,54 +471,15 @@ SEEDS = {"factory": 7101, "outfitter": 7202, "science": 7303}
 
 # ---------------------------------------------------------------- textures
 def texture_addon(pre, objs):
-    """One atlas for the hull mesh (station surface kinds, same pipeline as gen_factory)."""
-    st.ATLAS_RES = ATLAS_RES
-    st.KINDS.update(EXTRA_KINDS)
-    atlas_keys = [k for k in st.KINDS if k in MATS]
-    atlas_mats = {MATS[k] for k in atlas_keys}
-    st.unwrap_atlas(objs, atlas_mats)
-    st.setup_cycles(8)
-    masks = st.new_image(f"{pre}_masks", ATLAS_RES, True)
-    bms = {}
-    for k in atlas_keys:
-        nb = st.NB(MATS[k])
-        geo = nb.n("ShaderNodeNewGeometry")
-        aon = nb.n("ShaderNodeAmbientOcclusion", samples=16)
-        aon.inputs["Distance"].default_value = 0.8
-        aof = nb.n("ShaderNodeAmbientOcclusion", samples=16)
-        aof.inputs["Distance"].default_value = 4.0
-        bev = nb.n("ShaderNodeBevel", samples=8)
-        bev.inputs["Radius"].default_value = 0.2
-        edge = nb.m("MULTIPLY", nb.inv(nb.v("DOT_PRODUCT", bev.outputs["Normal"],
-                                            geo.outputs["Normal"])), 14.0, clamp=True)
-        col = nb.comb(aon.outputs["AO"], aof.outputs["AO"], edge)
-        bm = st.BakeMat(MATS[k], dict(masks=col), nb)
-        bm.set_pass("masks", masks)
-        bms[k] = bm
-    st.bake(objs, "EMIT", 16, masks)
-    albedo = st.new_image(f"{pre}_albedo", ATLAS_RES, False)
-    mr = st.new_image(f"{pre}_mr", ATLAS_RES, True)
-    normal = st.new_image(f"{pre}_normal", ATLAS_RES, True)
-    for i, k in enumerate(atlas_keys):
-        nb = st.NB(MATS[k])
-        outs = st.build_surface(nb, k, st.KINDS[k], masks, i + 11, [(0.0, -31.0)])
-        bms[k] = st.BakeMat(MATS[k], outs, nb)
-    for name, img, kind in (("albedo", albedo, "EMIT"), ("mr", mr, "EMIT"),
-                            ("normal", normal, "NORMAL")):
-        for bm in bms.values():
-            bm.set_pass(name, img)
-        st.bake(objs, kind, 8, img)
-    p_alb = st.save_image(albedo, f"{pre}_albedo.jpg", "JPEG", 92)
-    p_mr = st.save_image(mr, f"{pre}_mr.png", "PNG")
-    p_nrm = st.save_image(normal, f"{pre}_normal.png", "PNG")
+    """One worn-industrial atlas for the hull mesh (station_textures.bake_worn_atlas)."""
+    p_alb, p_mr, p_nrm, atlas_mats = st.bake_worn_atlas(
+        objs, MATS, pre, ATLAS_RES, [(0.0, -31.0)], decals=DECALS, labels=LABELS, seed0=11)
     hull = st.pbr_material(f"{pre}_hull", st.load_saved(p_alb, False),
                            st.load_saved(p_mr, True), st.load_saved(p_nrm, True))
     mapping = {m: hull for m in atlas_mats}
     for o in objs:
         st.remap_materials(o, mapping)
         o.data.uv_layers.remove(o.data.uv_layers["panel"])
-    for img in (masks, albedo, mr, normal):
-        bpy.data.images.remove(img)
     for m in atlas_mats:
         if m.users == 0:
             bpy.data.materials.remove(m)
@@ -467,6 +492,8 @@ def build_one(kind, textures):
     common.reset_scene()
     build_materials(pre)
     rng = random.Random(SEEDS[kind])
+    RNG.seed(SEEDS[kind] + 1)
+    DECALS.clear()
     H = parts.PanelPart(f"{pre}_hull", MATS)
     G = parts.PanelPart("factory_furnace_glow", MATS)
     L = parts.PanelPart(f"{pre}_lights", MATS)

@@ -417,3 +417,32 @@ static func specialty_for(role_name: String) -> Specialty:
 		"Salvager":
 			return Specialty.SALVAGE
 	return Specialty.MINING
+
+
+# --- Save ---------------------------------------------------------------------
+
+## Every field that is not derived (the ship link is restored with the ship).
+const SAVE_FIELDS: PackedStringArray = [
+	"captain_name", "personality", "role", "specialty",
+	"nerve", "greed", "diligence", "piloting", "skill", "loyalty", "teamwork",
+	"loads_delivered", "credits_earned", "wallet", "credits_spent", "kills", "escorts_completed", "alive",
+	"reputation", "rank", "traits", "history", "hired_at", "career_since", "crystal_loads", "salvage_loads",
+	"solo_jobs", "team_jobs", "fights_survived", "ejections", "modules_bought", "stranded",
+]
+
+
+func save_state() -> Dictionary:
+	var d := SaveUtil.props(self, SAVE_FIELDS)
+	d["id"] = SaveIds.of(self)
+	d["log"] = flight_log.save_state()
+	return d
+
+
+static func from_save(d: Dictionary) -> Captain:
+	var c := Captain.new()
+	var fields := d.duplicate()
+	fields.erase("id")
+	fields.erase("log")
+	SaveUtil.apply_props(c, fields)
+	c.flight_log.load_state(d.get("log", {}))
+	return c

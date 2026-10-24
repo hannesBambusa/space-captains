@@ -323,3 +323,20 @@ func _add_history(ore: int, units: int, credits: int) -> void:
 	history.append({"time": SimClock.time, "ore": ore, "units": units, "credits": credits})
 	if history.size() > MAX_HISTORY:
 		history.remove_at(0)
+
+
+# --- Save ---------------------------------------------------------------------
+
+const SAVE_FIELDS: PackedStringArray = [
+	"stock", "ask", "reserve", "auto_sell", "follow", "total_units", "total_credits", "history",
+	"_acc", "_credit_carry", "_sell_timer", "_report_timer", "_sample_timer", "_samples", "_pending_units", "_pending_credits",
+]
+
+
+func save_state() -> Dictionary:
+	return SaveUtil.props(self, SAVE_FIELDS)
+
+
+func load_state(d: Dictionary) -> void:
+	SaveUtil.apply_props(self, d)
+	changed.emit()

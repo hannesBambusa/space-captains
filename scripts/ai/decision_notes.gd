@@ -8,11 +8,17 @@ extends RefCounted
 const ALTERNATIVES := 3
 
 
-## "Cinder Belt mining", "Scavenger Den bounty".
+## "Cinder Belt mining", "Rustjaw Hideout (Scavengers) bounty".
 static func job_name(c: Contract) -> String:
 	if c == null:
 		return "?"
-	return "%s %s" % [c.get_target_name(), c.get_type_name().to_lower()]
+	var target := c.get_target_name()
+	var bc := c as BountyContract
+	if bc:
+		var f := Factions.of(bc.target)
+		if f and not target.contains(f.unit_name):
+			target += " (%s)" % f.display_name
+	return "%s %s" % [target, c.get_type_name().to_lower()]
 
 
 ## Log key for a contract decision (coalesces repeats).
@@ -71,7 +77,8 @@ static func why(brain: CaptainBrain, e: RoleEvaluator.Evaluation) -> String:
 					float(t.get("need", 0.0)), roundi(float(t.get("solo_chance", 0.0)) * 100.0), UIUtil.amount(e.contract.reward)]
 		if t.has("join_fleet"):
 			if bool(t.get("grudge", false)):
-				return "Grudge against scavengers: always joins, share %s cr" % UIUtil.amount(roundi(float(t.get("share", 0.0))))
+				var gf := Factions.of(e.contract.target) if e.contract else null
+				return "Grudge against %s: always joins, share %s cr" % [gf.display_name.to_lower() if gf else "raiders", UIUtil.amount(roundi(float(t.get("share", 0.0))))]
 			return "Share %s cr, danger split %d ways, join chance %d%% (Teamwork %d)" % [UIUtil.amount(roundi(float(t.get("share", 0.0)))),
 					int(t.get("heads", 1)), roundi(clampf(float(t.get("join_chance", 0.0)), 0.0, 1.0) * 100.0), cap.effective_teamwork() if cap else 5]
 		return score_line(brain, e)

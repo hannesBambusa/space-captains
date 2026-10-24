@@ -518,3 +518,71 @@ func _make_bar() -> void:
 	_bar.material_override = _bar_mat
 	_bar.position = local_center() + Vector3(0.0, _model_box.end.y + 4.0, 0.0)
 	add_child(_bar)
+
+
+# --- Save ---------------------------------------------------------------------
+
+## Placement, construction, berths (captains by save id) and the service
+## and cargo depot state. Ships are saved on their own (ShipCodec).
+func save_state() -> Dictionary:
+	var caps := []
+	for c in captains:
+		caps.append(SaveIds.of(c))
+	var wait := []
+	for c in waiting:
+		wait.append(SaveIds.of(c))
+	var d := {"id": SaveIds.of(self), "def": def.id, "label": display_name, "bay": bay, "offset": position, "yaw": rotation.y,
+			"active": is_active(), "started_at": started_at, "captains": caps, "waiting": wait, "wait_timer": _wait_timer}
+	if _service and _service.has_method(&"save_state"):
+		d["service"] = _service.call(&"save_state")
+	if _depot:
+		d["depot"] = _depot.save_state()
+	return d
+
+
+## Construction and berths; call once the captains exist. The service and
+## depot state come later ([method load_services]), after the ships.
+func load_state(d: Dictionary, refs: SaveRefs) -> void:
+	display_name = String(d.get("label", display_name))
+	if bool(d.get("active", true)):
+		finish_construction()
+	else:
+		set_construction_progress(0.0)
+		started_at = float(d.get("started_at", SimClock.time))
+		_update_construction()
+	captains.clear()
+	for id: int in d.get("captains", []):
+		var c := refs.captain(id)
+		if c:
+			captains.append(c)
+	waiting.clear()
+	for id: int in d.get("waiting", []):
+		var c := refs.captain(id)
+		if c:
+			waiting.append(c)
+	_wait_timer = float(d.get("wait_timer", 0.0))
+	hires_changed.emit(self)
+
+
+func load_services(d: Dictionary, refs: SaveRefs) -> void:
+	if _service and _service.has_method(&"load_state") and d.has("service"):
+		_service.call(&"load_state", d["service"], refs)
+	if _depot and d.has("depot"):
+		_depot.load_state(d["depot"], refs)
+
+
+## Puts a loaded ship back: in its berth ([param docked]) or under the space
+## root. The ship must be set up (setup_ship, loadout) and not in the tree.
+func restore_ship(ship: Ship, docked: bool) -> void:
+	if docked:
+		var berth := berth_transform(ship.slot_index)
+		ship.position = berth.origin
+		ship.rotation.y = ShipMover.yaw_for(-berth.basis.z)
+		add_child(ship)
+		ship.snap_to_slot()
+	else:
+		SpaceNav.space_root(get_tree()).add_child(ship)
+		ship.mover.avoid_enabled = true
+	if not ships.has(ship):
+		ships.append(ship)
+	hires_changed.emit(self)

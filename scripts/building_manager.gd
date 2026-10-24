@@ -573,3 +573,46 @@ func _install_factory() -> void:
 func _free_bay(b: Building) -> void:
 	if b.bay > 0 and _bays.get(b.bay) == b:
 		_bays.erase(b.bay)
+
+
+# --- Save ---------------------------------------------------------------------
+
+func save_state() -> Dictionary:
+	var list := []
+	for b in buildings:
+		if is_instance_valid(b) and not b.is_queued_for_deletion():
+			list.append(b.save_state())
+	return {"counts": _counts, "rng": SaveUtil.rng_state(rng), "buildings": list}
+
+
+## The def with [param id] (buildable ones and the Factory), or null.
+func def_by_id(id: StringName) -> BuildingDef:
+	if factory_def and factory_def.id == id:
+		return factory_def
+	for d in building_defs:
+		if d and d.id == id:
+			return d
+	return null
+
+
+## Rebuilds every saved building (the start Factory is reused when the save
+## has it in the same bay, else removed). Registers each under its save id.
+func load_state(d: Dictionary, refs: SaveRefs) -> void:
+	var kept: Array[Building] = []
+	for s: Dictionary in d.get("buildings", []):
+		var def := def_by_id(StringName(s["def"]))
+		if def == null:
+			push_warning("BuildingManager: unknown building '%s' in the save" % s["def"])
+			continue
+		var bay := int(s.get("bay", 0))
+		var b := addon_in_bay(bay) if bay > 0 else null
+		if b == null or b.def.id != def.id or kept.has(b):
+			b = _spawn(def, s["offset"] as Vector3, float(s["yaw"]), String(s["label"]), bay)
+		refs.add(int(s["id"]), b)
+		b.load_state(s, refs)
+		kept.append(b)
+	for b in buildings.duplicate():
+		if not kept.has(b):
+			remove_building(b)
+	_counts = (d.get("counts", {}) as Dictionary).duplicate()
+	SaveUtil.set_rng(rng, d.get("rng", {}))

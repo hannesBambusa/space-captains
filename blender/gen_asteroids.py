@@ -2,7 +2,7 @@
 
 Run:
   /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
-      --python /Users/hannesalm/code/games/space-majesty/blender/gen_asteroids.py
+      --python blender/gen_asteroids.py
   Add `-- --no-preview` to skip the PNG render.
 """
 import math

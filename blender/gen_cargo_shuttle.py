@@ -2,7 +2,7 @@
 
 Run:
   /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
-      --python /Users/hannesalm/code/games/space-majesty/blender/gen_cargo_shuttle.py
+      --python blender/gen_cargo_shuttle.py
   Add `-- --no-preview` to skip the PNG renders.
   Add `-- --scale-png /abs/out.png` to also render a tilted top-down shot beside miner.glb.
 

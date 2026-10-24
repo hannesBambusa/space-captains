@@ -28,12 +28,16 @@ You are a station administrator. Independent ship captains act on their own. You
 
 ## Contracts
 - Mining: on a belt, credits per delivered load.
-- Bounty: on a scavenger ship or a Scavenger Hideout, paid on destruction.
+- Bounty: on a raider ship or a hostile base (Scavenger Hideout, Corsair Nest, Syndicate Fortress), paid on destruction. The suggested pay and the bounty's danger follow the faction.
 - Escort: on a miner (or a mining contract), paid to escorts per completed trip. Like Majesty's protect flag.
 - Later: Salvage (on a scrap field), Explore.
 
 ## Enemies
-- Scavengers: junk raider ships from Scavenger Hideouts (bases dug into asteroids) near the richer belts. They hunt miners, steal cargo, and raid near home now and then. Belt danger comes from nearby hideouts.
+- Factions (data/factions/*.tres, FactionDef): each hostile base (DenDef) belongs to one. A faction sets its ship model and stats, behaviour (prey, aggression, flee threshold, steal or kill, packs, raid style), base model and toughness, loot and bounty multipliers, colour and names. All of them are hostile to the player and never fight each other. Belt danger comes from nearby bases.
+- Scavengers: junk raider ships from Scavenger Hideouts (bases dug into asteroids) near the richer belts. They hunt miners, steal cargo, and raid near home now and then.
+- Corsairs (outer system, Wraith Drift): fast light raiders from Corsair Nests. They hunt miners and salvagers in pairs over a wide arc, grab cargo and run early. They raid the colony rarely, in pairs, and not before 25 minutes.
+- Syndicate (outer system, Wraith Drift): slow, tough gunships from a Syndicate Fortress (twice a big hideout's hull, regenerating shields, its own guns). They patrol their territory, engage mercenaries there and fight to the end; their rare raids (3 to 5 gunships, not before 40 minutes) go for the turrets and the outposts, not the ships. A fortress needs a geared fleet.
+- Threat escalation (ThreatDirector, DenDef arrival fields): the game starts with the Rustjaw Hideout only. Then, one at a time: Ashfang Hideout (12 min), Redwake Corsair Nest (25 min, introduces the Corsairs), Hollowstar Corsair Nest (40 min), Obsidian Syndicate Fortress (60 min). A base comes at its time only once the colony has grown (Ashfang 3 captains and 3 structures, Redwake 5/4, Hollowstar 7/5, Obsidian 9/6), and anyway at 1.5x its time; at least 3 min between arrivals. While every base is destroyed the threat clock runs 1.5x. 75 s ahead a "Long-range scans" warning names the faction and belt and the spot shows as "Arriving" with a countdown (hologram, map, overview); the base warps in with the construction look and starts launching. A faction's first base posts a one-time intro. Bases that have not arrived add no belt danger, bounties, markers or raids; a new base waits 4 min before raiding. The overview gives a vague "Next: unknown signals, ~6 min".
 - Raids: raiders attack the station in order: the shield bubble while it is up (they never chase targets inside it from outside), then the defense turrets, then the shield generator, then ships near home; with nothing left to shoot they loot credits from a structure. They flee home below 35% hull. Tuned so a mid raid (4 raiders) is driven off by 2 turrets and a shield with every mercenary away, and an undefended early colony survives it with 2 mercenaries at home.
 - Later: the Swarm, rogue drones.
 

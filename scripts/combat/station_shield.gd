@@ -281,7 +281,9 @@ func absorb(amount: float, attacker: Node3D, at: Vector3) -> void:
 	damage_taken += amount
 	hp = maxf(hp - amount, 0.0)
 	if is_instance_valid(attacker) and attacker is ScavengerShip:
-		EventLog.post("Raiders are attacking the station shield", EventLog.Kind.THREAT, self, Vector3.INF, "shield_attack")
+		var f := (attacker as ScavengerShip).faction_def
+		var who := "Raiders" if f == null or f.id == Factions.DEFAULT_ID else "%s raiders" % f.unit_name
+		EventLog.post("%s are attacking the station shield" % who, EventLog.Kind.THREAT, self, Vector3.INF, "shield_attack", f.id if f else &"")
 	if hp <= 0.0:
 		_collapse()
 
@@ -419,3 +421,22 @@ func _view_fade() -> float:
 	var near := smoothstep(radius * 0.8, radius * 2.2, d)
 	var far := 1.0 - smoothstep(radius * 14.0, radius * 30.0, d)
 	return lerpf(0.25, 1.0, near) * far
+
+
+# --- Save ---------------------------------------------------------------------
+
+func save_state() -> Dictionary:
+	return SaveUtil.props(self, ["state", "hp", "cooldown_left", "last_hit_time", "hits_taken", "damage_taken", "collapses", "_anim", "_was_raised"])
+
+
+## Puts the bubble back in its saved state without the raise / collapse
+## messages. A collapsing bubble comes back down (cooling off).
+func load_state(d: Dictionary) -> void:
+	if d.is_empty():
+		return
+	SaveUtil.apply_props(self, d)
+	if state == State.COLLAPSING:
+		_anim = 0.0
+		cooldown_left = cooldown
+		state = State.DOWN
+	state_changed.emit(self)

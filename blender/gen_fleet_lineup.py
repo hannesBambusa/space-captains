@@ -1,7 +1,7 @@
 """Fleet lineup previews: all five ships side by side at true relative scale.
 Run after the ship generators:
   /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
-      --python /Users/hannesalm/code/games/space-majesty/blender/gen_fleet_lineup.py
+      --python blender/gen_fleet_lineup.py
 Writes blender/previews/fleet_lineup.png (3/4 view) and fleet_lineup_top.png
 (small top-down, about 100 px per ship).
 """

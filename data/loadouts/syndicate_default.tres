@@ -1,0 +1,56 @@
+[gd_resource type="Resource" script_class="ShipLoadout" load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/ships/ship_loadout.gd" id="0_load"]
+[ext_resource type="Script" path="res://scripts/ships/ship_module.gd" id="1_mod"]
+
+[sub_resource type="Resource" id="m0"]
+script = ExtResource("1_mod")
+id = &"siege_cannons"
+display_name = "Siege Cannons"
+slot = 0
+weapon_kind = 2
+weapon_damage = 18.0
+weapon_range = 720.0
+fire_rate = 1.6
+
+[sub_resource type="Resource" id="m1"]
+script = ExtResource("1_mod")
+id = &"shell_magazine"
+display_name = "Shell Magazine"
+slot = 1
+
+[sub_resource type="Resource" id="m2"]
+script = ExtResource("1_mod")
+id = &"bastion_armor"
+display_name = "Bastion Armor"
+slot = 2
+hull_bonus = 80.0
+shield_bonus = 200.0
+shield_regen = 10.0
+
+[sub_resource type="Resource" id="m3"]
+script = ExtResource("1_mod")
+id = &"heavy_drive"
+display_name = "Heavy Drive"
+slot = 3
+
+[sub_resource type="Resource" id="m4"]
+script = ExtResource("1_mod")
+id = &"patrol_sensors"
+display_name = "Patrol Sensors"
+slot = 4
+sensor_range = 2800.0
+
+[resource]
+script = ExtResource("0_load")
+role_name = "Syndicate"
+base_hull = 380.0
+base_speed = 115.0
+base_acceleration = 22.0
+base_turn_rate_deg = 78.0
+base_sensor_range = 2400.0
+tool = SubResource("m0")
+cargo = SubResource("m1")
+defense = SubResource("m2")
+engine = SubResource("m3")
+sensor = SubResource("m4")

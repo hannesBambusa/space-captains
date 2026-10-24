@@ -43,11 +43,15 @@ const DUST_SIDE_SHARE := 0.22
 var def: BeltDef
 var richness: float:
 	get: return def.richness if def else 0.0
-## Live danger: the authored rating minus what destroyed dens took off it.
+## Live danger: the authored rating minus what destroyed dens took off it
+## and what dens that have not arrived yet would add.
 var danger: int:
-	get: return maxi(def.danger - danger_reduction, 1) if def else 1
+	get: return maxi(def.danger - danger_reduction - pending_danger, 1) if def else 1
 ## Danger levels removed by destroyed Scavenger Dens on this belt.
 var danger_reduction: int = 0
+## Danger bonus of this belt's dens that have not arrived yet (SolarSystem
+## keeps it; not saved, it follows from the ThreatDirector's state).
+var pending_danger: int = 0
 var ore_type: AsteroidBelt.OreType:
 	get: return def.ore_type if def else OreType.ROCK
 

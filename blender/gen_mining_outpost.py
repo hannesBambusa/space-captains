@@ -2,7 +2,7 @@
 
 Run:
   /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
-      --python /Users/hannesalm/code/games/space-majesty/blender/gen_mining_outpost.py
+      --python blender/gen_mining_outpost.py
   Add `-- --no-preview` to skip the PNG renders, `-- --no-textures` for flat materials.
 Textures are baked by outpost_textures.py (Cycles, a few minutes) into blender/textures/
 and embedded in the glb.

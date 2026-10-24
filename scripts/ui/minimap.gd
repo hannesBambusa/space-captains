@@ -174,7 +174,7 @@ func _ship_at(m: Vector2) -> Node3D:
 	return best
 
 
-## Ships and live dens shown as dots (parked ships excluded).
+## Ships, live dens and arriving bases shown as dots (parked ships excluded).
 func _map_targets() -> Array[Node3D]:
 	var out: Array[Node3D] = []
 	for n in get_tree().get_nodes_in_group(Ship.GROUP):
@@ -185,6 +185,8 @@ func _map_targets() -> Array[Node3D]:
 		for d in hud.solar_system.dens:
 			if is_instance_valid(d) and not d.dead:
 				out.append(d)
+		for n in get_tree().get_nodes_in_group(DenArrivalSite.GROUP):
+			out.append(n as Node3D)
 	return out
 
 
@@ -241,7 +243,7 @@ func _draw_map() -> void:
 	var selected := hud.selection.selected if hud.selection else null
 	var hostiles: Array[Node3D] = []
 	for n in _map_targets():
-		if n is ScavengerDen or (n as Ship).is_hostile():
+		if n is ScavengerDen or n is DenArrivalSite or (n as Ship).is_hostile():
 			hostiles.append(n)
 			continue
 		var m := _to_map(n.global_position)
@@ -252,7 +254,11 @@ func _draw_map() -> void:
 		if n is Ship:
 			_draw_warp_streak(c, n as Ship, m)
 		if n is ScavengerDen:
-			c.draw_rect(Rect2(m - Vector2(3.0, 3.0), Vector2(6.0, 6.0)), ShipMarkers.DEN_COLOR, false, 1.5)
+			c.draw_rect(Rect2(m - Vector2(3.0, 3.0), Vector2(6.0, 6.0)), ShipMarkers.color_for(n), false, 1.5)
+		elif n is DenArrivalSite:
+			var pulse := 0.4 + 0.4 * sin(Time.get_ticks_msec() * 0.004)
+			c.draw_rect(Rect2(m - Vector2(3.0, 3.0), Vector2(6.0, 6.0)), Color(ShipMarkers.color_for(n), pulse), false, 1.0)
+			c.draw_arc(m, 6.0, 0.0, TAU, 16, Color(ShipMarkers.color_for(n), pulse * 0.7), 1.0, true)
 		else:
 			c.draw_circle(m, 2.4, ShipMarkers.color_for(n))
 	if is_instance_valid(selected) and selected.is_inside_tree():

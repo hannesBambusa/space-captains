@@ -201,3 +201,17 @@ static func danger_at(tree: SceneTree, pos: Vector3) -> int:
 		if SpaceNav.distance_to_belt(b, pos) < b.def.width * 0.5 + 900.0:
 			d = maxi(d, b.danger)
 	return d
+
+
+## Puts a loaded free salvage contract back as [param f]'s (see [method free_for]).
+static func restore_free(f: ScrapField, c: SalvageContract) -> void:
+	if f == null or c == null:
+		return
+	var key := f.get_instance_id()
+	c.free = true
+	_free[key] = c
+	_next_free_id = mini(_next_free_id, c.id - 1)
+	f.depleted.connect(func(_f: ScrapField) -> void: c.mark_done())
+	f.tree_exiting.connect(func() -> void:
+		c.mark_done()
+		_free.erase(key))

@@ -2,7 +2,7 @@
 
 Run:
   /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
-      --python /Users/hannesalm/code/games/space-majesty/blender/gen_miner_ship.py
+      --python blender/gen_miner_ship.py
   Add `-- --no-preview` to skip the PNG renders.
 
 Design: belter mining tug, functional hard sci-fi. A pressurised crew cab (cylinder

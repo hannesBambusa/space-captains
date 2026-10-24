@@ -1,4 +1,4 @@
-# Space Majesty (working title)
+# Space Captains
 
 Indirect-control space sim in the spirit of Majesty 2. You are a station administrator in a star sector. Ship captains (miners, escorts, scouts, bounty hunters) act on their own; you steer them with paid contracts (mining, explore, protect, bounty). Rich asteroid belts are more dangerous. Resources: credits (pay contractors) and typed ore (iron, titanium, crystal: for building, tooling, and to sell to the Factory, which makes the modules captains buy).
 
@@ -12,12 +12,12 @@ Design: docs/DESIGN.md (agreed design and stages, read it first). Reference: ../
 
 ## World conventions
 - 1 unit = 1 m. Y is up. "Thick disc": the system has a main orbital plane (y = 0), but planets and moons orbit on inclined planes (PlanetDef inclination), belts are thick (gaussian vertical spread), dens sit at a height, and the home station rides its planet's height. Ships fly in 3D within this disc: they clear belt bands in lanes (SystemBelt.lane_altitude), miners drop to their rock's real height, and planet avoidance uses spheres. Travel legs fly cruise arcs (CruiseLeg, highway rule) and combat is 3D (AttackRun: tilted orbits, dive/climb passes, pitch aiming, fleeing dives). Structures stay level in the station's frame.
-- Scale: cluster (8-12 star systems linked by jump lanes) -> solar system (one scene each, ~50 km across, compressed scale, star at origin) -> local area (zoomed in on a colony/belt/station). Godot float precision is fine inside one system; never put two systems in one scene.
+- Scale: cluster (8-12 star systems linked by jump lanes) -> solar system (one scene each, ~50 km radius, compressed scale, star at origin) -> local area (zoomed in on a colony/belt/station). Godot float precision is fine inside one system; never put two systems in one scene.
 - Planets move slowly on orbits (pausable sim time). Home station orbits a planet.
 - Structures stand free near the station (no corridors); cargo shuttles fly goods from the outposts to the station's docking pads.
 - Station hub radius ~40 m. Asteroids 2 to 25 m. Ships (later) 5 to 20 m.
 - Camera is a tilted top-down RTS camera, zooms from ~80 m (station) to the whole system.
-- Main scene is scenes/system.tscn.
+- Main scene is scenes/main_menu.tscn (New game / Continue / Load); the game scene is scenes/system.tscn. Saves: SaveManager autoload, scripts/save/, user://saves/.
 
 ## Layout
 - scenes/      .tscn (main: scenes/system.tscn)

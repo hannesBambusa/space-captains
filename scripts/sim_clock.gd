@@ -57,3 +57,24 @@ func set_speed(value: float) -> void:
 ## Jumps the clock forward (used by screenshot mode's --time).
 func advance(seconds: float) -> void:
 	time += seconds
+
+
+# --- Save ---------------------------------------------------------------------
+
+## A new game: time 0, 1x, running.
+func reset() -> void:
+	time = 0.0
+	set_speed(SPEEDS[0])
+	set_paused(false)
+
+
+## [param paused_override] >= 0 saves that pause state instead (the pause
+## menu pauses the clock while it is open).
+func save_state(paused_override: int = -1) -> Dictionary:
+	return {"time": time, "speed": speed, "paused": paused if paused_override < 0 else paused_override == 1}
+
+
+func load_state(d: Dictionary) -> void:
+	time = float(d.get("time", 0.0))
+	set_speed(float(d.get("speed", 1.0)))
+	set_paused(bool(d.get("paused", false)))

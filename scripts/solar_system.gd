@@ -8,10 +8,15 @@ extends Node3D
 ## Children built at runtime: Star, one PlanetBody per planet (moons and the
 ## home station orbit inside their planet's node), SystemBelts, JumpGates,
 ## orbit lines and name labels. Orbit lines and labels fade with camera zoom.
+## Dens: only those there from the start (DenDef.starts_present) are built
+## with the system; the ThreatDirector brings the others in later
+## ([method arrive_den]). [member dens] holds the arrived ones only.
 
 const ORBIT_SHADER: Shader = preload("res://shaders/orbit_line.gdshader")
 
 signal built
+## A den arrived after the start ([method arrive_den]).
+signal den_added(den: ScavengerDen)
 
 const GROUP := "solar_system"
 
@@ -49,6 +54,7 @@ var _label_radii: PackedFloat32Array = []
 var _orbit_mat: ShaderMaterial
 var _moon_orbit_mat: ShaderMaterial
 var _star_color := Color.WHITE
+var _view_args: Array = []
 
 
 func _ready() -> void:
@@ -115,7 +121,7 @@ func _build() -> void:
 	sun.light_angular_distance = 0.5
 	sun.shadow_enabled = true
 	sun.shadow_bias = 0.04
-	sun.shadow_normal_bias = 1.2
+	sun.shadow_normal_bias = 2.0
 	sun.shadow_blur = 1.0
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	sun.directional_shadow_split_1 = 0.25
@@ -164,27 +170,79 @@ func _build() -> void:
 		_add_label(gate, "%s  >  %s" % [gdef.name.to_upper(), gdef.target_system.to_upper()], 150.0, 0.9, Color(0.55, 0.85, 1.0))
 
 	for ddef in def.dens:
-		_add_den(ddef)
+		if ddef.starts_present():
+			_add_den(ddef)
+		else:
+			var b := belt_of(ddef)
+			if b:
+				b.pending_danger += ddef.danger_bonus
 
 	_apply_sky_seed(def.sky_seed)
 
 
-## Places a Scavenger Den next to its belt, mouth turned toward the star.
-func _add_den(ddef: DenDef) -> void:
+## The built den of [param ddef], or null while it has not arrived.
+func den_of(ddef: DenDef) -> ScavengerDen:
+	for d in dens:
+		if is_instance_valid(d) and d.def == ddef:
+			return d
+	return null
+
+
+func belt_of(ddef: DenDef) -> SystemBelt:
 	var belt: SystemBelt = null
 	for b in belts:
 		if b.def.name == ddef.belt_name:
 			belt = b
+	return belt
+
+
+## Where [param ddef]'s base sits (system space = world, the system is at the origin).
+func den_position(ddef: DenDef) -> Vector3:
+	var belt := belt_of(ddef)
 	var r := (belt.def.orbit_radius if belt else 10000.0) + ddef.radial_offset
 	var a := deg_to_rad(ddef.angle_deg)
+	return Vector3(cos(a), 0.0, sin(a)) * r + Vector3.UP * ddef.height
+
+
+## Yaw that turns [param ddef]'s base mouth toward the star.
+func den_yaw(ddef: DenDef) -> float:
+	var p := den_position(ddef)
+	var inward := -Vector3(p.x, 0.0, p.z) * signf(ddef.radial_offset if ddef.radial_offset != 0.0 else 1.0)
+	return atan2(inward.x, inward.z)
+
+
+## Builds a den that was not there at the start (its belt's danger rises by
+## its bonus). [param effect] plays the warp-in (not on load). Returns the
+## den (the existing one when it is already built).
+func arrive_den(ddef: DenDef, effect: bool = true) -> ScavengerDen:
+	var have := den_of(ddef)
+	if have:
+		return have
+	var b := belt_of(ddef)
+	if b and not ddef.starts_present():
+		b.pending_danger = maxi(b.pending_danger - ddef.danger_bonus, 0)
+	var den := _add_den(ddef)
+	if effect:
+		den.play_arrival()
+	if not _view_args.is_empty():
+		_on_view_changed.callv(_view_args)
+	den_added.emit(den)
+	return den
+
+
+## Places a hostile base (any faction) next to its belt, mouth turned toward the star.
+func _add_den(ddef: DenDef) -> ScavengerDen:
+	var belt := belt_of(ddef)
 	var den := ScavengerDen.new()
 	den.setup(ddef, belt)
-	den.position = Vector3(cos(a), 0.0, sin(a)) * r + Vector3.UP * ddef.height
-	var inward := -Vector3(den.position.x, 0.0, den.position.z) * signf(ddef.radial_offset if ddef.radial_offset != 0.0 else 1.0)
-	den.rotation.y = atan2(inward.x, inward.z)
+	den.position = den_position(ddef)
+	den.rotation.y = den_yaw(ddef)
 	add_child(den)
 	dens.append(den)
-	_add_label(den, ddef.name.to_upper(), 70.0, 0.8, Color(1.0, 0.45, 0.35))
+	var fac := ddef.get_faction()
+	var tone := Color(1.0, 0.45, 0.35) if fac.id == Factions.DEFAULT_ID else fac.color.lerp(Color.WHITE, 0.15)
+	_add_label(den, ddef.name.to_upper(), 70.0 * fac.den_hit_radius / 42.0, 0.8, tone)
+	return den
 
 
 func _add_planet(pdef: PlanetDef, parent: Node3D) -> PlanetBody:
@@ -307,6 +365,7 @@ func _configure_camera() -> void:
 
 
 func _on_view_changed(_pivot: Vector3, distance: float, _yaw_deg: float) -> void:
+	_view_args = [_pivot, distance, _yaw_deg]
 	var a := smoothstep(orbit_fade_in.x, orbit_fade_in.y, distance)
 	_orbit_mat.set_shader_parameter("opacity", a)
 	var m := smoothstep(moon_orbit_fade_in.x, moon_orbit_fade_in.y, distance) \

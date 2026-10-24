@@ -73,14 +73,7 @@ func post_bounty(on_target: Node3D, credits: int, max_takers: int = 3) -> Bounty
 	if not Combat.is_live(on_target):
 		return null
 	var c := post(BountyContract.new(on_target, maxi(credits, 0), max_takers)) as BountyContract
-	on_target.connect(&"destroyed", func(_n: Node3D, killer: Node3D) -> void: _resolve_bounty(c, killer))
-	# Leaving the tree without dying (a scavenger slipping into its den) ends it.
-	var tw: WeakRef = weakref(on_target)
-	var check_gone := func() -> void:
-		var t := tw.get_ref() as Node
-		if not c.is_finished() and (t == null or not t.is_inside_tree()):
-			cancel(c)
-	on_target.tree_exiting.connect(func() -> void: check_gone.call_deferred())
+	_wire(c)
 	return c
 
 
@@ -90,8 +83,7 @@ func post_salvage(field: ScrapField, credits_per_load: int, max_takers: int = 3)
 	if field == null or not is_instance_valid(field) or field.amount <= 0:
 		return null
 	var c := post(SalvageContract.new(field, maxi(credits_per_load, 0), max_takers)) as SalvageContract
-	field.depleted.connect(func(_f: ScrapField) -> void: c.mark_done())
-	field.tree_exiting.connect(func() -> void: c.mark_done())
+	_wire(c)
 	return c
 
 
@@ -100,7 +92,7 @@ func post_escort(ward: Ship, pay_per_trip: int, max_escorts: int = 2) -> EscortC
 	if ward == null or ward.dead:
 		return null
 	var c := post(EscortContract.new(ward, null, maxi(pay_per_trip, 0), max_escorts)) as EscortContract
-	ward.destroyed.connect(func(_s: Ship, _k: Node3D) -> void: cancel(c))
+	_wire(c)
 	return c
 
 
@@ -109,10 +101,70 @@ func post_escort_for_mining(mc: MiningContract, pay_per_trip: int, max_escorts: 
 	if mc == null or mc.is_finished():
 		return null
 	var c := post(EscortContract.new(null, mc, maxi(pay_per_trip, 0), max_escorts)) as EscortContract
-	mc.changed.connect(func(_m: Contract) -> void:
-		if mc.is_finished():
-			cancel(c))
+	_wire(c)
 	return c
+
+
+## Hooks a posted contract to its target: a bounty resolves when the target
+## dies (and is cancelled when it slips away), salvage ends with its field,
+## an escort with its ward or its mining contract.
+func _wire(c: Contract) -> void:
+	if c is BountyContract and is_instance_valid(c.target):
+		var on_target := c.target
+		var bc := c as BountyContract
+		on_target.connect(&"destroyed", func(_n: Node3D, killer: Node3D) -> void: _resolve_bounty(bc, killer))
+		# Leaving the tree without dying (a scavenger slipping into its den) ends it.
+		var tw: WeakRef = weakref(on_target)
+		var check_gone := func() -> void:
+			var t := tw.get_ref() as Node
+			if not bc.is_finished() and (t == null or not t.is_inside_tree()):
+				cancel(bc)
+		on_target.tree_exiting.connect(func() -> void: check_gone.call_deferred())
+	elif c is SalvageContract and is_instance_valid((c as SalvageContract).field):
+		var sc := c as SalvageContract
+		sc.field.depleted.connect(func(_f: ScrapField) -> void: sc.mark_done())
+		sc.field.tree_exiting.connect(func() -> void: sc.mark_done())
+	elif c is EscortContract:
+		var ec := c as EscortContract
+		if is_instance_valid(ec.ward):
+			ec.ward.destroyed.connect(func(_s: Ship, _k: Node3D) -> void: cancel(ec))
+		elif ec.mining_contract:
+			var mc := ec.mining_contract
+			mc.changed.connect(func(_m: Contract) -> void:
+				if mc.is_finished():
+					cancel(ec))
+
+
+# --- Save ---------------------------------------------------------------------
+
+## A new game: no contracts.
+func reset() -> void:
+	for c in contracts.duplicate():
+		if c.changed.is_connected(_on_contract_changed):
+			c.changed.disconnect(_on_contract_changed)
+		if c is BountyContract and (c as BountyContract).fleet:
+			# Fleet and contract point at each other: break it so both free.
+			(c as BountyContract).fleet.members.clear()
+			(c as BountyContract).fleet = null
+	contracts.clear()
+	_next_id = 1
+
+
+func next_id() -> int:
+	return _next_id
+
+
+## Puts a loaded contract back. [param listed] = it is open or active (on
+## the board, wired to its target); finished ones are only kept for the
+## trips still on them.
+func restore(c: Contract, listed: bool, next: int) -> void:
+	_next_id = maxi(_next_id, next)
+	if not listed:
+		return
+	c.changed.connect(_on_contract_changed)
+	contracts.append(c)
+	_wire(c)
+	contract_posted.emit(c)
 
 
 ## The open escort contract linked to [param mc], or null.

@@ -2,7 +2,7 @@
 
 Run:
   /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
-      --python /Users/hannesalm/code/games/space-majesty/blender/gen_mercenary_outpost.py
+      --python blender/gen_mercenary_outpost.py
   Add `-- --no-preview` to skip the PNG render.
 
 Layout (Blender Z up, exported +Y up). Building centre at origin, play plane z=0.

@@ -1,20 +1,28 @@
 class_name ScavengerBrain
 extends RefCounted
-## Scavenger decisions (no contracts, no captain):
+## Raider decisions for every hostile faction (no contracts, no captain).
+## The ship's [FactionDef] tunes them: prey (hunts_*), aggression (escort
+## aversion, retaliation reach), flee threshold, steal share (0 = shoot to
+## kill), packs and raid style. Scavenger values are the defaults below.
 ## - ROAMING the den's belt (around the den, and toward the colony's mining
 ##   site when a contract is posted there);
 ## - HUNTING miners (salvagers too, and escape pods): prefers loaded,
 ##   unescorted ones within sensor range or on its belt near the den; shoots
-##   them and steals [constant STEAL_SHARE] of the load once close or the
-##   miner is disabled, then runs home;
+##   them and steals the faction's steal share of the load once close or the
+##   miner is disabled, then runs home (factions that do not steal shoot
+##   to kill; factions that hunt armed ships go for mercenaries in their
+##   territory too);
+## - PACKS: a wingman ([method set_lead]) flies beside its lead, hunts and
+##   fights what the lead does and runs when it runs;
 ## - ATTACKING whoever shoots at it;
-## - FLEEING to the den when the hull drops below [constant FLEE_HULL]
+## - FLEEING to the den when the hull drops below the faction's flee_hull
 ##   (docks there and leaves the map with its loot);
 ## - RAIDING (raiders): fly at the colony and attack it in order: the
 ##   station shield bubble while it is up (nothing inside can be hit through
 ##   it), then the defense turrets, then the shield generator, then ships
 ##   near home; with nothing left to shoot, loot credits from a structure
-##   until driven off.
+##   until driven off. RaidStyle.STRUCTURES (the Syndicate) skips the ships
+##   near home (unless they shoot) and besieges the outposts, looting more.
 ## Targets inside an up shield bubble are never chased from outside: the
 ## bubble is attacked instead (raiders, retaliation) or the prey is skipped.
 ## Checks run on a timer ([constant AI_INTERVAL]).
@@ -27,6 +35,7 @@ enum State { LAUNCHING, ROAMING, HUNTING, ATTACKING, FLEEING, RAIDING, RETURNING
 
 const STATE_NAMES: PackedStringArray = ["Launching", "Roaming", "Hunting", "Attacking", "Fleeing", "Raiding", "Returning to hideout"]
 const AI_INTERVAL := 0.5
+## Scavenger defaults (FactionDef.flee_hull, steal_share).
 const FLEE_HULL := 0.35
 const STEAL_RANGE := 140.0
 const STEAL_TIME := 2.5
@@ -42,11 +51,16 @@ const RAID_LOOT_INTERVAL := 8.0
 const RAID_LOOT_CREDITS := 15
 const RAID_LOOT_MAX := 75
 const ROAM_SPEED := 0.55
+## Escort weight in prey scoring at aggression 0.5, metres per escort.
+const ESCORT_PENALTY := 2500.0
+## A wingman's slot beside its lead, metres.
+const WING_OFFSET := 90.0
 ## Raiders drop out of a warp this far short of the colony, metres.
 const RAID_WARP_DROP := 9000.0
 const WARP_CLEAR := 1500.0
 
 var ship: ScavengerShip
+var fac: FactionDef
 var state: State = State.LAUNCHING
 var target: Node3D
 var stolen_from: String = ""
@@ -58,19 +72,36 @@ var _steal_time: float = 0.0
 var _loot_clock: float = 0.0
 var _raid_target: Building
 var _last_attacker: WeakRef
+var _lead: WeakRef
 var _rng := RandomNumberGenerator.new()
 
 
 func _init(owner_ship: ScavengerShip) -> void:
 	ship = owner_ship
+	fac = ship.faction_def if ship.faction_def else Factions.scavengers()
 	_rng.randomize()
 	_ai_timer = _rng.randf() * AI_INTERVAL
 	if ship.is_raider:
 		state = State.RAIDING
 
 
+## Flies as [param leader]'s wingman (packs).
+func set_lead(leader: ScavengerShip) -> void:
+	_lead = weakref(leader) if leader and leader != ship else null
+
+
+## The live lead of this wingman, or null.
+func lead() -> ScavengerShip:
+	var l := _lead.get_ref() as ScavengerShip if _lead else null
+	return l if l and not l.dead and l.is_inside_tree() and l.ai else null
+
+
 func get_status_text() -> String:
 	match state:
+		State.RETURNING:
+			return "Returning to %s" % fac.den_kind.get_slice(" ", fac.den_kind.get_slice_count(" ") - 1)
+		State.ROAMING:
+			return "Patrolling" if fac.hunts_armed else ("Flying wing" if lead() else "Roaming")
 		State.HUNTING:
 			if _steal_time > 0.0:
 				return "Stealing cargo"
@@ -157,7 +188,7 @@ func update(dt: float) -> void:
 
 func _think() -> void:
 	var den_alive := is_instance_valid(ship.den) and ship.den.is_alive()
-	if state != State.FLEEING and state != State.RETURNING and ship.hull_fraction() < FLEE_HULL and den_alive:
+	if state != State.FLEEING and state != State.RETURNING and ship.hull_fraction() < fac.flee_hull and den_alive:
 		_set_state(State.FLEEING)
 		target = null
 		return
@@ -171,7 +202,7 @@ func _think() -> void:
 		return
 	# Self-defence.
 	var la := _last_attacker.get_ref() as Node3D if _last_attacker else null
-	if Combat.is_live_target(la) and ship.durability.seconds_since_hit() < 4.0 and ship.global_position.distance_to(la.global_position) < RETALIATE_RANGE:
+	if Combat.is_live_target(la) and ship.durability.seconds_since_hit() < 4.0 and ship.global_position.distance_to(la.global_position) < _retaliate_range():
 		if not (la is MinerShip):
 			target = _through_shield(la)
 			_set_state(State.ATTACKING)
@@ -182,8 +213,10 @@ func _think() -> void:
 		if state != State.RAIDING:
 			_set_state(State.RAIDING)
 		return
-	if state == State.ATTACKING and Combat.is_live_target(target) and ship.global_position.distance_to(target.global_position) < RETALIATE_RANGE * 1.4:
+	if state == State.ATTACKING and Combat.is_live_target(target) and ship.global_position.distance_to(target.global_position) < _retaliate_range() * 1.4:
 		target = _through_shield(target)
+		return
+	if _follow_lead():
 		return
 	var prey := _pick_prey()
 	if prey:
@@ -196,7 +229,45 @@ func _think() -> void:
 		_set_state(State.ROAMING)
 
 
-## Best miner to hunt, or null.
+func _retaliate_range() -> float:
+	return RETALIATE_RANGE * 2.0 * fac.aggression
+
+
+## Wingman: take the lead's fight or flight. True when it decided.
+func _follow_lead() -> bool:
+	var l := lead()
+	if l == null:
+		return false
+	match l.ai.state:
+		State.FLEEING, State.RETURNING:
+			target = null
+			_set_state(State.FLEEING)
+			return true
+		State.HUNTING, State.ATTACKING:
+			if Combat.is_live_target(l.ai.target):
+				if l.ai.target != target:
+					_steal_time = 0.0
+				target = _through_shield(l.ai.target)
+				_set_state(l.ai.state)
+				return true
+	if state == State.HUNTING or state == State.ATTACKING:
+		target = null
+		_set_state(State.ROAMING)
+	return true
+
+
+## Is [param s] prey for this faction?
+func _is_prey(s: Ship) -> bool:
+	if s is EscapePod:
+		return fac.hunts_pods
+	if s is SalvagerShip:
+		return fac.hunts_salvagers
+	if s is MinerShip:
+		return fac.hunts_miners
+	return fac.hunts_armed and s.faction == Combat.Faction.PLAYER and s.weapon != null and s.role == Ship.Role.MERCENARY
+
+
+## Best prey to hunt, or null.
 func _pick_prey() -> Ship:
 	var tree := ship.get_tree()
 	var pos := ship.global_position
@@ -205,13 +276,14 @@ func _pick_prey() -> Ship:
 	var best_score := INF
 	for n in tree.get_nodes_in_group(Ship.GROUP):
 		var m := n as Ship
-		if m == null or not (m is MinerShip or m is EscapePod) or not m.is_targetable():
+		if m == null or not m.is_targetable() or not _is_prey(m):
 			continue
+		var armed := m.weapon != null and not (m is MinerShip)
 		var d := pos.distance_to(m.global_position)
 		var on_turf := false
 		if den and den.belt:
 			on_turf = Combat.flat_distance(den.global_position, m.global_position) < den.def.hunt_range \
-					and SpaceNav.distance_to_belt(den.belt, m.global_position) < den.belt.def.width * 0.5 + 1500.0
+					and (armed or SpaceNav.distance_to_belt(den.belt, m.global_position) < den.belt.def.width * 0.5 + 1500.0)
 		if d > ship.stats.sensor_range and not on_turf:
 			continue
 		if StationShield.shielding(tree, m.global_position, pos):
@@ -221,8 +293,8 @@ func _pick_prey() -> Ship:
 			score -= 1800.0
 		elif m is EscapePod:
 			score -= 600.0
-		var escorts := _guns_near(m.global_position, ESCORT_RADIUS)
-		score += 2500.0 * float(escorts)
+		var escorts := _guns_near(m.global_position, ESCORT_RADIUS) - (1 if armed else 0)
+		score += ESCORT_PENALTY * 2.0 * (1.0 - fac.aggression) * float(maxi(escorts, 0))
 		if m == target:
 			score -= 400.0
 		if score < best_score:
@@ -260,6 +332,8 @@ func _raid_pick() -> Node3D:
 	for h in near:
 		if h is ShieldGenerator:
 			return h
+	if fac.raid_style == FactionDef.RaidStyle.STRUCTURES:
+		return null
 	for h in near:
 		if h is Ship:
 			return h
@@ -286,6 +360,14 @@ func _launch_step() -> void:
 
 
 func _roam_step() -> void:
+	var l := lead()
+	if l:
+		# Wingman: hold a slot beside the lead.
+		var side := l.global_basis.x
+		side.y = 0.0
+		var slot := l.global_position + (side.normalized() if side.length() > 0.01 else Vector3.RIGHT) * WING_OFFSET * ship.attack_side
+		ship.set_world_goal(slot, l.mover.velocity, Vector3.ZERO, 30.0, ship.max_speed)
+		return
 	if _roam_point == Vector3.INF or Combat.flat_distance(ship.global_position, _roam_point) < 120.0:
 		_roam_point = _pick_roam_point()
 	ship.set_world_goal(_roam_point, Vector3.ZERO, Vector3.ZERO, 80.0, ship.max_speed * ROAM_SPEED)
@@ -313,7 +395,7 @@ func _pick_roam_point() -> Vector3:
 
 func _steal_step(dt: float) -> void:
 	var m := target as MinerShip
-	if m == null or not m.is_loaded():
+	if fac.steal_share <= 0.0 or m == null or not m.is_loaded():
 		_steal_time = 0.0
 		return
 	var close := ship.global_position.distance_to(m.global_position) < STEAL_RANGE
@@ -323,11 +405,11 @@ func _steal_step(dt: float) -> void:
 		_steal_time = maxf(_steal_time - dt * 0.5, 0.0)
 	if _steal_time < STEAL_TIME:
 		return
-	var taken := m.lose_cargo(STEAL_SHARE)
+	var taken := m.lose_cargo(fac.steal_share)
 	ship.loot += taken
 	stolen_from = m.get_display_name()
 	_steal_time = 0.0
-	EventLog.post("%s stole cargo from %s" % [ship.get_display_name(), stolen_from], EventLog.Kind.COMBAT, m)
+	EventLog.post("%s stole cargo from %s" % [ship.get_display_name(), stolen_from], EventLog.Kind.COMBAT, m, Vector3.INF, "", fac.id)
 	target = null
 	_set_state(State.FLEEING)
 
@@ -366,12 +448,13 @@ func _raid_step(dt: float) -> void:
 	_loot_clock += dt
 	if _loot_clock >= RAID_LOOT_INTERVAL:
 		_loot_clock = 0.0
-		var amount := mini(RAID_LOOT_CREDITS, maxi(Economy.credits, 0))
+		var amount := mini(roundi(RAID_LOOT_CREDITS * fac.raid_loot_mult), maxi(Economy.credits, 0))
 		if amount > 0:
 			Economy.spend(amount)
 			credits_looted += amount
-			EventLog.post("Raiders are looting %s" % _raid_target.display_name, EventLog.Kind.THREAT, _raid_target)
-		if credits_looted >= RAID_LOOT_MAX:
+			var who := "Raiders" if fac.id == Factions.DEFAULT_ID else "%s raiders" % fac.unit_name
+			EventLog.post("%s are looting %s" % [who, _raid_target.display_name], EventLog.Kind.THREAT, _raid_target, Vector3.INF, "", fac.id)
+		if credits_looted >= roundi(RAID_LOOT_MAX * fac.raid_loot_mult):
 			_set_state(State.FLEEING)
 
 

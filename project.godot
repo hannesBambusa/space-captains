@@ -10,8 +10,8 @@ config_version=5
 
 [application]
 
-config/name="Space Majesty"
-run/main_scene="res://scenes/system.tscn"
+config/name="Space Captains"
+run/main_scene="res://scenes/main_menu.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 
 [autoload]
@@ -20,6 +20,8 @@ SimClock="*res://scripts/sim_clock.gd"
 Economy="*res://scripts/economy.gd"
 WindowMode="*res://scripts/window_mode.gd"
 PauseMenu="*res://scripts/ui/pause_menu.gd"
+SaveManager="*res://scripts/save/save_manager.gd"
+AudioDirector="*res://scripts/audio_director.gd"
 ContractBoard="*res://scripts/contracts/contract_board.gd"
 EventLog="*res://scripts/event_log.gd"
 

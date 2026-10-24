@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds Space Majesty as a macOS app: build/macos/Space Majesty.app
+# Builds Space Captains as a macOS app: build/macos/Space Captains.app
 #
 #   ./build.sh            release build
 #   ./build.sh --debug    debug build (shows script errors in a console)
@@ -13,7 +13,7 @@ cd "$(dirname "$0")"
 
 GODOT="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
 PRESET="macOS"
-OUT="build/macos/Space Majesty.app"
+OUT="build/macos/Space Captains.app"
 MODE="--export-release"
 RUN=0
 YES=0

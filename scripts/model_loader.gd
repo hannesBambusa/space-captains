@@ -172,6 +172,37 @@ static func dim_emission(root: Node, factor: float = BUILDING_LIGHT_DIM) -> void
 static var _dimmed := {}
 
 
+## Recolours every mesh under [param root] toward [param color] by
+## [param amount] (albedo multiplied, emission blended), skipping the
+## "engine_glow" subtree (Ship animates those). For stand-in models of a
+## faction whose own model is missing. Tinted copies are cached per source
+## material and colour.
+static func tint(root: Node, color: Color, amount: float) -> void:
+	if root.name == &"engine_glow":
+		return
+	if root is MeshInstance3D:
+		var mi := root as MeshInstance3D
+		if mi.mesh:
+			for i in mi.mesh.get_surface_count():
+				var src := mi.get_active_material(i) as BaseMaterial3D
+				if src == null:
+					continue
+				var key := "%d:%s:%s" % [src.get_instance_id(), color.to_html(), amount]
+				var m: BaseMaterial3D = _tinted.get(key)
+				if m == null:
+					m = src.duplicate() as BaseMaterial3D
+					m.albedo_color = src.albedo_color * Color.WHITE.lerp(color, amount)
+					if src.emission_enabled:
+						m.emission = src.emission.lerp(color, minf(amount * 1.4, 1.0))
+					_tinted[key] = m
+				mi.set_surface_override_material(i, m)
+	for c in root.get_children():
+		tint(c, color, amount)
+
+
+static var _tinted := {}
+
+
 ## Combined local-space AABB of all meshes under [param root], relative to it.
 static func local_aabb(root: Node3D) -> AABB:
 	var box := AABB()

@@ -1,4 +1,4 @@
-"""Shared helpers for the Space Majesty bpy generator scripts."""
+"""Shared helpers for the Space Captains bpy generator scripts."""
 import math
 import os
 

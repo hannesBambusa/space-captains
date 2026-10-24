@@ -219,6 +219,7 @@ func _ready() -> void:
 	_model = ModelLoader.instantiate(_model_path, _fallback_model)
 	_model.name = "Model"
 	add_child(_model)
+	_prepare_model(_model)
 	MeshUtil.set_layers_recursive(_model, RENDER_LAYER)
 	_collect_glow()
 	if stats.has_weapon():
@@ -986,6 +987,11 @@ func _on_ready_ship() -> void:
 	pass
 
 
+## Hook right after the model is loaded, before its glow is collected.
+func _prepare_model(_m: Node3D) -> void:
+	pass
+
+
 ## Took a hit (still alive or about to die).
 func _on_damaged(_amount: float, _attacker: Node3D) -> void:
 	pass
@@ -1020,7 +1026,7 @@ func _on_destroyed(killer: Node3D) -> void:
 		else:
 			EventLog.post("%s was lost%s" % [captain.captain_name, by], EventLog.Kind.LOSS, null, global_position)
 		if killer is ScavengerShip or killer is ScavengerDen:
-			_spread_grudge()
+			_spread_grudge(Factions.of(killer))
 
 
 func _launch_pod() -> void:
@@ -1038,15 +1044,15 @@ func _launch_pod() -> void:
 	pod.rotation.y = mover.yaw
 
 
-## Wingmates (same home, or close by) take a loss to scavengers personally.
-func _spread_grudge() -> void:
+## Wingmates (same home, or close by) take a loss to raiders personally.
+func _spread_grudge(by: FactionDef) -> void:
 	var pos := global_position
 	for n in get_tree().get_nodes_in_group(GROUP):
 		var s := n as Ship
 		if s == null or s == self or s.dead or s.faction != Combat.Faction.PLAYER or s.captain == null or s is EscapePod:
 			continue
 		if (is_instance_valid(home) and s.home == home) or Combat.flat_distance(pos, s.global_position) < CaptainTraits.GRUDGE_RADIUS:
-			s.captain.add_trait(CaptainTraits.GRUDGE, "Scavengers destroyed %s nearby" % get_display_name())
+			s.captain.add_trait(CaptainTraits.GRUDGE, "%s destroyed %s nearby" % [by.display_name if by else "Raiders", get_display_name()])
 
 
 ## Ships with the same non-zero key skip separation from each other

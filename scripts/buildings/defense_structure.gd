@@ -257,3 +257,31 @@ func _own_material(mesh_name: String) -> StandardMaterial3D:
 	mi.material_override = m
 	_own_mats[mi] = m
 	return m
+
+
+# --- Save ---------------------------------------------------------------------
+
+func save_state() -> Dictionary:
+	var d := SaveUtil.props(self, ["repair_session_paid", "repair_total_paid", "repairing", "_repair_credit"])
+	d["durability"] = SaveUtil.durability(durability)
+	_save_extra(d)
+	return d
+
+
+func load_state(d: Dictionary, refs: SaveRefs) -> void:
+	var fields := d.duplicate()
+	fields.erase("durability")
+	fields.erase("extra")
+	SaveUtil.apply_props(self, fields)
+	SaveUtil.set_durability(durability, d.get("durability", {}), refs)
+	_load_extra(d.get("extra", {}))
+	changed.emit()
+
+
+## Subclass state, under "extra".
+func _save_extra(_d: Dictionary) -> void:
+	pass
+
+
+func _load_extra(_d: Dictionary) -> void:
+	pass

@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="FactionDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/enemies/faction_def.gd" id="1_fac"]
+[ext_resource type="Resource" path="res://data/loadouts/scavenger_default.tres" id="2_load"]
+
+[resource]
+script = ExtResource("1_fac")
+id = &"scavenger"
+display_name = "Scavengers"
+unit_name = "Scavenger"
+den_kind = "scavenger hideout"
+loadout = ExtResource("2_load")

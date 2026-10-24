@@ -28,7 +28,7 @@ const INFO := {
 	&"survivor": {"name": "Survivor", "tip": "Lived through a near-loss. +10% eject chance; weighs danger a little less.", "fade": 0.0, "good": true},
 	&"shaken": {"name": "Shaken", "tip": "Badly damaged recently. Nerve counts 3 lower until it fades.", "fade": 300.0, "good": false},
 	&"crystal_hound": {"name": "Crystal Hound", "tip": "Has hauled a lot of crystal. Prefers crystal belts.", "fade": 0.0, "good": true},
-	&"grudge": {"name": "Grudge", "tip": "Lost a wingmate to scavengers. Hunts them harder; fades in time.", "fade": 900.0, "good": true},
+	&"grudge": {"name": "Grudge", "tip": "Lost a wingmate to raiders (scavengers, corsairs or the Syndicate). Hunts them harder; fades in time.", "fade": 900.0, "good": true},
 	&"lone_wolf": {"name": "Lone Wolf", "tip": "Works alone. Ignores escort cover, dislikes escort jobs and fleets (Teamwork -3).", "fade": 0.0, "good": true},
 	&"union_rep": {"name": "Union Rep", "tip": "Long, loyal service. Keeps 4% more of each payment; sulks at below-fair pay. Teamwork +2.", "fade": 0.0, "good": true},
 }

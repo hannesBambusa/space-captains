@@ -1,0 +1,43 @@
+[gd_resource type="Resource" script_class="FactionDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/enemies/faction_def.gd" id="1_fac"]
+[ext_resource type="Resource" path="res://data/loadouts/corsair_default.tres" id="2_load"]
+
+[resource]
+script = ExtResource("1_fac")
+id = &"corsair"
+display_name = "Corsairs"
+unit_name = "Corsair"
+den_kind = "corsair nest"
+color = Color(1, 0.36, 0.72, 1)
+raider_color = Color(1, 0.6, 0.85, 1)
+light_color = Color(1, 0.3, 0.7, 1)
+ship_model_path = "res://assets/models/ships/corsair_raider.glb"
+den_model_path = "res://assets/models/buildings/corsair_nest.glb"
+ship_fallback_scale = 0.85
+den_fallback_scale = 0.9
+loadout = ExtResource("2_load")
+hit_radius = 7.5
+aggression = 0.25
+flee_hull = 0.65
+steal_share = 0.6
+pack_size = 2
+raid_weight = 0.5
+raid_size = Vector2i(2, 2)
+raid_after = 1500.0
+den_hull = 3200.0
+den_shields = 900.0
+den_shield_regen = 10.0
+den_hit_radius = 38.0
+den_guns = 1
+den_gun_damage = 6.0
+den_gun_rate = 2.5
+den_gun_range = 650.0
+bounty_mult = 1.1
+loot_mult = 1.4
+den_bounty_danger = 4
+ship_bounty_danger = 2
+name_pool = PackedStringArray("Shrike", "Kestrel", "Dart", "Vane", "Skiff", "Wisp", "Lark", "Flicker")
+den_info = "Corsair nest hidden in the rocks of %s. Fast raiders in pairs, up to %d out, strike miners and salvagers, grab cargo and run. Destroy it to stop them and lower the belt's danger."
+intro = "New faction: Corsairs. Fast light raiders hunting in pairs over a wide arc of the outer belts. They grab cargo from miners and salvagers and run early. Escorts and bounties keep them off."
+ship_info = "Fast corsair from %s. Hunts in pairs, grabs cargo from miners and salvagers and runs early."

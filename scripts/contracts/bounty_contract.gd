@@ -1,6 +1,6 @@
 class_name BountyContract
 extends Contract
-## Destroy a target: a scavenger ship or a Scavenger Den. Nothing is reserved
+## Destroy a target: a raider ship or a hostile base (any faction). Nothing is reserved
 ## when posting; when the target dies the reward is paid from the player's
 ## credits, split equally among the player ships that damaged it in the last
 ## [constant CREDIT_WINDOW] seconds (the killer alone when it was alone).
@@ -85,10 +85,18 @@ func get_progress_text() -> String:
 	return ""
 
 
+## The target faction's bounty danger (scavengers: hideout 4, ship 2).
 func get_danger() -> int:
+	var f := Factions.of(target)
 	if is_den():
-		return 4
-	return 2
+		return f.den_bounty_danger if f else 4
+	return f.ship_bounty_danger if f else 2
+
+
+## The target's faction ("Corsairs"), "" when none.
+func get_faction_name() -> String:
+	var f := Factions.of(target)
+	return f.display_name if f else ""
 
 
 ## Called by the board when the target died.

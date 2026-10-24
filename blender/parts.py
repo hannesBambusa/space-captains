@@ -593,3 +593,66 @@ class PanelPart(Part):
                     q = lp.vert.co
                     lp[self.uv].uv = (q[a] + off.x, q[b] + off.y)
         return super().finish(parent, sharp_deg)
+
+
+# --- Worn industrial station kit (gen_station.py, gen_station_addons.py). Existing code untouched.
+
+def strut(part, p0, p1, w, h, mat, up=Vector((0, 0, 1))):
+    """Open-ended square member (4 sides, 8 tris) for truss chords, braces and rails whose
+    ends are buried in a joint. PanelPart.finish gives it box-projected panel UVs."""
+    p0, p1 = Vector(p0), Vector(p1)
+    x = (p1 - p0).normalized()
+    if abs(x.dot(up)) > 0.99:
+        up = Vector((1, 0, 0))
+    z = (up - x * up.dot(x)).normalized()
+    y = z.cross(x)
+    cs = [y * sy * w / 2 + z * sz * h / 2 for sy, sz in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+    a = [part.bm.verts.new(p0 + c) for c in cs]
+    b = [part.bm.verts.new(p1 + c) for c in cs]
+    idx = part.mi(mat)
+    for i in range(4):
+        j = (i + 1) % 4
+        part.bm.faces.new((a[i], a[j], b[j], b[i])).material_index = idx
+
+
+def pipe(part, p0, p1, rad, mat, segs=6):
+    """Open-ended pipe run (no caps)."""
+    p0, p1 = Vector(p0), Vector(p1)
+    d = p1 - p0
+    q = d.normalized().to_track_quat("Z", "Y").to_matrix().to_4x4()
+    m = Matrix.Translation((p0 + p1) / 2) @ q
+    res = bmesh.ops.create_cone(part.bm, cap_ends=False, cap_tris=False, segments=segs,
+                                radius1=rad, radius2=rad, depth=d.length, matrix=m)
+    idx = part.mi(mat)
+    for f in {f for v in res["verts"] for f in v.link_faces}:
+        f.material_index = idx
+
+
+def quad(part, c, n, up, w, h, mat):
+    """Single quad centred at c facing n (use a double-sided material)."""
+    n = Vector(n).normalized()
+    u = (Vector(up) - n * Vector(up).dot(n)).normalized()
+    r = u.cross(n)
+    vs = [part.bm.verts.new(Vector(c) + r * x * w / 2 + u * y * h / 2)
+          for x, y in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+    part.bm.faces.new(vs).material_index = part.mi(mat)
+
+
+def window(part, c, n, up, w, h, lit, glass="glass"):
+    """Porthole: dark glass with a frame margin, lit pane in front when `lit` is a key."""
+    n = Vector(n).normalized()
+    # Offsets clear the faceted hull between lathe vertices, so the panes
+    # never dip into the wall and z-fight in game.
+    quad(part, Vector(c) + n * 0.04, n, up, w + 0.14, h + 0.14, glass)
+    if lit:
+        quad(part, Vector(c) + n * 0.07, n, up, w, h, lit)
+
+
+def pick_lit(rng, mode):
+    """Window state by module use: hab (mostly lit), work (cool), store (mostly dark)."""
+    x = rng.random()
+    if mode == "hab":
+        return "window" if x < 0.55 else ("window_dim" if x < 0.78 else None)
+    if mode == "work":
+        return "window_cool" if x < 0.5 else ("window" if x < 0.65 else None)
+    return "window_dim" if x < 0.12 else None

@@ -2,7 +2,7 @@
 
 Run:
   /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
-      --python /Users/hannesalm/code/games/space-majesty/blender/gen_defense_turret.py
+      --python blender/gen_defense_turret.py
   Add `-- --no-preview` to skip the PNG renders, `-- --no-textures` for flat materials.
 Textures: one 1024 atlas baked with the station_textures surface kinds (plus "gun" and
 "radiator"), saved as blender/textures/defense_turret_*.{jpg,png}, embedded as JPEG.

@@ -141,19 +141,22 @@ func show_target(t: Node3D) -> void:
 	var hostile := t is ScavengerDen or t is ScavengerShip
 	_bounty_box.visible = hostile or t is ScrapField
 	_bars.visible = hostile or t is CargoShuttle
+	var fac := Factions.of(t)
 	if changed:
 		reward = den_reward if t is ScavengerDen else (salvage_reward if t is ScrapField else ship_reward)
+		if fac:
+			reward = clampi(roundi(reward * fac.bounty_mult / float(reward_step)) * reward_step, reward_min, reward_max)
 	_contracts_header.text = "SALVAGE CONTRACTS" if t is ScrapField else "BOUNTIES"
 	_reward_title.text = "Bonus per load" if t is ScrapField else "Reward"
 	_post.text = "Post salvage contract" if t is ScrapField else "Post bounty"
 	if t is ScavengerDen:
 		var d := t as ScavengerDen
-		_header.text = "SCAVENGER HIDEOUT"
-		_info.text = "Raider base dug into an asteroid, claiming %s. Launches scavengers up to %d at a time. Destroy it to stop them and lower the belt's danger." % [d.belt.def.name if d.belt else "?", d.def.spawn_cap]
+		_header.text = fac.den_kind.to_upper()
+		_info.text = fac.den_info % [d.belt.def.name if d.belt else "?", d.def.spawn_cap]
 	elif t is ScavengerShip:
 		var sc := t as ScavengerShip
-		_header.text = "SCAVENGER"
-		_info.text = "Junk raider from %s. Hunts loaded miners and steals cargo." % (sc.den.get_display_name() if is_instance_valid(sc.den) else "a destroyed hideout")
+		_header.text = fac.unit_name.to_upper()
+		_info.text = fac.ship_info % (sc.den.get_display_name() if is_instance_valid(sc.den) else "a destroyed %s" % fac.den_kind)
 	elif t is CargoShuttle:
 		_header.text = "CARGO SHUTTLE"
 		_info.text = ""
@@ -163,7 +166,7 @@ func show_target(t: Node3D) -> void:
 		_info.text = "Wreckage drifting apart. Salvagers from a Salvage Yard strip it on their own: %d scrap is about %d loads, which the yard reprocesses into ore (mostly iron, some titanium, a little crystal) and sells to you. It stops fading while salvagers work it or a contract is open. Danger here: %d of 5." % [
 				sf.amount, ceili(float(sf.amount) / SalvageContract.LOAD_SCRAP), SalvageContract.danger_at(get_tree(), sf.global_position)]
 	_title.text = String(t.call(&"get_display_name"))
-	_title.add_theme_color_override("font_color", Color(1.0, 0.6, 0.5) if hostile else Color(0.95, 0.9, 0.78))
+	_title.add_theme_color_override("font_color", (fac.color.lerp(Color.WHITE, 0.25) if fac else Color(1.0, 0.6, 0.5)) if hostile else Color(0.95, 0.9, 0.78))
 	_rebuild_bounties()
 	_refresh()
 
