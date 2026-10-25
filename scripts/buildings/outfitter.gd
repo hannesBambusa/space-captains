@@ -6,7 +6,9 @@ extends Node
 ## slot, or an upgrade of a bought one. Stock comes from the Factory
 ## warehouse (finite, see [Factory]); the best tier allowed is the lower of
 ## the captain's rank tier and what the Factory is tooled for (or a rare part
-## lets it make). Without an Outfitter captains cannot buy modules at all.
+## lets it make). Modules not researched yet (Research) are not offered,
+## except a salvaged rare part in the warehouse. Without an Outfitter
+## captains cannot buy modules at all.
 ##
 ## What they buy follows personality (slot weights in [constant SLOT_WEIGHTS]):
 ##   Bold      guns and engines
@@ -53,11 +55,7 @@ var stockouts: int = 0
 
 
 static func find(tree: SceneTree) -> Outfitter:
-	for n in tree.get_nodes_in_group(GROUP):
-		var o := n as Outfitter
-		if o and is_instance_valid(o.building) and o.building.is_active():
-			return o
-	return null
+	return Building.first_active_service(tree, GROUP) as Outfitter
 
 
 func setup(owner_building: Building) -> void:
@@ -104,6 +102,9 @@ func block_reason(captain: Captain, m: ShipModule) -> String:
 		return "Needs %s rank" % Reputation.rank_name(Reputation.MAX_TIER.find(m.tier))
 	if factory() == null:
 		return "No Factory"
+	var locked := Research.module_lock_reason(m.id)
+	if not locked.is_empty() and not (factory().rare_parts.has(m.id) and factory().stock_of(m) > 0):
+		return locked
 	if not is_stocked(m) and factory().stock_of(m) <= 0:
 		return "Factory not tooled for %s" % ShipModule.TIER_NAMES[m.tier]
 	return ""
@@ -185,11 +186,11 @@ func visit(ship: Ship) -> ShipModule:
 	var price := price_of(want)
 	if not f.place_backorder(want, cap, price):
 		return null
-	cap.flight_log.note(CaptainLog.Kind.PURCHASE, CaptainLog.Outcome.DID, "Ordered %s from the Factory, paid %s cr up front" % [want.display_name, UIUtil.amount(price)],
+	cap.flight_log.note(CaptainLog.Kind.PURCHASE, CaptainLog.Outcome.DID, "Ordered %s from the Factory, paid %s cr up front" % [want.display_name, Fmt.amount(price)],
 			"Out of stock: a %s %s" % [cap.get_personality_name(), "waits for the part it wants" if cap.personality != Captain.Personality.BOLD else "found nothing else worth taking, so orders it"],
 			_why(cap, want), "order:" + String(want.id))
-	ship.show_toast("Ordered %s (%s cr)" % [want.display_name, UIUtil.amount(price)], Color(1.0, 0.85, 0.5))
-	EventLog.post("%s ordered %s from the Factory (out of stock, paid %s cr)" % [cap.captain_name, want.display_name, UIUtil.amount(price)], EventLog.Kind.INFO, ship, Vector3.INF, "order:%s:%s" % [cap.captain_name, want.id])
+	ship.show_toast("Ordered %s (%s cr)" % [want.display_name, Fmt.amount(price)], Color(1.0, 0.85, 0.5))
+	EventLog.post("%s ordered %s from the Factory (out of stock, paid %s cr)" % [cap.captain_name, want.display_name, Fmt.amount(price)], EventLog.Kind.INFO, ship, Vector3.INF, "order:%s:%s" % [cap.captain_name, want.id])
 	changed.emit()
 	return null
 
@@ -202,7 +203,7 @@ func _why(cap: Captain, m: ShipModule) -> String:
 		line += ", cheapest that fits"
 	if m.eject_bonus > 0.0:
 		line += ", escape gear (%s)" % ("wanted" if cap.personality == Captain.Personality.CAUTIOUS or cap.has_trait(CaptainTraits.SURVIVOR) else "not their thing")
-	return line + "; budget %s cr (wallet less %s cr reserve)" % [UIUtil.amount(maxi(cap.wallet - RESERVE[cap.personality], 0)), UIUtil.amount(RESERVE[cap.personality])]
+	return line + "; budget %s cr (wallet less %s cr reserve)" % [Fmt.amount(maxi(cap.wallet - RESERVE[cap.personality], 0)), Fmt.amount(RESERVE[cap.personality])]
 
 
 ## Installs [param m] on [param ship] from the Factory warehouse. Paid from
@@ -237,11 +238,11 @@ func sell(ship: Ship, m: ShipModule, context: String = "") -> ShipModule:
 	sales.append(sale)
 	if sales.size() > MAX_SALES_LISTED:
 		sales.remove_at(0)
-	EventLog.post("%s bought %s (%s cr)" % [cap.captain_name, m.display_name, UIUtil.amount(price)], EventLog.Kind.INFO, ship, Vector3.INF, "buy:%s:%s" % [cap.captain_name, m.id])
-	var headline := ("Picked up %s, paid %s cr when ordered" if prepaid else "Bought %s for %s cr") % [m.display_name, UIUtil.amount(price)]
+	EventLog.post("%s bought %s (%s cr)" % [cap.captain_name, m.display_name, Fmt.amount(price)], EventLog.Kind.INFO, ship, Vector3.INF, "buy:%s:%s" % [cap.captain_name, m.id])
+	var headline := ("Picked up %s, paid %s cr when ordered" if prepaid else "Bought %s for %s cr") % [m.display_name, Fmt.amount(price)]
 	cap.flight_log.note(CaptainLog.Kind.PURCHASE, CaptainLog.Outcome.DID, headline,
 			why,
-			"Wallet %s cr left, keeps %s cr in reserve. %s" % [UIUtil.amount(cap.wallet), UIUtil.amount(RESERVE[cap.personality]), m.blurb])
+			"Wallet %s cr left, keeps %s cr in reserve. %s" % [Fmt.amount(cap.wallet), Fmt.amount(RESERVE[cap.personality]), m.blurb])
 	ship.show_toast("Fitted %s" % m.display_name, Color(0.6, 1.0, 0.7))
 	sold.emit(sale)
 	changed.emit()

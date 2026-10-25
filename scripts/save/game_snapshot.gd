@@ -14,23 +14,36 @@ extends RefCounted
 ## stash, ruins), scrap fields, the raid director (with an announced raid),
 ## the threat director (base arrivals, threat clock, a pending warning),
 ## defence zones (radius, kill bounty, budget, stats), structure and station
-## hulls, raid objectives, belt danger, the camera
-## and the random number generators that pick captains, rare parts and
-## career skills. Orbits follow from the clock; belts regenerate from their
-## seeds (nothing on them is mined away). Not saved: shots in flight and
-## effects, the selection.
+## hulls, raid objectives, the asteroid clusters (their defs: orbit, shape,
+## ore, seed, name; the loads left; the spawner's due surveys and name
+## pointer), the camera and the random number generators that pick
+## captains, rare parts and career skills. Orbits follow from the clock;
+## cluster rocks regenerate from their seeds. Not saved: shots in flight
+## and effects, the selection.
 
 ## 2: the outer system (moved belts, planets and gates), factions (raider
 ## faction id and pack lead per ship, faction tag per event line).
 ## 3: threat escalation (arrived bases, threat clock, pending arrival).
 ## Phase B (defence zones, structure hulls, announced raids) added keys
 ## only; older v3 saves load with no zones and full hulls, so no bump.
+## Phase C1 (research: done techs, funded projects with their reserve,
+## researchers, applicants) added the "research" key only. A v3 save without
+## it keeps what it could use before (Research.grant_legacy), so no bump.
+## Phase C2 (planet raids: the "planets" raid records, planet raid
+## contracts, landers, the planet goods in every ore array) added keys and
+## longer arrays only; older saves pad their ore arrays, so no bump.
+## Phase C3 (planet claims: garrisons saved with the dens plus the "claims"
+## key, claim group ships, guard links) added keys only; older saves load
+## with no claims until the ThreatDirector makes them, so no bump.
+## Asteroid clusters (the "clusters" key) replaced the belts without a bump:
+## a save without it keeps the starting clusters full, and its contracts'
+## belt names map onto them ("Cinder Belt" -> "Cinder Cluster").
 const VERSION := 3
 
 
 static func capture(tree: SceneTree) -> Dictionary:
-	var sys := tree.get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
-	var mgr := tree.get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	var sys := SolarSystem.of(tree)
+	var mgr := BuildingManager.of(tree)
 	var world := CombatWorld.of(tree)
 	var paused := -1
 	var pm := tree.root.get_node_or_null(^"PauseMenu")
@@ -40,15 +53,12 @@ static func capture(tree: SceneTree) -> Dictionary:
 			"rng": {"salvage": SaveUtil.rng_state(SalvageContract.rng), "career": SaveUtil.rng_state(Career.rng)}}
 	d["captains"] = _save_captains(tree, mgr)
 	d["buildings"] = mgr.save_state() if mgr else {}
-	var belts := {}
 	var dens := []
 	if sys:
-		for b in sys.belts:
-			belts[b.def.name] = b.danger_reduction
+		d["clusters"] = _save_clusters(sys)
 		for den in sys.dens:
 			if is_instance_valid(den):
 				dens.append(den.save_state())
-	d["belts"] = belts
 	d["dens"] = dens
 	var scrap := []
 	if world:
@@ -61,15 +71,42 @@ static func capture(tree: SceneTree) -> Dictionary:
 	d["fleets"] = _save_fleets(tree)
 	d["raids"] = world.raids.save_state() if world and world.raids else {}
 	d["threats"] = world.threats.save_state() if world and world.threats else {}
+	d["claims"] = world.claims.save_state() if world and world.claims else {}
 	d["zones"] = world.zones.save_state() if world and world.zones else {}
+	d["research"] = Research.save_state()
+	d["planets"] = PlanetRaidContract.save_records()
 	d["camera"] = _save_camera(tree)
 	d["ids_next"] = SaveIds.next
 	return d
 
 
+static func _save_clusters(sys: SolarSystem) -> Dictionary:
+	var list := []
+	for b in sys.belts:
+		var bd := b.def.to_dict()
+		bd["left"] = b.loads_left
+		bd["total"] = b.reserve
+		list.append(bd)
+	return {"list": list, "spawner": sys.cluster_spawner.save_state() if sys.cluster_spawner else {}}
+
+
+## Swaps the starting clusters for the saved ones.
+static func _restore_clusters(sys: SolarSystem, cd: Dictionary) -> void:
+	for b in sys.belts.duplicate():
+		sys.remove_cluster(b)
+	for bd: Dictionary in cd.get("list", []):
+		if int(bd.get("left", 1)) <= 0:
+			# Was fading out: gone (its contracts end with their trips).
+			continue
+		var b := sys.add_cluster(ClusterDef.from_dict(bd))
+		b.set_loads_left(int(bd.get("left", b.reserve)), int(bd.get("total", b.reserve)))
+	if sys.cluster_spawner:
+		sys.cluster_spawner.load_state(cd.get("spawner", {}))
+
+
 ## Short facts for the load list.
 static func summary(tree: SceneTree) -> Dictionary:
-	var mgr := tree.get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	var mgr := BuildingManager.of(tree)
 	var n := 0
 	if mgr:
 		for b in mgr.buildings:
@@ -125,7 +162,7 @@ static func _save_fleets(tree: SceneTree) -> Array:
 
 
 static func _save_camera(tree: SceneTree) -> Dictionary:
-	var cam := tree.get_first_node_in_group("rts_camera") as RTSCamera
+	var cam := RTSCamera.of(tree)
 	if cam == null:
 		return {}
 	var follow := cam.get_follow_target()
@@ -143,6 +180,8 @@ static func apply_globals(d: Dictionary) -> void:
 	SimClock.load_state(d.get("sim", {}))
 	Economy.load_state(d.get("economy", {}))
 	EventLog.load_state(d.get("events", []))
+	Research.load_state(d.get("research", {}))
+	PlanetRaidContract.load_records(d.get("planets", {}))
 	var rng: Dictionary = d.get("rng", {})
 	SaveUtil.set_rng(SalvageContract.rng, rng.get("salvage", {}))
 	SaveUtil.set_rng(Career.rng, rng.get("career", {}))
@@ -152,8 +191,8 @@ static func apply_globals(d: Dictionary) -> void:
 ## stepped yet.
 static func apply_scene(tree: SceneTree, d: Dictionary) -> void:
 	var refs := SaveRefs.new()
-	var sys := tree.get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
-	var mgr := tree.get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	var sys := SolarSystem.of(tree)
+	var mgr := BuildingManager.of(tree)
 	var world := CombatWorld.of(tree)
 	for cd: Dictionary in d.get("captains", []):
 		refs.add(int(cd["id"]), Captain.from_save(cd))
@@ -166,11 +205,19 @@ static func apply_scene(tree: SceneTree, d: Dictionary) -> void:
 	if world and world.threats:
 		# Builds the dens that had arrived, before their state is matched below.
 		world.threats.load_state(d.get("threats", {}))
+	if world and world.claims:
+		# Garrisons are dens too: built before the den states are matched.
+		world.claims.load_state(d.get("claims", {}))
 	if sys:
-		var reductions: Dictionary = d.get("belts", {})
+		if d.has("clusters"):
+			_restore_clusters(sys, d["clusters"])
 		for b in sys.belts:
 			belts[b.def.name] = b
-			b.danger_reduction = int(reductions.get(b.def.name, 0))
+		# Old saves: their belts are the starting clusters now.
+		for bdef in sys.system_def.belts:
+			var b := sys.find_cluster(bdef.name)
+			if b:
+				belts[bdef.name.replace(" Cluster", " Belt")] = b
 		for dd: Dictionary in d.get("dens", []):
 			for den in sys.dens:
 				if den.def and den.def.name == String(dd.get("name", "")):
@@ -201,14 +248,18 @@ static func apply_scene(tree: SceneTree, d: Dictionary) -> void:
 		ShipCodec.finish(pair[0] as Ship, pair[1] as Dictionary, refs)
 	for fd: Dictionary in d.get("fleets", []):
 		ShipCodec.restore_fleet(fd, refs)
+	if world and world.claims:
+		world.claims.restore_links(refs)
 	if world and world.raids:
 		world.raids.load_state(d.get("raids", {}), refs)
+	if Research.legacy_pending:
+		Research.grant_legacy(tree)
 	_restore_camera.call_deferred(tree, d.get("camera", {}))
 
 
 ## Deferred: after the system has set the camera up (it defers that too).
 static func _restore_camera(tree: SceneTree, c: Dictionary) -> void:
-	var cam := tree.get_first_node_in_group("rts_camera") as RTSCamera
+	var cam := RTSCamera.of(tree)
 	if cam == null or c.is_empty():
 		return
 	cam.set_yaw(float(c.get("yaw", cam.default_yaw_deg)), true)

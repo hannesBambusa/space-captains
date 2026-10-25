@@ -44,7 +44,7 @@ func _ready() -> void:
 ## A system scene is running (also when it was started on its own, e.g.
 ## from the editor: it then gets a new slot on its first save).
 func in_game() -> bool:
-	return get_tree().get_first_node_in_group(SolarSystem.GROUP) != null
+	return SolarSystem.of(get_tree()) != null
 
 
 func _process(delta: float) -> void:
@@ -217,11 +217,14 @@ func new_game() -> void:
 	if _busy:
 		return
 	_busy = true
+	var slot := next_slot()
+	var cover := await LoadingScreen.cover(get_tree(), "Starting %s" % slot_name(slot))
 	await _leave_scene()
 	_reset_globals()
-	current_slot = next_slot()
+	current_slot = slot
 	_enter_game({})
 	_busy = false
+	cover.reveal()
 
 
 ## Loads [param slot] (its .bak with [param backup]). Returns "" or the
@@ -233,6 +236,7 @@ func load_game(slot: String, backup: bool = false) -> String:
 	if not bool(file["ok"]):
 		return String(file["error"])
 	_busy = true
+	var cover := await LoadingScreen.cover(get_tree(), "Loading %s" % slot_name(slot))
 	await _leave_scene()
 	_reset_globals()
 	current_slot = slot
@@ -240,6 +244,7 @@ func load_game(slot: String, backup: bool = false) -> String:
 	GameSnapshot.apply_globals(data)
 	_enter_game(data)
 	_busy = false
+	cover.reveal()
 	if backup:
 		# The backup is now the game: save it back as the main file.
 		save_game()
@@ -253,11 +258,13 @@ func to_main_menu() -> void:
 	if in_game():
 		save_game()
 	_busy = true
+	var cover := await LoadingScreen.cover(get_tree(), "Returning to the menu")
 	await _leave_scene()
 	current_slot = ""
 	_reset_globals()
 	get_tree().change_scene_to_file(MENU_SCENE)
 	_busy = false
+	cover.reveal()
 
 
 ## Saves the running game, then quits.
@@ -299,12 +306,14 @@ func _reset_globals() -> void:
 	ContractBoard.reset()
 	SimClock.reset()
 	Economy.reset()
+	Research.reset()
 	EventLog.reset()
 	MinerShip._claims.clear()
 	SalvagerShip._slots.clear()
 	CargoShuttle._pads.clear()
 	SalvageContract._free.clear()
 	SalvageContract._next_free_id = -1
+	PlanetRaidContract.records.clear()
 
 
 func _toast(text: String) -> void:

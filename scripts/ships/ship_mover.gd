@@ -199,7 +199,7 @@ func path_done() -> bool:
 
 func distance_to_goal() -> float:
 	var rel := goal_pos - ship.position
-	return Vector2(rel.x, rel.z).length()
+	return SpaceNav.flat_length(rel)
 
 
 func arrived(speed_tolerance: float = 4.0) -> bool:
@@ -259,7 +259,7 @@ func step(dt: float) -> void:
 			# A goal inside a body (a patrol point behind a planet): aim at its edge.
 			rel = Vector3(g.x - pos.x, 0.0, g.z - pos.z)
 			d = rel.length()
-		var plan_speed := maxf(Vector2(velocity.x, velocity.z).length(), max_speed * 0.5)
+		var plan_speed := maxf(SpaceNav.flat_length(velocity), max_speed * 0.5)
 		# Spooling or in a hop, the leg is flown at warp speed: plan for it.
 		var y_lo := minf(pos.y, minf(goal_pos.y, cruise_y if cruise_active else pos.y))
 		var y_hi := maxf(pos.y, maxf(goal_pos.y, cruise_y if cruise_active else pos.y))
@@ -322,7 +322,7 @@ func step(dt: float) -> void:
 ## (speed-limited approach, so climbs start and end smoothly), no steeper
 ## than [member climb_angle_deg] once moving, and pitch the nose with it.
 func _step_height(y: float, dt: float) -> float:
-	var hs := Vector2(velocity.x, velocity.z).length()
+	var hs := SpaceNav.flat_length(velocity)
 	if not cruise_active:
 		climb_rate = 0.0
 		y = move_toward(y, goal_y, climb_speed * dt)
@@ -383,7 +383,7 @@ func aligned(face: Vector3, tolerance_deg: float = 6.0) -> bool:
 func _advance_path() -> void:
 	var w := path[0]
 	var rel := w.pos - ship.position
-	var d := Vector2(rel.x, rel.z).length()
+	var d := SpaceNav.flat_length(rel)
 	var done := false
 	if w.stop:
 		done = d <= w.radius and velocity.length() <= 1.5
@@ -446,7 +446,7 @@ func _body_push(pos: Vector3, goal: Vector3) -> Vector3:
 		var r := SpaceNav.slice_radius(o["plan"], dy)
 		if dist >= r or dist < 1.0:
 			continue
-		if Vector2(goal.x - c.x, goal.z - c.z).length() < SpaceNav.slice_radius(o["plan"], goal_pos.y - c.y):
+		if SpaceNav.flat_distance(goal, c) < SpaceNav.slice_radius(o["plan"], goal_pos.y - c.y):
 			r = hard + 15.0
 			if dist >= r:
 				continue
@@ -524,7 +524,7 @@ func _warp_step(dt: float, target: Vector3, _via: bool) -> bool:
 			# Level: at the lane height (or holding height) and no longer climbing.
 			var level := (absf(pos.y - cruise_y) < 4.0 and absf(climb_rate) < 4.0) or not cruise_active
 			if warp_timer <= 0.0 and level and forward().dot(warp_dir) >= WARP_ALIGN:
-				warp_speed = maxf(Vector2(velocity.x, velocity.z).length(), max_speed)
+				warp_speed = maxf(SpaceNav.flat_length(velocity), max_speed)
 				_warp_y0 = pos.y
 				_warp_flown = 0.0
 				_set_warp(Warp.WARP)
@@ -648,7 +648,7 @@ func _warp_end_for(from: Vector3, target: Vector3) -> Vector3:
 	var reach := length - warp_drop
 	for o in SpaceNav.obstacles(ship.get_tree()):
 		var node := o["node"] as Node3D
-		if is_instance_valid(node) and Vector2(from.x - node.global_position.x, from.z - node.global_position.z).length() \
+		if is_instance_valid(node) and SpaceNav.flat_distance(from, node.global_position) \
 				< SpaceNav.slice_radius(o["plan"], ship.position.y - node.global_position.y):
 			return Vector3.INF
 	for z in SpaceNav.no_warp_zones(ship.get_tree()):

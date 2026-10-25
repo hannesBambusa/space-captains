@@ -38,11 +38,7 @@ func _ready() -> void:
 	_scrap = UIUtil.label("", &"ValueLabel")
 	_scrap.custom_minimum_size.x = 210.0
 	sh.add_child(_scrap)
-	_scrap_bar = PipMeter.new()
-	_scrap_bar.style = PipMeter.Style.BAR
-	_scrap_bar.max_value = 1.0
-	_scrap_bar.color = Color(1.0, 0.6, 0.24)
-	_scrap_bar.custom_minimum_size = Vector2(110.0, 6.0)
+	_scrap_bar = UIUtil.bar(Color(1.0, 0.6, 0.24), Vector2(110.0, 6.0))
 	_scrap_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_scrap_bar.tooltip_text = "Scrap waiting to be reprocessed, against what the yard handles in a minute"
 	sh.add_child(_scrap_bar)
@@ -141,7 +137,7 @@ func _refresh() -> void:
 			var b := r[key] as Button
 			b.disabled = not can
 			b.tooltip_text = "Nothing in stock" if y.stock[i] <= 0 else ("Not enough credits" if not can else
-					"%d %s for %s cr" % [mini(y.stock[i], BUY_STEP) if key == "buy10" else y.affordable(i), Economy.ORE_NAMES[i].to_lower(),
+					"%d %s for %s cr" % [mini(y.stock[i], BUY_STEP) if key == "buy10" else y.affordable(i), Economy.ore_name(i),
 					UIUtil.amount(y.price_of(i, mini(y.stock[i], BUY_STEP) if key == "buy10" else y.affordable(i)))])
 	_refresh_transit(y)
 	_auto.set_pressed_no_signal(y.auto_buy)
@@ -162,10 +158,7 @@ func _refresh_transit(y: SalvageYard) -> void:
 			depot.capacity() if depot else 0, roundi(depot.max_wait) if depot else 0]
 	var f := Factory.find(get_tree()) if is_inside_tree() else null
 	if f and f.market.auto_sell:
-		var keep: PackedStringArray = []
-		for i in SalvageYard.TYPES:
-			keep.append("%d %s" % [f.market.reserve[i], Economy.ORE_NAMES[i].to_lower()])
-		note += " Factory auto-sell is on: it sells what you hold above your keep-at-least (%s)." % ", ".join(keep)
+		note += " Factory auto-sell never sells bought ore: it is held back until you spend or sell it yourself."
 	_transit_note.text = note
 
 

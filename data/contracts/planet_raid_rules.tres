@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="PlanetRaidRules" format=3]
+
+[ext_resource type="Script" path="res://scripts/contracts/planet_raid_rules.gd" id="1_rules"]
+
+[resource]
+script = ExtResource("1_rules")
+loot = PackedInt32Array(7, 4, 6, 4, 5, 3)
+units_per_load = PackedInt32Array(44, 36, 34, 48, 18, 26)
+base_reward = PackedInt32Array(90, 80, 100, 90, 120, 120)
+danger_premium = 20
+base_danger = PackedInt32Array(1, 1, 1, 1, 2, 2)
+surface_time = PackedFloat32Array(26, 22, 24, 26, 32, 28)
+size_ref = 900.0
+size_range = Vector2(0.8, 1.35)
+richness_range = Vector2(0.85, 1.25)
+far_km = 15.0
+deep_km = 30.0
+descent_time = 14.0
+climb_time = 12.0
+reward_min = 40
+reward_max = 500
+reward_step = 10
+load_limit_options = PackedInt32Array(0, 3, 5, 10, 20)

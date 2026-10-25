@@ -96,7 +96,7 @@ func get_display_name() -> String:
 func get_status_text() -> String:
 	if _claimed:
 		return "%d scrap, being salvaged" % amount
-	return "%d scrap, fades in %s" % [amount, _clock(remaining_time())]
+	return "%d scrap, fades in %s" % [amount, Fmt.clock(remaining_time())]
 
 
 func is_claimed() -> bool:
@@ -153,11 +153,6 @@ func _build() -> void:
 	_mmi.layers = 2
 	_mmi.custom_aabb = AABB(Vector3(-radius - 10.0, -15.0, -radius - 10.0), Vector3(radius * 2.0 + 20.0, 30.0, radius * 2.0 + 20.0))
 	add_child(_mmi)
-
-
-static func _clock(t: float) -> String:
-	var s := int(t)
-	return "%d:%02d" % [floori(s / 60.0), s % 60]
 
 
 # --- Save ---------------------------------------------------------------------

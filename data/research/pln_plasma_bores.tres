@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"pln_plasma_bores"
+display_name = "Plasma bore drilling"
+field = 2
+tier = 3
+cost_credits = 1300
+cost_titanium = 80
+cost_crystal = 60
+research_time = 280.0
+prerequisites = Array[StringName]([&"pln_deep_core"])
+unlock_modules = Array[StringName]([&"mining_laser_3", &"salvage_claw_3"])
+tags = PackedStringArray("economy")
+description = "Plasma bores for the hardest rock: Mk III mining lasers and salvage claws."

@@ -9,6 +9,6 @@ display_name = "Ore Hold Mk III"
 slot = 1
 tier = 3
 cost = 760
-roles = PackedStringArray("Miner")
+roles = PackedStringArray("Miner", "Lander")
 blurb = "Bigger loads: more pay and materials per trip."
 cargo_bonus = 0.65

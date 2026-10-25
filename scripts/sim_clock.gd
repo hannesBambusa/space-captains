@@ -1,5 +1,5 @@
 extends Node
-## Autoload "SimClock". Simulation time for orbits, spins and belt rotation.
+## Autoload "SimClock". Simulation time for orbits, spins and cluster drift.
 ## Space toggles pause, 1/2/3 set speed 1x/2x/4x. Cosmetic shader motion
 ## (asteroid tumble, star granulation) keeps using real time on purpose.
 

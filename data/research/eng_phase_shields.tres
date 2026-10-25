@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"eng_phase_shields"
+display_name = "Phase shield arrays"
+field = 0
+tier = 3
+cost_credits = 1400
+cost_titanium = 80
+cost_crystal = 70
+research_time = 300.0
+prerequisites = Array[StringName]([&"eng_shield_lattice"])
+unlock_modules = Array[StringName]([&"shield_projector_3", &"deflector_3"])
+tags = PackedStringArray("defence")
+description = "Shields that shift phase under fire: Mk III shield modules."

@@ -1,8 +1,8 @@
 // Mid/far view of individual asteroids: one camera-facing dot per asteroid,
 // at the same position as the detailed mesh. Invisible near the camera (the
 // meshes draw there), fades in as the meshes shrink away, then keeps a
-// pixel-size floor with energy falloff so far belts read as sparkling bands.
-// Instance transform = translation only (belt-local).
+// pixel-size floor with energy falloff so far clusters read as sparkling clouds.
+// Instance transform = translation only (cluster-local).
 // INSTANCE_CUSTOM: x = radius (m), y = albedo 0..1, z = ore kind (0 rock,1 iron,2 titanium,3 crystal), w = seed.
 shader_type spatial;
 render_mode unshaded, blend_add, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
@@ -16,6 +16,8 @@ uniform float near_end = 3600.0;
 // Minimum brightness factor for sub-pixel asteroids.
 uniform float energy_floor = 0.02;
 uniform float crystal_glow = 1.0;
+// Cluster thinning: dots whose seed (INSTANCE_CUSTOM.w) is below this fade out.
+uniform float thin_level = 0.0;
 
 varying vec3 v_color;
 varying float v_alpha;
@@ -50,7 +52,7 @@ void vertex() {
 	}
 	float twinkle = 0.8 + 0.4 * sin(TIME * (0.6 + INSTANCE_CUSTOM.w * 1.7) + INSTANCE_CUSTOM.w * 40.0);
 	v_color = (base * star_color * phase * INSTANCE_CUSTOM.y + glow) * intensity * twinkle;
-	v_alpha = energy * smoothstep(near_start, near_end, dist);
+	v_alpha = energy * smoothstep(near_start, near_end, dist) * smoothstep(thin_level, thin_level + 0.04, INSTANCE_CUSTOM.w + step(thin_level, 0.0));
 }
 
 void fragment() {

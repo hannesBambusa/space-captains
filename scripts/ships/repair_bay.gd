@@ -39,6 +39,12 @@ static func can_afford(ship: Ship) -> bool:
 	return float(ship.captain.wallet) + ship.repair_credit >= COST_PER_HULL
 
 
+## True when [param ship] is below [param hull] (fraction) and its captain
+## can pay for repairs: it should fly home for them first.
+static func should_repair(ship: Ship, hull: float) -> bool:
+	return ship.hull_fraction() < hull and can_afford(ship)
+
+
 ## One docked step: repairs what the rate and the wallet allow. Returns the
 ## hull points repaired.
 static func step(ship: Ship, dt: float) -> float:
@@ -92,7 +98,7 @@ static func end_session(ship: Ship) -> void:
 				"Paid %d cr for repairs%s" % [paid, ", only part of the job" if partial else ""],
 				"Hull %d%% to %d%% at %.2f cr per hull point%s" % [roundi(ship.repair_from * 100.0), roundi(ship.hull_fraction() * 100.0), COST_PER_HULL,
 				": the wallet ran dry, %d cr still to go" % cost_to_repair(ship) if partial else ""],
-				"Wallet now %s cr. The station keeps %d%% (%d cr)." % [UIUtil.amount(ship.captain.wallet), roundi(PLAYER_SHARE * 100.0), share])
+				"Wallet now %s cr. The station keeps %d%% (%d cr)." % [Fmt.amount(ship.captain.wallet), roundi(PLAYER_SHARE * 100.0), share])
 
 
 static func _pays(ship: Ship) -> bool:

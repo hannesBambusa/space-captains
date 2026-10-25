@@ -1,6 +1,6 @@
 [gd_resource type="Resource" script_class="SystemDef" format=3]
 
-[ext_resource type="Script" path="res://scripts/belt_def.gd" id="1_5yhii"]
+[ext_resource type="Script" path="res://scripts/cluster_def.gd" id="1_5yhii"]
 [ext_resource type="Script" path="res://scripts/gate_def.gd" id="2_lckmy"]
 [ext_resource type="Script" path="res://scripts/planet_def.gd" id="3_to17p"]
 [ext_resource type="Script" path="res://scripts/system_def.gd" id="4_4dhre"]
@@ -11,13 +11,16 @@
 
 [sub_resource type="Resource" id="Resource_ri6ys"]
 script = ExtResource("1_5yhii")
-name = "Cinder Belt"
-vertical_spread = 300.0
-count = 20000
+name = "Cinder Cluster"
+orbit_radius = 5700.0
+start_angle_deg = 180.0
+inclination_deg = 1.2
+ascending_node_deg = 140.0
+size = 1800.0
+vertical_spread = 250.0
 max_scale = 18.0
 richness = 0.25
 seed = 11
-rotation_period = 1800.0
 dust_color = Color(0.66, 0.52, 0.42, 1)
 
 [sub_resource type="Resource" id="Resource_fdqaq"]
@@ -27,13 +30,13 @@ ore_type = 2
 secondary_ore = 1
 secondary_share = 0.3
 orbit_radius = 13200.0
-width = 1000.0
-vertical_spread = 500.0
-count = 30000
+start_angle_deg = 195.0
+inclination_deg = 1.6
+ascending_node_deg = 300.0
+size = 1600.0
+vertical_spread = 400.0
 richness = 0.5
-danger = 3
 seed = 23
-rotation_period = 3000.0
 dust_color = Color(0.6, 0.6, 0.62, 1)
 
 [sub_resource type="Resource" id="Resource_vgmyx"]
@@ -41,14 +44,15 @@ script = ExtResource("1_5yhii")
 name = "Crystal Veil"
 ore_type = 3
 orbit_radius = 32500.0
-width = 1500.0
-vertical_spread = 750.0
-count = 40000
+start_angle_deg = 140.0
+inclination_deg = 1.0
+ascending_node_deg = 20.0
+size = 2600.0
+vertical_spread = 600.0
 max_scale = 22.0
 richness = 0.8
-danger = 5
+danger = 2
 seed = 53
-rotation_period = 6000.0
 glow = 1.6
 dust_color = Color(0.5, 0.62, 0.72, 1)
 
@@ -59,14 +63,15 @@ ore_type = 3
 secondary_ore = 2
 secondary_share = 0.35
 orbit_radius = 41000.0
-width = 1800.0
-vertical_spread = 900.0
-count = 42000
+start_angle_deg = 45.0
+inclination_deg = 0.8
+ascending_node_deg = 230.0
+size = 2800.0
+vertical_spread = 700.0
 max_scale = 24.0
 richness = 0.65
-danger = 5
+danger = 2
 seed = 71
-rotation_period = 8000.0
 glow = 1.3
 dust_color = Color(0.56, 0.5, 0.7, 1)
 
@@ -276,8 +281,9 @@ name = "Rustjaw Hideout"
 faction = ExtResource("6_fscav")
 gang = "Rustjaw"
 belt_name = "Talon Reach"
+anchor_radius = 13200.0
 angle_deg = 212.0
-radial_offset = 950.0
+radial_offset = 1400.0
 height = 650.0
 spawn_cap = 3
 respawn_time = 50.0
@@ -295,6 +301,7 @@ name = "Ashfang Hideout"
 faction = ExtResource("6_fscav")
 gang = "Ashfang"
 belt_name = "Crystal Veil"
+anchor_radius = 32500.0
 arrival_order = 1
 min_arrival_time = 720.0
 growth_captains = 3
@@ -318,10 +325,13 @@ name = "Redwake Corsair Nest"
 faction = ExtResource("7_fcors")
 gang = "Redwake"
 belt_name = "Wraith Drift"
+anchor_radius = 41000.0
 arrival_order = 2
 min_arrival_time = 1500.0
 growth_captains = 5
 growth_structures = 4
+claim_planet = "Noctis"
+claim_lead = 240.0
 angle_deg = 70.0
 radial_offset = -1500.0
 height = 750.0
@@ -341,10 +351,13 @@ name = "Hollowstar Corsair Nest"
 faction = ExtResource("7_fcors")
 gang = "Hollowstar"
 belt_name = "Wraith Drift"
+anchor_radius = 41000.0
 arrival_order = 3
 min_arrival_time = 2400.0
 growth_captains = 7
 growth_structures = 5
+claim_planet = "Orcus"
+claim_lead = 240.0
 angle_deg = 255.0
 radial_offset = 1500.0
 height = -800.0
@@ -364,10 +377,13 @@ name = "Obsidian Syndicate Fortress"
 faction = ExtResource("8_fsynd")
 gang = "Obsidian"
 belt_name = "Wraith Drift"
+anchor_radius = 41000.0
 arrival_order = 4
 min_arrival_time = 3600.0
 growth_captains = 9
 growth_structures = 6
+claim_planet = "Tavros"
+claim_lead = 300.0
 angle_deg = 160.0
 radial_offset = -2000.0
 height = 500.0
@@ -391,6 +407,7 @@ planets = Array[ExtResource("3_to17p")]([SubResource("Resource_djlms"), SubResou
 belts = Array[ExtResource("1_5yhii")]([SubResource("Resource_ri6ys"), SubResource("Resource_fdqaq"), SubResource("Resource_vgmyx"), SubResource("Resource_wraith")])
 gates = Array[ExtResource("2_lckmy")]([SubResource("Resource_tbifg"), SubResource("Resource_7gfjg")])
 dens = Array[ExtResource("5_den")]([SubResource("Resource_den_talon"), SubResource("Resource_den_veil"), SubResource("Resource_den_redwake"), SubResource("Resource_den_hollowstar"), SubResource("Resource_den_obsidian")])
+cluster_names = PackedStringArray("Talon Shoal", "Ember Drift", "Hollow Reef", "Glass Shoal", "Iron Tide", "Vesper Drift", "Rook Cluster", "Pale Shoal", "Sable Reach", "Halcyon Drift", "Ashen Reef", "Cobalt Shoal", "Spindle Drift", "Gilt Cluster", "Basalt Reach", "Nadir Shoal", "Quill Drift", "Brimstone Reef", "Lattice Shoal", "Thorn Drift", "Mirror Reef", "Ochre Reach", "Static Shoal", "Umbra Drift")
 station_planet = "Verda"
 station_orbit_radius = 1600.0
 station_orbit_period = 330.0

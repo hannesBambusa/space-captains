@@ -36,7 +36,7 @@ extends Node
 signal changed
 
 const GROUP := "cargo_depots"
-const TYPES := 3
+const TYPES := Economy.COUNT
 
 ## Oldest waiting unit leaves after this many sim seconds, even short of a full load.
 @export var max_wait: float = 40.0
@@ -48,15 +48,17 @@ const TYPES := 3
 @export var trip_overhead: float = 45.0
 ## Shuttle count is rechecked this often, sim seconds.
 @export var check_interval: float = 3.0
+## A shot-down shuttle is replaced after this many sim seconds.
+@export var replace_delay: float = 45.0
 ## Cosmetic supply runs every this many sim seconds (0 = cargo depot).
 var supply_interval: float = 0.0
 
 var building: Building
-## Waiting for a shuttle: iron, titanium, crystal.
-var stock := PackedInt32Array([0, 0, 0])
+## Waiting for a shuttle, per Economy.Ore type (asteroid ore and planet goods).
+var stock := Economy.zero_ore()
 var shuttles: Array[CargoShuttle] = []
 ## Units that reached the station, per type.
-var total_shipped := PackedInt32Array([0, 0, 0])
+var total_shipped := Economy.zero_ore()
 var trips: int = 0
 
 ## {time, amount} per delivery inside the throughput window, oldest first.
@@ -66,6 +68,8 @@ var _waiting_since: float = INF
 var _check_timer: float = 0.0
 var _supply_timer: float = 0.0
 var _spawned: int = 0
+## SimClock.time before which no new shuttle comes (a shuttle was lost).
+var _replace_at: float = 0.0
 
 
 ## The depot of [param b], or null.
@@ -103,7 +107,7 @@ func sim_step(dt: float) -> void:
 	if _check_timer <= 0.0:
 		_check_timer = check_interval
 		_prune()
-		if shuttles.size() < wanted_shuttles():
+		if shuttles.size() < wanted_shuttles() and SimClock.time >= _replace_at:
 			_spawn_shuttle()
 
 
@@ -129,7 +133,10 @@ func add_stock(type: int, amount: int) -> void:
 
 
 func waiting_total() -> int:
-	return stock[0] + stock[1] + stock[2]
+	var n := 0
+	for v in stock:
+		n += v
+	return n
 
 
 ## True when a docked shuttle should load now.
@@ -144,7 +151,7 @@ func load_ready() -> bool:
 
 ## Takes a load (up to [method capacity], rarest ore first) for a shuttle.
 func take_load() -> PackedInt32Array:
-	var out := PackedInt32Array([0, 0, 0])
+	var out := Economy.zero_ore()
 	if is_supply_only():
 		_supply_timer = supply_interval
 		return out
@@ -180,7 +187,7 @@ func throughput_per_min() -> float:
 
 ## Units one shuttle moves per sim minute on this outpost's round trip.
 func shuttle_rate_per_min() -> float:
-	var dist := Vector2(building.position.x, building.position.z).length()
+	var dist := SpaceNav.flat_length(building.position)
 	var trip_time := 2.0 * dist / CargoShuttle.CRUISE_SPEED + trip_overhead
 	return float(capacity()) * 60.0 / maxf(trip_time, 1.0)
 
@@ -216,7 +223,7 @@ func docked_shuttle() -> CargoShuttle:
 ## Ore aboard this depot's shuttles on their way to the station (loading
 ## counts: it is no longer in the stock).
 func in_flight() -> PackedInt32Array:
-	var out := PackedInt32Array([0, 0, 0])
+	var out := Economy.zero_ore()
 	for s in shuttles:
 		if is_instance_valid(s) and not s.dead and s.is_carrying_cargo():
 			for i in TYPES:
@@ -235,7 +242,7 @@ func pending() -> PackedInt32Array:
 
 ## Pending ore over every depot (see [method pending]).
 static func pending_all(tree: SceneTree) -> PackedInt32Array:
-	var out := PackedInt32Array([0, 0, 0])
+	var out := Economy.zero_ore()
 	for n in tree.get_nodes_in_group(GROUP):
 		var d := n as CargoDepot
 		if d and is_instance_valid(d.building) and d.building.is_active():
@@ -262,7 +269,7 @@ static func ore_text(ore: PackedInt32Array) -> String:
 	var parts: PackedStringArray = []
 	for i in mini(ore.size(), TYPES):
 		if ore[i] > 0:
-			parts.append("%s %s" % [UIUtil.amount(ore[i]), Economy.ORE_NAMES[i].to_lower()])
+			parts.append("%s %s" % [Fmt.amount(ore[i]), Economy.ore_name(i)])
 	return ", ".join(parts)
 
 
@@ -282,7 +289,7 @@ func transit_lines() -> PackedStringArray:
 		elif eta <= 0.5:
 			when = "shuttle loading now"
 		else:
-			when = "shuttle leaving in %s" % UIUtil.clock(ceilf(eta))
+			when = "shuttle leaving in %s" % Fmt.clock(ceilf(eta))
 		out.append("In transit: %s (%s)" % [waiting, when])
 	var aboard := ore_text(in_flight())
 	if not aboard.is_empty():
@@ -314,10 +321,20 @@ func berth_transform(index: int) -> Transform3D:
 	return Transform3D(Basis.looking_at(out, Vector3.UP), p)
 
 
-## A shuttle was lost or left: forget it.
-func remove_shuttle(s: CargoShuttle) -> void:
+## A shuttle was lost or left: forget it. [param lost]: it was shot down,
+## so the next one comes after [member replace_delay].
+func remove_shuttle(s: CargoShuttle, lost: bool = false) -> void:
 	shuttles.erase(s)
+	if lost:
+		_replace_at = SimClock.time + replace_delay
 	changed.emit()
+
+
+## Sim seconds until the replacement for a lost shuttle arrives, 0 = none pending.
+func replacement_eta() -> float:
+	if building == null or shuttles.size() >= wanted_shuttles():
+		return 0.0
+	return maxf(_replace_at - SimClock.time, 0.0)
 
 
 ## "Stock waiting: 37 iron, shuttles 2/3".
@@ -327,12 +344,16 @@ func summary_text() -> String:
 	var parts: PackedStringArray = []
 	for i in TYPES:
 		if stock[i] > 0:
-			parts.append("%s %s" % [UIUtil.amount(stock[i]), Economy.ORE_NAMES[i].to_lower()])
-	return "Stock waiting: %s, shuttles %d/%d" % [", ".join(parts) if not parts.is_empty() else "none", shuttles.size(), building.def.max_shuttles]
+			parts.append("%s %s" % [Fmt.amount(stock[i]), Economy.ore_name(i)])
+	var text := "Stock waiting: %s, shuttles %d/%d" % [", ".join(parts) if not parts.is_empty() else "none", shuttles.size(), building.def.max_shuttles]
+	var eta := replacement_eta()
+	if eta > 0.0:
+		text += "\nReplacement shuttle in %s" % Fmt.clock(ceilf(eta))
+	return text
 
 
 func _spawn_shuttle() -> void:
-	var mgr := get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	var mgr := BuildingManager.of(get_tree())
 	if mgr == null or mgr.frame == null:
 		return
 	_spawned += 1
@@ -362,9 +383,12 @@ func _trim_history() -> void:
 
 ## The stock and counters; the shuttles are saved as ships.
 func save_state() -> Dictionary:
-	return SaveUtil.props(self, ["stock", "total_shipped", "trips", "_history", "_waiting_since", "_check_timer", "_supply_timer", "_spawned"])
+	return SaveUtil.props(self, ["stock", "total_shipped", "trips", "_history", "_waiting_since", "_check_timer", "_supply_timer", "_spawned", "_replace_at"])
 
 
 func load_state(d: Dictionary, _refs: SaveRefs) -> void:
 	SaveUtil.apply_props(self, d)
+	# Saves before the planet goods hold three types.
+	stock = Economy.padded(stock)
+	total_shipped = Economy.padded(total_shipped)
 	changed.emit()

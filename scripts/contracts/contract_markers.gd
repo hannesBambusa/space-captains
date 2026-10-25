@@ -1,17 +1,18 @@
 class_name ContractMarkers
 extends Node3D
-## Holographic beacons for posted contracts: one per contract target (belt),
-## at the contract site (for belts: the stretch nearest the home station,
-## so it slides along the ring as the station orbits). Each beacon has a
+## Holographic beacons for posted contracts: one per contract target (an
+## asteroid cluster: at its centre, drifting with it, the ring around the
+## clump). Each beacon has a
 ## constant-size label (visible at every zoom), a pulsing ring and a light
 ## pillar for closer views. Beacons are focusable; clicking one selects its
-## belt (meta "belt").
+## cluster (meta "belt").
 
 const GROUP := "contract_markers"
 const HOLO := Color(0.4, 0.88, 1.0)
 const BOUNTY_COLOR := Color(1.0, 0.3, 0.24)
 const ESCORT_COLOR := Color(0.45, 0.95, 1.0)
 const SALVAGE_COLOR := Color(1.0, 0.72, 0.35)
+const RAID_COLOR := Color(0.8, 0.62, 1.0)
 ## Icon size on screen ~ texture px * this * px per radian.
 const ICON_PIXEL_SIZE := 0.0006
 
@@ -20,7 +21,6 @@ const ICON_PIXEL_SIZE := 0.0006
 
 ## target (Node3D) -> marker Node3D
 var _markers: Dictionary = {}
-var _system: SolarSystem
 ## Shields over miners flying escorted mining trips: miner -> Sprite3D.
 var _escort_icons: Dictionary = {}
 var _icon_timer := 0.0
@@ -45,7 +45,6 @@ func _process(delta: float) -> void:
 		(_escort_icons[miner] as Node3D).global_position = (miner as Node3D).global_position + Vector3(0.0, 4.0, 0.0)
 	if _markers.is_empty():
 		return
-	var from := _reference_point()
 	var t := Time.get_ticks_msec() * 0.001
 	if not is_inside_tree():
 		return
@@ -56,14 +55,14 @@ func _process(delta: float) -> void:
 		var cs := ContractBoard.get_for_target(target as Node)
 		if cs.is_empty():
 			continue
-		if not (target is SystemBelt):
-			m.global_position = (target as Node3D).global_position + Vector3(0.0, 3.0, 0.0)
+		if not (target is AsteroidCluster):
+			var lift := (target as PlanetBody).def.radius * 1.15 if target is PlanetBody else 3.0
+			m.global_position = (target as Node3D).global_position + Vector3(0.0, lift, 0.0)
 			var icon := m.get_node_or_null(^"Icon") as Sprite3D
 			if icon:
 				icon.pixel_size = ICON_PIXEL_SIZE * (1.0 + 0.08 * sin(t * 4.0))
 			continue
-		var site := cs[0].get_site_position(from)
-		m.global_position = Vector3(site.x, 0.0, site.z)
+		m.global_position = (target as Node3D).global_position
 		var ring := m.get_node_or_null(^"Ring") as Node3D
 		if ring:
 			var k := fposmod(t * 0.35, 1.0)
@@ -102,14 +101,6 @@ func _update_escort_icons() -> void:
 			_escort_icons[miner] = icon
 
 
-func _reference_point() -> Vector3:
-	if _system == null:
-		_system = get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
-	if _system and _system.home_station:
-		return _system.home_station.global_position
-	return Vector3.ZERO
-
-
 func _refresh() -> void:
 	var by_target: Dictionary = {}
 	for c in ContractBoard.get_listed():
@@ -124,7 +115,7 @@ func _refresh() -> void:
 	for target: Node3D in by_target:
 		var m := _markers.get(target) as Node3D
 		if m == null:
-			m = _make_marker(target) if target is SystemBelt else _make_icon_marker(target, by_target[target][0] as Contract)
+			m = _make_marker(target) if target is AsteroidCluster else _make_icon_marker(target, by_target[target][0] as Contract)
 			_markers[target] = m
 		var lines: PackedStringArray = []
 		for c: Contract in by_target[target]:
@@ -159,13 +150,17 @@ func _make_icon(tex: Texture2D, color: Color) -> Sprite3D:
 func _make_icon_marker(target: Node3D, first: Contract) -> Node3D:
 	var bounty := first is BountyContract
 	var salvage := first is SalvageContract
-	var color := BOUNTY_COLOR if bounty else (SALVAGE_COLOR if salvage else ESCORT_COLOR)
+	var raid := first is PlanetRaidContract
+	var color := BOUNTY_COLOR if bounty else (SALVAGE_COLOR if salvage else (RAID_COLOR if raid else ESCORT_COLOR))
 	var m := Node3D.new()
 	m.name = "Contract_%s" % String(target.name)
 	m.set_meta(&"focus_radius", 40.0)
 	m.set_meta(&"focus_distance", 520.0 if target is ScavengerDen else 220.0)
 	add_child(m)
-	var icon := _make_icon(IconTextures.reticle() if bounty else (IconTextures.salvage() if salvage else IconTextures.shield()), color)
+	var tex: Texture2D = IconTextures.reticle() if bounty else (IconTextures.salvage() if salvage else IconTextures.shield())
+	if raid:
+		tex = HudStyle.icon(&"role_lander")
+	var icon := _make_icon(tex, color)
 	if target is ScavengerDen:
 		icon.pixel_size = ICON_PIXEL_SIZE * 1.3
 	m.add_child(icon)
@@ -194,9 +189,10 @@ func _make_marker(target: Node3D) -> Node3D:
 	var m := Node3D.new()
 	m.name = "Contract_%s" % String(target.name)
 	var width := 900.0
-	if target is SystemBelt:
+	if target is AsteroidCluster:
 		m.set_meta(&"belt", target)
-		width = (target as SystemBelt).def.width
+		# Ring just outside the clump.
+		width = (target as AsteroidCluster).rock_half_width() * 1.1 / ring_radius_factor
 	m.set_meta(&"focus_radius", width * 0.3)
 	m.set_meta(&"focus_distance", width * 2.0)
 	m.add_to_group(RTSCamera.FOCUS_GROUP)

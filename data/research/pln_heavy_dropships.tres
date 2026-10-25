@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"pln_heavy_dropships"
+display_name = "Heavy dropships"
+field = 2
+tier = 3
+cost_credits = 1400
+cost_titanium = 100
+cost_crystal = 60
+research_time = 300.0
+prerequisites = Array[StringName]([&"pln_assault_doctrine"])
+tags = PackedStringArray("economy")
+description = "Bigger cargo pods for dropships: every lander carries 40% more loot per raid."

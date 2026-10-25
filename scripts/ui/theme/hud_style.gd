@@ -29,12 +29,13 @@ const CREDITS := Color(1.0, 0.84, 0.45)
 ## Pilot roles: colour of the emblem badge and the role icon.
 const ROLE_COLORS := {
 	"Miner": Color(0.98, 0.74, 0.3),
-	"Mercenary": Color(1.0, 0.44, 0.36),
+	"Mercenary": Color(0.55, 0.72, 1.0),
 	"Salvager": Color(0.42, 0.88, 0.74),
+	"Lander": Color(0.78, 0.58, 1.0),
 }
-const ROLE_ICONS := {"Miner": &"role_miner", "Mercenary": &"role_mercenary", "Salvager": &"role_salvager"}
+const ROLE_ICONS := {"Miner": &"role_miner", "Mercenary": &"role_mercenary", "Salvager": &"role_salvager", "Lander": &"role_lander"}
 ## Short role names for chips and badges.
-const ROLE_SHORT := {"Miner": "Miners", "Mercenary": "Mercs", "Salvager": "Salvagers"}
+const ROLE_SHORT := {"Miner": "Miners", "Mercenary": "Mercs", "Salvager": "Salvagers", "Lander": "Landers"}
 
 const FONT_DIR := "res://assets/ui/fonts/"
 const ICON_DIR := "res://assets/ui/icons/"

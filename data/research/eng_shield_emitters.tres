@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"eng_shield_emitters"
+display_name = "Shield emitters"
+field = 0
+tier = 1
+cost_credits = 300
+cost_iron = 60
+research_time = 90.0
+unlock_modules = Array[StringName]([&"shield_projector_1", &"deflector_1"])
+tags = PackedStringArray("defence")
+description = "Compact shield emitters for small hulls. The Factory can make the first shield modules for miners, salvagers and mercenaries."

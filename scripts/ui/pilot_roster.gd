@@ -13,7 +13,7 @@ signal count_changed(total: int, in_combat: int)
 enum Sort { ROLE, STATUS, HULL, WALLET, RANK }
 
 const SORT_NAMES: PackedStringArray = ["Role", "Status", "Hull", "Wallet", "Rank"]
-const ROLE_ORDER: PackedStringArray = ["Miner", "Mercenary", "Salvager"]
+const ROLE_ORDER: PackedStringArray = ["Miner", "Mercenary", "Salvager", "Lander"]
 const H := preload("res://scripts/ui/theme/hud_style.gd")
 
 @export var refresh_interval: float = 0.25
@@ -138,7 +138,7 @@ func _add_chip(role: String, text: String) -> void:
 
 
 func _update_sort_label() -> void:
-	_sort_button.text = SORT_NAMES[sort_mode].to_upper()
+	_sort_button.text = "Sort: %s" % SORT_NAMES[sort_mode]
 
 
 func _process(delta: float) -> void:

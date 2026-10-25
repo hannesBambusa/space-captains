@@ -30,7 +30,7 @@ func mine_time_for(ore: int) -> float:
 
 
 ## Fair reward for one load from [param belt], snapped to the UI step.
-func default_reward(belt: SystemBelt) -> int:
+func default_reward(belt: AsteroidCluster) -> int:
 	if belt == null or belt.def == null:
 		return reward_min
 	var raw := base_reward[clampi(belt.ore_type, 0, base_reward.size() - 1)] + danger_premium * maxi(belt.danger - 1, 0)

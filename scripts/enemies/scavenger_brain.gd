@@ -4,10 +4,10 @@ extends RefCounted
 ## The ship's [FactionDef] tunes them: prey (hunts_*), aggression (escort
 ## aversion, retaliation reach), flee threshold, steal share (0 = shoot to
 ## kill), packs and raid style. Scavenger values are the defaults below.
-## - ROAMING the den's belt (around the den, and toward the colony's mining
+## - ROAMING around the den and the cluster drifting past it (toward the colony's mining
 ##   site when a contract is posted there);
 ## - HUNTING miners (salvagers too, and escape pods): prefers loaded,
-##   unescorted ones within sensor range or on its belt near the den; shoots
+##   unescorted ones within sensor range or at the cluster near the den; shoots
 ##   them and steals the faction's steal share of the load once close or the
 ##   miner is disabled, then runs home (factions that do not steal shoot
 ##   to kill; factions that hunt armed ships go for mercenaries in their
@@ -31,6 +31,12 @@ extends RefCounted
 ##   and fight its attackers (ScavengerDen.defence_target); once the base's
 ##   alarm is over and nothing hostile is near it, back to roaming (or
 ##   raiding). Fleeing below the flee threshold still comes first.
+## - GUARDING (planet garrison patrols, claim group escorts, PlanetClaims):
+##   with a [member guard] set, roaming circles the guard (a planet or a
+##   ship) between [member guard_inner] and [member guard_radius] and any
+##   player ship inside the radius is prey. A guard that is gone, or a
+##   base destroyed under a ship that guards ([member withdraw]), sends it
+##   off the map with a warp flash once nothing is shooting at it.
 ## Targets inside an up shield bubble are never chased from outside: the
 ## bubble is attacked instead (raiders, retaliation) or the prey is skipped.
 ## Checks run on a timer ([constant AI_INTERVAL]).
@@ -63,6 +69,9 @@ const RAID_LOOT_MAX := 75
 const ROAM_SPEED := 0.55
 ## Escort weight in prey scoring at aggression 0.5, metres per escort.
 const ESCORT_PENALTY := 2500.0
+## Landers (fast dropships on a raid, mostly out of the lanes) rank this much
+## lower as prey, metres of distance.
+const LANDER_PREY_PENALTY := 1500.0
 ## A wingman's slot beside its lead, metres.
 const WING_OFFSET := 90.0
 ## Raiders drop out of a warp this far short of the colony, metres.
@@ -77,6 +86,15 @@ var stolen_from: String = ""
 var credits_looted: int = 0
 ## The base this ship is defending (DEFENDING).
 var defend_den: ScavengerDen
+
+## Guarding (see the class notes): what, how far out (metres from its centre).
+var guard: Node3D
+var guard_radius: float = 0.0
+var guard_inner: float = 0.0
+## Leaves the map once out of the fight (its garrison or charge is gone).
+var withdraw: bool = false
+var _guard_offset := Vector3.INF
+var _guarding := false
 
 var _ai_timer: float = 0.0
 var _roam_point := Vector3.INF
@@ -124,7 +142,7 @@ func objective_name() -> String:
 		return ""
 	if raid_objective is Building:
 		return (raid_objective as Building).display_name
-	return _name_of(raid_objective)
+	return Combat.name_of(raid_objective, "?")
 
 
 ## The objective's combatant: a building's hull, the shuttle, the station
@@ -143,21 +161,25 @@ func get_status_text() -> String:
 		State.RETURNING:
 			return "Returning to %s" % fac.den_kind.get_slice(" ", fac.den_kind.get_slice_count(" ") - 1)
 		State.ROAMING:
+			if withdraw:
+				return "Withdrawing"
+			if is_guarding():
+				return ("Escorting %s" % Combat.name_of(guard, "?")) if guard is Ship else ("Guarding %s" % _guard_name())
 			return "Patrolling" if fac.hunts_armed else ("Flying wing" if lead() else "Roaming")
 		State.HUNTING:
 			if _steal_time > 0.0:
 				return "Stealing cargo"
-			return "Hunting %s" % _name_of(target)
+			return "Hunting %s" % Combat.name_of(target, "?")
 		State.ATTACKING:
-			return "Attacking %s" % _name_of(target)
+			return "Attacking %s" % Combat.name_of(target, "?")
 		State.DEFENDING:
 			var dn := defend_den.get_display_name() if is_instance_valid(defend_den) else "its base"
-			return "Defending %s, attacking %s" % [dn, _name_of(target)] if Combat.is_live_target(target) else "Flying back to defend %s" % dn
+			return "Defending %s, attacking %s" % [dn, Combat.name_of(target, "?")] if Combat.is_live_target(target) else "Flying back to defend %s" % dn
 		State.FLEEING:
 			return "Fleeing with loot" if ship.loot > 0.0 else "Fleeing"
 		State.RAIDING:
 			if Combat.is_live_target(target):
-				return "Raiding, attacking %s" % _name_of(target)
+				return "Raiding, attacking %s" % Combat.name_of(target, "?")
 			var obj := objective_name()
 			if not obj.is_empty():
 				return "Raiding %s" % obj
@@ -174,10 +196,10 @@ func can_warp() -> bool:
 		State.RAIDING:
 			return not Combat.is_live_target(target)
 		State.FLEEING, State.RETURNING:
-			return Combat.nearest_hostile(ship.get_tree(), ship.global_position, WARP_CLEAR, ship.faction) == null
+			return ship.nearest_hostile(WARP_CLEAR) == null
 		State.DEFENDING:
 			return is_instance_valid(defend_den) and ship.global_position.distance_to(defend_den.global_position) > DEFEND_WARP_DISTANCE \
-					and Combat.nearest_hostile(ship.get_tree(), ship.global_position, WARP_CLEAR, ship.faction) == null
+					and ship.nearest_hostile(WARP_CLEAR) == null
 	return false
 
 
@@ -190,7 +212,7 @@ func cruise_free() -> bool:
 		State.RAIDING:
 			var goal := _raid_goal()
 			return not Combat.is_live_target(target) and goal != null \
-					and Combat.flat_distance(ship.global_position, goal.global_position) > RAID_LOOT_RANGE * 3.0
+					and SpaceNav.flat_distance(ship.global_position, goal.global_position) > RAID_LOOT_RANGE * 3.0
 	return false
 
 
@@ -262,7 +284,37 @@ func update(dt: float) -> void:
 
 # --- Thinking -------------------------------------------------------------------
 
+## Guards [param node] (see the class notes).
+func set_guard(node: Node3D, radius: float, inner: float = 0.0) -> void:
+	guard = node
+	guard_radius = radius
+	guard_inner = inner
+	_guarding = node != null
+	_guard_offset = Vector3.INF
+
+
+func is_guarding() -> bool:
+	return _guarding and is_instance_valid(guard) and guard.is_inside_tree() and not (guard is Ship and (guard as Ship).dead)
+
+
+## Withdrawing and clear of the fight: warps out. True when it left.
+func _withdraw_step() -> bool:
+	if ship.durability.seconds_since_hit() < 6.0:
+		return false
+	if ship.nearest_hostile(1200.0) != null:
+		return false
+	WarpFx.flash(ship.get_tree(), ship.global_position, 30.0)
+	ship.leave_map()
+	return true
+
+
 func _think() -> void:
+	if _guarding and not is_guarding():
+		_guarding = false
+		guard = null
+		withdraw = true
+	if withdraw and _withdraw_step():
+		return
 	var den_alive := is_instance_valid(ship.den) and ship.den.is_alive()
 	if state != State.FLEEING and state != State.RETURNING and ship.hull_fraction() < fac.flee_hull and den_alive:
 		_set_state(State.FLEEING)
@@ -270,6 +322,11 @@ func _think() -> void:
 		return
 	if state == State.FLEEING or state == State.RETURNING:
 		if not den_alive:
+			if withdraw or _guarding:
+				# A garrison's ship with its base gone: leaves instead.
+				withdraw = true
+				_set_state(State.ROAMING)
+				return
 			# Nowhere to go: turn on the colony.
 			ship.is_raider = true
 			_set_state(State.RAIDING)
@@ -286,6 +343,12 @@ func _think() -> void:
 			target = _through_shield(la)
 			_set_state(State.ATTACKING)
 			return
+	if withdraw:
+		# Only fights back (above) on the way out.
+		if state == State.HUNTING or state == State.ATTACKING:
+			target = null
+			_set_state(State.ROAMING)
+		return
 	if ship.is_raider:
 		var t := _raid_pick()
 		target = t
@@ -348,9 +411,13 @@ func _is_prey(s: Ship) -> bool:
 
 ## Best prey to hunt, or null.
 func _pick_prey() -> Ship:
+	if is_guarding():
+		return _guard_prey()
 	var tree := ship.get_tree()
 	var pos := ship.global_position
 	var den := ship.den if is_instance_valid(ship.den) else null
+	# The cluster in the base's reach right now (they drift past).
+	var turf: AsteroidCluster = den.belt if den else null
 	var best: Ship = null
 	var best_score := INF
 	for n in tree.get_nodes_in_group(Ship.GROUP):
@@ -360,9 +427,9 @@ func _pick_prey() -> Ship:
 		var armed := m.weapon != null and not (m is MinerShip)
 		var d := pos.distance_to(m.global_position)
 		var on_turf := false
-		if den and den.belt:
-			on_turf = Combat.flat_distance(den.global_position, m.global_position) < den.def.hunt_range \
-					and (armed or SpaceNav.distance_to_belt(den.belt, m.global_position) < den.belt.def.width * 0.5 + 1500.0)
+		if turf:
+			on_turf = SpaceNav.flat_distance(den.global_position, m.global_position) < den.def.hunt_range \
+					and (armed or turf.distance_to(m.global_position) < 1500.0)
 		if d > ship.stats.sensor_range and not on_turf:
 			continue
 		if StationShield.shielding(tree, m.global_position, pos):
@@ -372,6 +439,8 @@ func _pick_prey() -> Ship:
 			score -= 1800.0
 		elif m is EscapePod:
 			score -= 600.0
+		if m is LanderShip:
+			score += LANDER_PREY_PENALTY
 		var escorts := _guns_near(m.global_position, ESCORT_RADIUS) - (1 if armed else 0)
 		score += ESCORT_PENALTY * 2.0 * (1.0 - fac.aggression) * float(maxi(escorts, 0))
 		if m == target:
@@ -382,11 +451,33 @@ func _pick_prey() -> Ship:
 	return best
 
 
+## Guarding: the player ship nearest this one inside the guard radius
+## (any kind but cargo shuttles and pods), or null.
+func _guard_prey() -> Ship:
+	var tree := ship.get_tree()
+	var c := guard.global_position
+	var best: Ship = null
+	var best_d := INF
+	for n in tree.get_nodes_in_group(Ship.GROUP):
+		var m := n as Ship
+		if m == null or m.faction != Combat.Faction.PLAYER or not m.is_targetable() or m is CargoShuttle or m is EscapePod:
+			continue
+		if m.global_position.distance_to(c) > guard_radius:
+			continue
+		if StationShield.shielding(tree, m.global_position, ship.global_position):
+			continue
+		var d := ship.global_position.distance_to(m.global_position) - (400.0 if m == target else 0.0)
+		if d < best_d:
+			best_d = d
+			best = m
+	return best
+
+
 func _guns_near(pos: Vector3, radius: float) -> int:
 	var n := 0
 	for o in ship.get_tree().get_nodes_in_group(Ship.GROUP):
 		var s := o as Ship
-		if s and s.faction == Combat.Faction.PLAYER and s.weapon and s.is_targetable() and Combat.flat_distance(pos, s.global_position) < radius:
+		if s and s.faction == Combat.Faction.PLAYER and s.weapon and s.is_targetable() and SpaceNav.flat_distance(pos, s.global_position) < radius:
 			n += 1
 	return n
 
@@ -398,9 +489,9 @@ func _guns_near(pos: Vector3, radius: float) -> int:
 func _raid_pick() -> Node3D:
 	var tree := ship.get_tree()
 	var pos := ship.global_position
-	var sys := tree.get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var sys := SolarSystem.of(tree)
 	var home := sys.home_station.global_position if sys and sys.home_station else pos
-	if Combat.flat_distance(pos, home) > RAID_ENGAGE_RADIUS * 2.0:
+	if SpaceNav.flat_distance(pos, home) > RAID_ENGAGE_RADIUS * 2.0:
 		# A shuttle out in space can be caught on the way in.
 		var far := _objective_combatant()
 		if far is CargoShuttle and pos.distance_to(far.global_position) < RAID_ENGAGE_RADIUS:
@@ -486,7 +577,7 @@ func _launch_step() -> void:
 	var out := den.get_mouth_position() + den.get_outward() * 260.0
 	ship.set_world_goal(out, Vector3.ZERO, Vector3.ZERO, 40.0, ship.max_speed * 0.5)
 	# Flat: in open space the ship holds its lane height, not the mouth's.
-	if Combat.flat_distance(ship.global_position, out) < 80.0:
+	if SpaceNav.flat_distance(ship.global_position, out) < 80.0:
 		_set_state(State.RAIDING if ship.is_raider else State.ROAMING)
 
 
@@ -499,29 +590,63 @@ func _roam_step() -> void:
 		var slot := l.global_position + (side.normalized() if side.length() > 0.01 else Vector3.RIGHT) * WING_OFFSET * ship.attack_side
 		ship.set_world_goal(slot, l.mover.velocity, Vector3.ZERO, 30.0, ship.max_speed)
 		return
-	if _roam_point == Vector3.INF or Combat.flat_distance(ship.global_position, _roam_point) < 120.0:
+	if is_guarding():
+		_guard_roam_step()
+		return
+	if withdraw:
+		# Base gone, nothing to guard: hold still until it can warp out.
+		ship.set_world_goal(ship.global_position, Vector3.ZERO, Vector3.ZERO, 200.0, ship.max_speed * 0.3)
+		return
+	if _roam_point == Vector3.INF or SpaceNav.flat_distance(ship.global_position, _roam_point) < 120.0:
 		_roam_point = _pick_roam_point()
 	ship.set_world_goal(_roam_point, Vector3.ZERO, Vector3.ZERO, 80.0, ship.max_speed * ROAM_SPEED)
 
 
+func _guard_name() -> String:
+	var body := guard as PlanetBody
+	return body.def.name if body and body.def else Combat.name_of(guard, "?")
+
+
+## Circles the guard: random points around it that ride along with it.
+func _guard_roam_step() -> void:
+	var c := guard.global_position
+	var vel := (guard as Ship).get_world_velocity() if guard is Ship else SpaceNav.world_velocity(guard)
+	if _guard_offset == Vector3.INF or ship.global_position.distance_to(c + _guard_offset) < (60.0 if guard is Ship else 140.0):
+		var a := _rng.randf() * TAU
+		if guard is Ship:
+			_guard_offset = Vector3(cos(a), 0.0, sin(a)) * _rng.randf_range(120.0, 300.0) + Vector3.UP * _rng.randf_range(-40.0, 60.0)
+		else:
+			var lo := maxf(guard_inner, 200.0)
+			var hi := maxf(guard_radius * 0.85, lo + 300.0)
+			_guard_offset = Vector3(cos(a), 0.0, sin(a)) * _rng.randf_range(lo, hi) + Vector3.UP * _rng.randf_range(-250.0, 250.0)
+	var speed := ship.max_speed if guard is Ship else ship.max_speed * ROAM_SPEED
+	ship.set_world_goal(c + _guard_offset, vel, Vector3.ZERO, 40.0 if guard is Ship else 80.0, speed)
+
+
 func _pick_roam_point() -> Vector3:
 	var den := ship.den
-	if not is_instance_valid(den) or den.belt == null:
+	if not is_instance_valid(den):
 		return ship.global_position + Vector3(_rng.randf_range(-800.0, 800.0), 0.0, _rng.randf_range(-800.0, 800.0))
 	var belt := den.belt
+	if belt and _rng.randf() < 0.6:
+		# Prowl the cluster drifting past: the colony's mining site on it
+		# now and then, else anywhere in the rocks.
+		var c := belt.global_position
+		var spot := Vector2(_rng.randf_range(-1.0, 1.0), _rng.randf_range(-1.0, 1.0)).limit_length(1.0) * belt.rock_half_width()
+		var site := c + Vector3(spot.x, 0.0, spot.y)
+		if _rng.randf() < 0.5:
+			for con in ContractBoard.get_available(Contract.Type.MINING):
+				var mc := con as MiningContract
+				if mc and mc.belt == belt:
+					site = mc.get_site_position(_home_position()) + Vector3(_rng.randf_range(-300.0, 300.0), 0.0, _rng.randf_range(-300.0, 300.0))
+					break
+		return Vector3(site.x, 0.0, site.z)
+	# Around the base, along its orbit radius.
 	var base_angle := atan2(den.global_position.z, den.global_position.x)
 	var arc := deg_to_rad(den.def.roam_arc_deg)
 	var angle := base_angle + _rng.randf_range(-arc, arc)
-	# Prowl toward the colony's mining site on this belt now and then.
-	if _rng.randf() < 0.4:
-		for c in ContractBoard.get_available(Contract.Type.MINING):
-			var mc := c as MiningContract
-			if mc and mc.belt == belt:
-				var site := mc.get_site_position(_home_position())
-				angle = atan2(site.z, site.x) + _rng.randf_range(-0.08, 0.08)
-				break
-	var r := belt.def.orbit_radius + _rng.randf_range(-0.35, 0.35) * belt.def.width
-	return belt.global_position + Vector3(cos(angle), 0.0, sin(angle)) * r
+	var r := SpaceNav.flat_length(den.global_position) + _rng.randf_range(-1200.0, 1200.0)
+	return Vector3(cos(angle), 0.0, sin(angle)) * r
 
 
 func _steal_step(dt: float) -> void:
@@ -552,7 +677,7 @@ func _return_step() -> void:
 	var mouth := den.get_mouth_position()
 	var outside := mouth + den.get_outward() * 40.0
 	ship.set_world_goal(outside, Vector3.ZERO, Vector3.ZERO, 30.0)
-	if Combat.flat_distance(ship.global_position, outside) < 60.0 and absf(ship.global_position.y - outside.y) < 40.0:
+	if SpaceNav.flat_distance(ship.global_position, outside) < 60.0 and absf(ship.global_position.y - outside.y) < 40.0:
 		den.recall(ship)
 
 
@@ -572,7 +697,7 @@ func _raid_step(dt: float) -> void:
 			_roam_step()
 			return
 	var bp := _raid_target.global_position
-	var d := Combat.flat_distance(ship.global_position, bp)
+	var d := SpaceNav.flat_distance(ship.global_position, bp)
 	if d > RAID_LOOT_RANGE:
 		ship.set_world_goal(bp, SpaceNav.world_velocity(_raid_target), Vector3.ZERO, RAID_LOOT_RANGE * 0.6)
 		return
@@ -589,7 +714,7 @@ func _raid_step(dt: float) -> void:
 		if amount > 0:
 			Economy.spend(amount)
 			credits_looted += amount
-			var who := "Raiders" if fac.id == Factions.DEFAULT_ID else "%s raiders" % fac.unit_name
+			var who := fac.raiders_label()
 			EventLog.post("%s are looting %s" % [who, _raid_target.display_name], EventLog.Kind.THREAT, _raid_target, Vector3.INF, "", fac.id)
 		if credits_looted >= roundi(RAID_LOOT_MAX * fac.raid_loot_mult):
 			_set_state(State.FLEEING)
@@ -603,23 +728,14 @@ func _raid_goal() -> Node3D:
 
 
 func _pick_raid_building() -> Building:
-	var mgr := ship.get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	var mgr := BuildingManager.of(ship.get_tree())
 	if mgr == null:
 		return null
-	var best: Building = null
-	var best_d := INF
-	for b in mgr.buildings:
-		if not is_instance_valid(b):
-			continue
-		var d := Combat.flat_distance(ship.global_position, b.global_position)
-		if d < best_d:
-			best_d = d
-			best = b
-	return best
+	return Combat.nearest_of(mgr.buildings, ship.global_position) as Building
 
 
 func _home_position() -> Vector3:
-	var sys := ship.get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var sys := SolarSystem.of(ship.get_tree())
 	return sys.home_station.global_position if sys and sys.home_station else Vector3.ZERO
 
 
@@ -628,9 +744,3 @@ func _set_state(s: State) -> void:
 		return
 	state = s
 	ship.status_changed.emit(ship)
-
-
-func _name_of(n: Variant) -> String:
-	if is_instance_valid(n) and (n as Object).has_method(&"get_display_name"):
-		return String((n as Object).call(&"get_display_name"))
-	return "?"

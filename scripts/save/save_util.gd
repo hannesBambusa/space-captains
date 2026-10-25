@@ -70,6 +70,35 @@ static func set_durability(d: Durability, s: Dictionary, refs: SaveRefs) -> void
 			d.tally[o.get_instance_id()] = {"ref": weakref(o), "damage": float(e["damage"]), "time": float(e["time"])}
 
 
+## [method props] of [param names] on [param o], plus [param d] under
+## "durability" ([method durability]).
+static func props_and_durability(o: Object, names: PackedStringArray, d: Durability) -> Dictionary:
+	var out := props(o, names)
+	out["durability"] = durability(d)
+	return out
+
+
+## Applies [method props_and_durability] data: every key but "durability"
+## and [param skip] onto [param o], then the durability ([method set_durability]).
+static func apply_props_and_durability(o: Object, data: Dictionary, d: Durability, refs: SaveRefs, skip: PackedStringArray = []) -> void:
+	var fields := data.duplicate()
+	fields.erase("durability")
+	for k in skip:
+		fields.erase(k)
+	apply_props(o, fields)
+	set_durability(d, data.get("durability", {}), refs)
+
+
+## Save ids of the objects in [param list] that still exist; with
+## [param skip_dead], also without the ones flagged dead (ships).
+static func ids(list: Array, skip_dead: bool = false) -> Array:
+	var out := []
+	for o in list:
+		if is_instance_valid(o) and not (skip_dead and bool((o as Object).get(&"dead"))):
+			out.append(SaveIds.of(o))
+	return out
+
+
 ## A WeakRef that resolves to nothing (for links to objects that are gone).
 static func dead_ref() -> WeakRef:
 	var o := Object.new()

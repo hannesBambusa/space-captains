@@ -1,9 +1,9 @@
 class_name SpaceNav
 extends RefCounted
 ## Shared navigation helpers for every ship: world velocity of orbiting nodes,
-## velocity of points on a rotating belt, the bodies ships steer around (and
-## where they will be, [method predict_position]), belt lanes (the height
-## that clears a belt's rocks), warp hops (no-warp zones, travel time
+## velocity of points in a drifting asteroid cluster, the bodies ships steer
+## around (and where they will be, [method predict_position]), cluster lanes
+## (the height that clears a cluster's rocks when the way crosses it), warp hops (no-warp zones, travel time
 ## estimates) and the world-space container ships fly in while undocked.
 ##
 ## Bodies ([method obstacles]): each has a hard radius (the visible body:
@@ -18,7 +18,7 @@ extends RefCounted
 ## orbital velocities.
 
 const SPACE_ROOT_NAME := "Ships"
-## Belt lanes: the look-ahead covers this many seconds of flight on top of
+## Cluster lanes: the look-ahead covers this many seconds of flight on top of
 ## the distance a full climb takes.
 const LANE_LEAD_TIME := 2.5
 ## Rock band slack for "caught low inside a band", metres.
@@ -57,6 +57,16 @@ static var _obstacles: Array[Dictionary] = []
 static var _obstacle_source: SolarSystem
 
 
+## Distance between [param a] and [param b] on the plane (x, z).
+static func flat_distance(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
+
+
+## Length of [param v] on the plane (x, z).
+static func flat_length(v: Vector3) -> float:
+	return Vector2(v.x, v.z).length()
+
+
 ## Velocity (m/s, world axes) of [param node] caused by the orbits it rides on.
 static func world_velocity(node: Node) -> Vector3:
 	var v := Vector3.ZERO
@@ -91,43 +101,39 @@ static func height_gap(y: float, span: Vector2) -> float:
 	return 0.0
 
 
-## Velocity of a point riding on a rotating belt (belt centred on the origin).
-static func belt_point_velocity(belt: SystemBelt, world_pos: Vector3) -> Vector3:
-	if belt == null or belt.def == null or belt.def.rotation_period == 0.0:
+## Velocity of a point riding with an asteroid cluster (the whole clump
+## drifts on its orbit without turning, so every point moves alike).
+static func belt_point_velocity(belt: AsteroidCluster, _world_pos: Vector3 = Vector3.ZERO) -> Vector3:
+	if belt == null or belt.def == null:
 		return Vector3.ZERO
-	var w := -TAU / belt.def.rotation_period
-	var r := world_pos - belt.global_position
-	return Vector3(w * r.z, 0.0, -w * r.x)
+	return world_velocity(belt)
 
 
-## Point on the belt's centre line closest to [param world_pos] (on the plane).
-static func nearest_belt_point(belt: SystemBelt, world_pos: Vector3) -> Vector3:
-	var c := belt.global_position
-	var d := Vector3(world_pos.x - c.x, 0.0, world_pos.z - c.z)
-	if d.length_squared() < 1.0:
-		d = Vector3.RIGHT
-	return c + d.normalized() * belt.def.orbit_radius
+## Point on the cluster's rim facing [param world_pos] (inside: the point itself
+## at the cluster's height).
+static func nearest_belt_point(belt: AsteroidCluster, world_pos: Vector3) -> Vector3:
+	return belt.nearest_point(world_pos)
 
 
-## Straight-line distance from [param world_pos] to the belt's centre line.
-static func distance_to_belt(belt: SystemBelt, world_pos: Vector3) -> float:
-	var c := belt.global_position
-	return absf(Vector2(world_pos.x - c.x, world_pos.z - c.z).length() - belt.def.orbit_radius)
+## Flat distance from [param world_pos] to the cluster's rim (0 inside).
+static func distance_to_belt(belt: AsteroidCluster, world_pos: Vector3) -> float:
+	return belt.distance_to(world_pos)
 
 
-## The system's belts (empty outside a SolarSystem).
-static func belts(tree: SceneTree) -> Array[SystemBelt]:
-	var sys := tree.get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+## The system's clusters (empty outside a SolarSystem).
+static func belts(tree: SceneTree) -> Array[AsteroidCluster]:
+	var sys := SolarSystem.of(tree)
 	if sys:
 		return sys.belts
-	var none: Array[SystemBelt] = []
+	var none: Array[AsteroidCluster] = []
 	return none
 
 
-## Height (unsigned) a ship at [param pos] must hold to clear belt rocks: the
-## highest lane altitude of the belts whose band, padded by the largest rock
-## and the lane margin, lies on its way within the look-ahead (the straight
-## line toward [param goal], and the current motion [param vel]). 0 = clear.
+## Height (unsigned) a ship at [param pos] must hold to clear cluster rocks:
+## the highest lane altitude of the clusters whose footprint, padded by the
+## largest rock and the lane margin, lies on its way within the look-ahead
+## (the straight line toward [param goal], and the current motion
+## [param vel]). 0 = clear. Ships whose way misses every cluster fly level.
 ## [param climb_tan] = tangent of the steepest climb, sets how early to start.
 static func belt_lane_altitude(tree: SceneTree, pos: Vector3, vel: Vector3, goal: Vector3, climb_tan: float) -> float:
 	var need := 0.0
@@ -142,40 +148,36 @@ static func belt_lane_altitude(tree: SceneTree, pos: Vector3, vel: Vector3, goal
 		var alt := b.lane_altitude()
 		var lead := speed * LANE_LEAD_TIME + alt / maxf(climb_tan, 0.05) * 1.3 + 60.0
 		var c := Vector2(b.global_position.x, b.global_position.z)
-		var hw := b.rock_half_width() + b.def.max_scale + SystemBelt.LANE_MARGIN
-		var inner := b.def.orbit_radius - hw
-		var outer := b.def.orbit_radius + hw
+		var hw := b.rock_half_width() + b.def.max_scale + AsteroidCluster.LANE_MARGIN
 		var end := p + to_goal / gd * minf(gd, lead) if gd > 1.0 else p
-		var hit := _segment_meets_ring(p, end, c, inner, outer)
+		var hit := _segment_meets_disc(p, end, c, hw)
 		if not hit and speed > 2.0:
-			hit = _segment_meets_ring(p, p + v / speed * lead, c, inner, outer)
+			hit = _segment_meets_disc(p, p + v / speed * lead, c, hw)
 		if hit:
 			need = maxf(need, alt)
 	return need
 
 
-## The belt whose rock band (radially, plus the largest rock) holds
-## [param pos], or null.
-static func rock_band_at(tree: SceneTree, pos: Vector3) -> SystemBelt:
+## The cluster whose footprint (plus the largest rock) holds [param pos]
+## on the plane, or null.
+static func rock_band_at(tree: SceneTree, pos: Vector3) -> AsteroidCluster:
 	for b in belts(tree):
-		if b.def and distance_to_belt(b, pos) <= b.rock_half_width() + b.def.max_scale + ROCK_BAND_SLACK:
+		if b.def and b.distance_to(pos) <= b.def.max_scale + ROCK_BAND_SLACK:
 			return b
 	return null
 
 
-## True when the segment [param a]-[param b] (on the plane) passes through
-## the ring between radii [param inner] and [param outer] around [param c].
-static func _segment_meets_ring(a: Vector2, b: Vector2, c: Vector2, inner: float, outer: float) -> bool:
+## True when the segment [param a]-[param b] (on the plane) passes within
+## [param radius] of [param c].
+static func _segment_meets_disc(a: Vector2, b: Vector2, c: Vector2, radius: float) -> bool:
 	var ab := b - a
 	var t := clampf((c - a).dot(ab) / maxf(ab.length_squared(), 1e-6), 0.0, 1.0)
-	var r_min := (a + ab * t - c).length()
-	var r_max := maxf((a - c).length(), (b - c).length())
-	return r_min <= outer and r_max >= inner
+	return (a + ab * t - c).length() <= radius
 
 
 ## The world-space node undocked ships live under (created on first use).
 static func space_root(tree: SceneTree) -> Node3D:
-	var sys := tree.get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var sys := SolarSystem.of(tree)
 	var parent: Node = sys if sys else tree.current_scene
 	var root := parent.get_node_or_null(SPACE_ROOT_NAME) as Node3D
 	if root == null:
@@ -188,7 +190,7 @@ static func space_root(tree: SceneTree) -> Node3D:
 ## Bodies ships steer around: star, planets (with rings), moons, the home
 ## station hub. Built once per SolarSystem.
 static func obstacles(tree: SceneTree) -> Array[Dictionary]:
-	var sys := tree.get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var sys := SolarSystem.of(tree)
 	if sys == _obstacle_source and (sys == null or not _obstacles.is_empty()):
 		return _obstacles
 	_obstacle_source = sys
@@ -241,16 +243,16 @@ static func predict_position(node: Node3D, ahead: float) -> Vector3:
 
 
 ## Lane height (unsigned) for a straight warp from [param a] to [param b]:
-## the highest lane altitude of the belt bands the segment crosses, 0 when
-## none (a warp never crosses rocks at plane height).
+## the highest lane altitude of the clusters the segment crosses, 0 when
+## none (a warp never crosses rocks at their height).
 static func segment_lane_altitude(tree: SceneTree, a: Vector3, b: Vector3) -> float:
 	var need := 0.0
 	for belt in belts(tree):
 		if belt.def == null:
 			continue
 		var c := Vector2(belt.global_position.x, belt.global_position.z)
-		var hw := belt.rock_half_width() + belt.def.max_scale + SystemBelt.LANE_MARGIN
-		if _segment_meets_ring(Vector2(a.x, a.z), Vector2(b.x, b.z), c, belt.def.orbit_radius - hw, belt.def.orbit_radius + hw):
+		var hw := belt.rock_half_width() + belt.def.max_scale + AsteroidCluster.LANE_MARGIN
+		if _segment_meets_disc(Vector2(a.x, a.z), Vector2(b.x, b.z), c, hw):
 			need = maxf(need, belt.lane_altitude())
 	return need
 
@@ -259,14 +261,14 @@ static func segment_lane_altitude(tree: SceneTree, a: Vector3, b: Vector3) -> fl
 ## Home Station complex and shield bubble, every structure).
 static func no_warp_zones(tree: SceneTree) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
-	var sys := tree.get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var sys := SolarSystem.of(tree)
 	if sys and sys.home_station:
 		var r := NO_WARP_STATION
 		var bubble := StationShield.find(tree)
 		if bubble:
 			r = maxf(r, bubble.radius + 200.0)
 		out.append({"center": sys.home_station.global_position, "radius": r})
-	var mgr := tree.get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	var mgr := BuildingManager.of(tree)
 	if mgr:
 		for b in mgr.buildings:
 			if is_instance_valid(b):
@@ -296,18 +298,18 @@ static func travel_text(t: Vector2) -> String:
 ## "at Talon Reach", "near home", "near Verda": where [param pos] is, for
 ## event lines.
 static func place_name(tree: SceneTree, pos: Vector3) -> String:
-	var sys := tree.get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var sys := SolarSystem.of(tree)
 	if sys == null:
 		return ""
-	if sys.home_station and Vector2(pos.x - sys.home_station.global_position.x, pos.z - sys.home_station.global_position.z).length() < 3500.0:
+	if sys.home_station and flat_distance(pos, sys.home_station.global_position) < 3500.0:
 		return "near home"
 	for b in sys.belts:
-		if distance_to_belt(b, pos) < b.def.width * 0.5 + 900.0:
+		if b.distance_to(pos) < 900.0:
 			return "at %s" % b.def.name
 	var best := ""
 	var best_d := INF
 	for p in sys.planets:
-		var d := Vector2(pos.x - p.global_position.x, pos.z - p.global_position.z).length()
+		var d := flat_distance(pos, p.global_position)
 		if d < best_d:
 			best_d = d
 			best = p.def.name

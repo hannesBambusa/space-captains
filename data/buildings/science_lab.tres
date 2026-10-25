@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="BuildingDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_def.gd" id="1_bdef"]
+[ext_resource type="Script" path="res://scripts/buildings/science_lab.gd" id="2_lab"]
+
+[resource]
+script = ExtResource("1_bdef")
+id = &"science_lab"
+display_name = "Science Lab"
+short_label = "Science Lab"
+description = "Station addon: research labs. Hire up to 3 researchers and fund projects; the researchers pick what they work on by field and personality. Research unlocks new modules for the Factory and new buildings."
+model_path = "res://assets/models/station/addons/addon_science.glb"
+cost_credits = 700
+cost_iron = 150
+cost_titanium = 40
+build_time = 25.0
+footprint_radius = 22.0
+max_count = 1
+placeholder_tint = Color(0.55, 0.75, 1, 1)
+service_script = ExtResource("2_lab")
+station_addon = true

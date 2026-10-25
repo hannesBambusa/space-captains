@@ -1,4 +1,4 @@
-// Asteroid material for MultiMesh belts. Carries the glb's PBR inputs (copied
+// Asteroid material for MultiMesh belts and clusters. Carries the glb's PBR inputs (copied
 // from its StandardMaterial3D at load time) and tumbles each instance in the
 // vertex stage so thousands of asteroids spin for free.
 // INSTANCE_CUSTOM: x = axis azimuth (0..1), y = axis z (0..1), z = spin rad/s, w = phase/tint seed.
@@ -36,6 +36,9 @@ instance uniform float emission_boost = 1.0;
 // lod_fade_start and lod_fade_end (camera distance, metres). 0 = off.
 instance uniform float lod_fade_start = 0.0;
 instance uniform float lod_fade_end = 0.0;
+// Per MultiMeshInstance3D cluster thinning: instances whose seed
+// (INSTANCE_CUSTOM.w) is below thin_level shrink away (0 = all shown).
+instance uniform float thin_level = 0.0;
 // Slight per-instance brightness variation so repeated meshes read as different rocks.
 uniform float tint_variation : hint_range(0.0, 0.5) = 0.18;
 
@@ -61,6 +64,9 @@ void vertex() {
 	if (lod_fade_end > 0.0) {
 		float d = distance(MODEL_MATRIX[3].xyz, INV_VIEW_MATRIX[3].xyz);
 		lod = 1.0 - smoothstep(lod_fade_start, lod_fade_end, d);
+	}
+	if (thin_level > 0.0) {
+		lod *= smoothstep(thin_level, thin_level + 0.04, INSTANCE_CUSTOM.w);
 	}
 	VERTEX = rot * VERTEX * lod;
 	NORMAL = rot * NORMAL;

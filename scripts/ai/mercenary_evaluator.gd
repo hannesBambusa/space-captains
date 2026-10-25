@@ -50,7 +50,6 @@ const NEEDS_REPAIRS := "Needs repairs first"
 const NO_MINER := "No miner to escort"
 const GRUDGE_PAY := 1.4
 const LONE_WOLF_ESCORT := 0.25
-const LONE_WOLF_BONUS := 0.1
 const TOO_STRONG := "Too strong to take on alone"
 const FLEET_SHORT := "Not enough mercenaries free for a fleet"
 const FLEET_TOO_WEAK := "Too dangerous for the current fleet"
@@ -93,14 +92,14 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 	var e := Evaluation.new()
 	e.contract = contract
 	var site := contract.get_site_position(brain.home_position())
-	var km := Combat.flat_distance(site, brain.home_position()) / 1000.0
+	var km := SpaceNav.flat_distance(site, brain.home_position()) / 1000.0
 	var danger := contract.get_danger()
 	var escort := contract is EscortContract
 	var scale := ESCORT_PAY_SCALE if escort else BOUNTY_PAY_SCALE
-	var pay := prof.pay_weight * float(contract.reward) / scale * (cap.pay_scale() if cap else 1.0)
+	var pay := pay_term(brain, float(contract.reward), scale)
 	var trip := travel_of(brain, km)
-	var dist := prof.distance_weight * (trip.x + trip.y) / MERC_TRAVEL_SCALE_S
-	var dang := prof.danger_weight * pow(float(maxi(danger - 1, 0)), 2.0) / 4.0 * (cap.danger_scale() if cap else 1.0)
+	var dist := distance_term(brain, trip, MERC_TRAVEL_SCALE_S)
+	var dang := danger_term(brain, danger)
 	if escort:
 		dang *= ESCORT_DANGER_SHARE
 	dang *= 1.0 + DAMAGED_DANGER * (1.0 - brain.ship.hull_fraction())
@@ -146,7 +145,7 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 				too_strong = true
 			e.terms["pay"] = pay
 			e.terms["danger"] = dang
-	var noise := brain.rng.randf_range(-prof.noise, prof.noise)
+	var noise := noise_of(brain)
 	e.utility = pay - dist - dang + loyal + noise
 	e.terms["loyal"] = loyal
 	e.terms["noise"] = noise
@@ -156,7 +155,7 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 		e.reason = fleet_block
 	elif contract.is_paused():
 		e.reason = CANT_PAY
-	elif brain.ship.hull_fraction() < MIN_HULL and RepairBay.can_afford(brain.ship):
+	elif RepairBay.should_repair(brain.ship, MIN_HULL):
 		e.reason = NEEDS_REPAIRS
 	elif escort and (contract as EscortContract).ward != null and (contract as EscortContract).pick_ward() == null:
 		e.reason = NO_MINER
@@ -182,11 +181,11 @@ func evaluate_fleet_join(brain: CaptainBrain, fleet: MercFleet) -> Evaluation:
 		e.reason = FLEET_FULL
 		return e
 	var heads := float(fleet.members.size() + 1)
-	var km := Combat.flat_distance(brain.ship.global_position, fleet.rally_point()) / 1000.0
-	var pay := prof.pay_weight * fleet.share_for_next() / BOUNTY_PAY_SCALE * (cap.pay_scale() if cap else 1.0)
+	var km := SpaceNav.flat_distance(brain.ship.global_position, fleet.rally_point()) / 1000.0
+	var pay := pay_term(brain, fleet.share_for_next(), BOUNTY_PAY_SCALE)
 	var trip := travel_of(brain, km)
-	var dist := prof.distance_weight * (trip.x + trip.y) / MERC_TRAVEL_SCALE_S
-	var dang := prof.danger_weight * pow(float(maxi(bounty.get_danger() - 1, 0)), 2.0) / 4.0 * (cap.danger_scale() if cap else 1.0) / heads
+	var dist := distance_term(brain, trip, MERC_TRAVEL_SCALE_S)
+	var dang := danger_term(brain, bounty.get_danger()) / heads
 	# Combined power: a fleet that covers the need (with this ship) weighs less.
 	var with_me := fleet.power() + MercFleet.power_of(brain.ship)
 	var cover := clampf(MercFleet.target_need(bounty.target) * MercFleet.FLEET_POWER_SHARE / maxf(with_me, 0.1), JOIN_COVER.x, JOIN_COVER.y)
@@ -195,7 +194,7 @@ func evaluate_fleet_join(brain: CaptainBrain, fleet: MercFleet) -> Evaluation:
 	if grudge:
 		pay *= GRUDGE_PAY
 	var loyal := cap.loyalty_bonus() if cap else 0.0
-	var noise := brain.rng.randf_range(-prof.noise, prof.noise)
+	var noise := noise_of(brain)
 	e.utility = pay - dist - dang + loyal + noise
 	var chance := JOIN_BASE + JOIN_PER_TEAMWORK * float((cap.effective_teamwork() if cap else 5) - 1)
 	if cap:
@@ -208,7 +207,7 @@ func evaluate_fleet_join(brain: CaptainBrain, fleet: MercFleet) -> Evaluation:
 	e.terms = {"pay": pay, "distance": dist, "danger": dang, "km": km, "join_chance": chance, "join_fleet": true, "loyal": loyal, "noise": noise,
 			"share": fleet.share_for_next(), "heads": heads, "reward": bounty.reward, "danger_level": bounty.get_danger(), "base_danger": bounty.get_danger(),
 			"grudge": grudge, "leader": fleet.leader_name, "cover": cover, "completes": completes, "warp_s": trip.x, "flight_s": trip.y, "pay_div": BOUNTY_PAY_SCALE, "time_div": MERC_TRAVEL_SCALE_S}
-	if brain.ship.hull_fraction() < MIN_HULL and RepairBay.can_afford(brain.ship):
+	if RepairBay.should_repair(brain.ship, MIN_HULL):
 		e.reason = NEEDS_REPAIRS
 	elif grudge:
 		e.accept = true

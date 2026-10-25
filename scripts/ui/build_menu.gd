@@ -7,7 +7,7 @@ extends VBoxContainer
 ## with the short resource in red when unaffordable, show a lock at the
 ## limit or with no free addon bay, and light up while placing. Hovering a
 ## tile shows the [BuildInfoCard] (cost, build time, what it does, the
-## DefenseStats numbers, why it cannot be built). Clicking or the hotkey
+## DefenseStats numbers, why it cannot be built, e.g. "Needs research: X"). Clicking or the hotkey
 ## arms placement; while placing, a hint line above the bar shows the
 ## controls and why a spot is invalid.
 
@@ -128,6 +128,7 @@ func setup(owner_hud: HUD) -> void:
 		if zones:
 			zones.zones_changed.connect(_refresh)
 	Economy.changed.connect(func(_c: int, _m: int) -> void: _refresh())
+	Research.changed.connect(_refresh)
 	if hud.manager:
 		hud.manager.building_added.connect(func(_b: Building) -> void: _refresh())
 		hud.manager.building_changed.connect(func(_b: Building) -> void: _refresh())
@@ -233,7 +234,7 @@ static func cost_entries(def: BuildingDef) -> Array[Dictionary]:
 	for i in mini(ore.size(), 3):
 		if ore[i] > 0:
 			out.append({"icon": icons[i], "text": str(ore[i]), "short": Economy.ore[i] < ore[i], "color": Economy.ORE_COLORS[i],
-					"have": UIUtil.amount(Economy.ore[i]), "full": "%d %s" % [ore[i], Economy.ORE_NAMES[i].to_lower()]})
+					"have": UIUtil.amount(Economy.ore[i]), "full": "%d %s" % [ore[i], Economy.ore_name(i)]})
 	return out
 
 

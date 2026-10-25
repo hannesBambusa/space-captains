@@ -153,7 +153,7 @@ static func status_text(c: Captain, ship: Ship) -> String:
 		return "Waiting for a ship" if c.stranded or not is_instance_valid(c.ship) else "Lost"
 	var br := ship.brain
 	var text := ship.get_status_text()
-	if br and br.state == CaptainBrain.State.MINING and br.trip and br.trip.contract and ship.warp_status_text().is_empty():
+	if br and br.state == CaptainBrain.State.MINING and br.trip and br.trip.contract and ship.warp_status_text().is_empty() and not (ship is LanderShip):
 		text = "Mining at %s" % br.trip.contract.get_target_name()
 	if br and not br.last_refusal.is_empty() and (br.state == CaptainBrain.State.DOCKED or br.state == CaptainBrain.State.EVALUATING):
 		text += ": " + br.last_refusal.to_lower()
@@ -440,7 +440,10 @@ func _draw_compact() -> void:
 	var wallet := UIUtil.amount(int(_data["wallet"]))
 	var wsz := _f_num.get_string_size(wallet, HORIZONTAL_ALIGNMENT_LEFT, -1, 11)
 	_text(_f_num, Vector2(right - wsz.x, base - 0.5), wallet, 11, Color(H.CREDITS, 0.7))
-	right -= 44.0
+	var coin := H.icon(&"credits_small")
+	if coin:
+		draw_texture_rect(coin, Rect2(right - wsz.x - 11.0, base - 9.0, 9.0, 9.0), false, Color(H.CREDITS, 0.7))
+	right -= 52.0
 	# Hull over shield, tiny, inline.
 	var bar_w := 30.0
 	var bx := right - bar_w

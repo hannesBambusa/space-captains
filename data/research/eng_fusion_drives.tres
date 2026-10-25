@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"eng_fusion_drives"
+display_name = "Fusion torch drives"
+field = 0
+tier = 3
+cost_credits = 1200
+cost_titanium = 60
+cost_crystal = 50
+research_time = 260.0
+prerequisites = Array[StringName]([&"eng_ion_tuning"])
+unlock_modules = Array[StringName]([&"ion_drive_3", &"combat_thrusters_3"])
+tags = PackedStringArray("economy")
+description = "Small fusion torches for fast hulls: Mk III drives and combat thrusters."

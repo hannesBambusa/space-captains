@@ -171,6 +171,8 @@ static func type_icon(c: Contract) -> StringName:
 		return &"st_escort"
 	if c is SalvageContract:
 		return &"scrap"
+	if c is PlanetRaidContract:
+		return &"planet"
 	return &"tab_contracts"
 
 
@@ -180,7 +182,7 @@ func open(c: Contract) -> void:
 	var t := ContractRow._focus_target(c, hud)
 	if hud.camera and is_instance_valid(t):
 		hud.camera.focus_on(t)
-	if hud.selection and is_instance_valid(c.target) and (c.target is SystemBelt or c.target is Ship or c.target is ScavengerDen or c.target is ScrapField):
+	if hud.selection and is_instance_valid(c.target) and (c.target is AsteroidCluster or c.target is PlanetBody or c.target is Ship or c.target is ScavengerDen or c.target is ScrapField):
 		hud.selection.select(c.target)
 
 

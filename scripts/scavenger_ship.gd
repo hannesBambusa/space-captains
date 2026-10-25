@@ -15,6 +15,9 @@ var is_raider: bool = false
 ## Share of a miner's load aboard (stolen).
 var loot: float = 0.0
 var ai: ScavengerBrain
+## False: a subclass flies the ship itself (ClaimConstructor); the brain
+## stays for status and save but does not steer.
+var ai_driven: bool = true
 var attack_side: float = 1.0
 
 
@@ -59,7 +62,7 @@ func _on_ready_ship() -> void:
 func sim_step(dt: float) -> void:
 	if dead:
 		return
-	if ai:
+	if ai and ai_driven:
 		ai.update(dt)
 	super.sim_step(dt)
 
@@ -141,7 +144,4 @@ func leave_map() -> void:
 	if dead:
 		return
 	dead = true
-	remove_from_group(GROUP)
-	remove_from_group(Combat.GROUP)
-	remove_from_group(RTSCamera.FOCUS_GROUP)
-	queue_free()
+	_leave_world()

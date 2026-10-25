@@ -100,7 +100,7 @@ func get_status_text() -> String:
 	var text := "Holding fire" if not fire_at_will else MODE_NAMES[mode]
 	if Combat.is_live_target(target):
 		text += ": %s" % String(target.call(&"get_display_name"))
-	return text + (", repairing" if repairing else "")
+	return text + (", repairing" if repair.repairing else "")
 
 
 func set_fire_at_will(on: bool) -> void:
@@ -158,7 +158,7 @@ func _pick_target() -> void:
 	var best: Node3D = null
 	var best_score := INF
 	for h in Combat.hostiles_near(get_tree(), global_position, weapon_range + 60.0, Combat.Faction.PLAYER):
-		var score := Combat.flat_distance(global_position, h.global_position)
+		var score := SpaceNav.flat_distance(global_position, h.global_position)
 		var sc := h as ScavengerShip
 		if sc:
 			if sc.is_raider:
@@ -196,7 +196,7 @@ func _angles_to(world_pos: Vector3) -> Vector2:
 	var yaw := atan2(-local.x, -local.z)
 	var pivot := parent.to_local(_pitch_node.global_position)
 	var rel := parent.to_local(world_pos) - pivot
-	var flat := Vector2(rel.x, rel.z).length()
+	var flat := SpaceNav.flat_length(rel)
 	var pitch := atan2(rel.y, maxf(flat, 0.1))
 	# Over the -Z side (yaw near 0) the barrels would clip the port block.
 	var port := 1.0 - smoothstep(deg_to_rad(40.0), deg_to_rad(80.0), absf(yaw))

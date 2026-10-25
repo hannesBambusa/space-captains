@@ -7,7 +7,8 @@ extends RefCounted
 ## now; BountyContract (target: an enemy ship or den, paid on destruction) and
 ## EscortContract (target: a miner or a mining contract, paid per completed
 ## trip) later; SalvageContract (target: a scrap field, paid per load) in
-## stage 3. The board, the UI rows and the brain only use this base API.
+## stage 3; PlanetRaidContract (target: a planet or moon, paid per load) in
+## phase C2. The board, the UI rows and the brain only use this base API.
 ##
 ## Status: OPEN (no one on it), ACTIVE (at least one taker on a trip),
 ## COMPLETED (limit reached), CANCELLED (withdrawn by the player). Takers are
@@ -15,15 +16,15 @@ extends RefCounted
 
 signal changed(contract: Contract)
 
-enum Type { MINING, BOUNTY, ESCORT, SALVAGE }
+enum Type { MINING, BOUNTY, ESCORT, SALVAGE, PLANET_RAID }
 enum Status { OPEN, ACTIVE, COMPLETED, CANCELLED }
 
-const TYPE_NAMES: PackedStringArray = ["Mining", "Bounty", "Escort", "Salvage"]
+const TYPE_NAMES: PackedStringArray = ["Mining", "Bounty", "Escort", "Salvage", "Planet raid"]
 const STATUS_NAMES: PackedStringArray = ["Open", "Active", "Completed", "Cancelled"]
 
 var id: int = 0
 var type: Type = Type.MINING
-## What the contract is about (a belt, an enemy, a ship to escort).
+## What the contract is about (an asteroid cluster, an enemy, a ship to escort).
 var target: Node3D
 ## Credits per unit of work (per load, per kill, per trip).
 var reward: int = 0
@@ -85,7 +86,7 @@ func is_paused() -> bool:
 	return not is_finished() and pays_per_delivery() and reward > 0 and Economy.credits < reward
 
 
-## Short name of the target, e.g. "Cinder Belt".
+## Short name of the target, e.g. "Cinder Cluster".
 func get_target_name() -> String:
 	return String(target.name) if is_instance_valid(target) else "?"
 

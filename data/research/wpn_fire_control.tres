@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"wpn_fire_control"
+display_name = "Fire control computers"
+field = 1
+tier = 2
+cost_credits = 550
+cost_iron = 50
+cost_titanium = 30
+research_time = 150.0
+prerequisites = Array[StringName]([&"wpn_ballistic_calibration"])
+unlock_modules = Array[StringName]([&"targeting_array_2"])
+tags = PackedStringArray("weapons")
+description = "Lead-calculating sights: the Mk II targeting array hits more often."

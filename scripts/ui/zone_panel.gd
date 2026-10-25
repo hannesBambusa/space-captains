@@ -71,12 +71,12 @@ func _ready() -> void:
 	v.add_child(rrow)
 	rrow.add_child(UIUtil.label("Radius", &"DimLabel"))
 	rrow.add_child(UIUtil.spacer())
-	_radius_minus = _step_button("-", "Smaller (Shift: 1 km)")
+	_radius_minus = UIUtil.step_button("-", "Smaller (Shift: 1 km)")
 	_radius_minus.pressed.connect(_step_radius.bind(-1))
 	rrow.add_child(_radius_minus)
 	_radius_value = _value_label()
 	rrow.add_child(_radius_value)
-	_radius_plus = _step_button("+", "Larger (Shift: 1 km)")
+	_radius_plus = UIUtil.step_button("+", "Larger (Shift: 1 km)")
 	_radius_plus.pressed.connect(_step_radius.bind(1))
 	rrow.add_child(_radius_plus)
 
@@ -86,12 +86,12 @@ func _ready() -> void:
 	v.add_child(brow)
 	brow.add_child(UIUtil.label("Per raider killed inside", &"DimLabel"))
 	brow.add_child(UIUtil.spacer())
-	_bounty_minus = _step_button("-", "Lower (Shift: 50)")
+	_bounty_minus = UIUtil.step_button("-", "Lower (Shift: 50)")
 	_bounty_minus.pressed.connect(_step_bounty.bind(-1))
 	brow.add_child(_bounty_minus)
 	_bounty_value = _value_label()
 	brow.add_child(_bounty_value)
-	_bounty_plus = _step_button("+", "Raise (Shift: 50)")
+	_bounty_plus = UIUtil.step_button("+", "Raise (Shift: 50)")
 	_bounty_plus.pressed.connect(_step_bounty.bind(1))
 	brow.add_child(_bounty_plus)
 	var grow := HBoxContainer.new()
@@ -163,10 +163,10 @@ func refresh() -> void:
 		return
 	var z := zone
 	_title.text = z.zone_name
-	_anchor.text = "Moves with the station" if z.anchored else "Fixed in space"
+	_anchor.text = z.anchor_text()
 	var sys := hud.solar_system if hud else null
 	if sys and sys.home_station:
-		_distance.text = "%.1f km" % (Combat.flat_distance(z.global_position, sys.home_station.global_position) / 1000.0)
+		_distance.text = "%.1f km" % (SpaceNav.flat_distance(z.global_position, sys.home_station.global_position) / 1000.0)
 	var patrolling := 0
 	for n in get_tree().get_nodes_in_group(Ship.GROUP):
 		var s := n as Ship
@@ -250,9 +250,3 @@ func _value_label() -> Label:
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	return l
 
-
-func _step_button(text: String, tip: String) -> Button:
-	var b := UIUtil.button(text, &"IconButton")
-	b.custom_minimum_size = Vector2(28.0, 24.0)
-	b.tooltip_text = tip
-	return b

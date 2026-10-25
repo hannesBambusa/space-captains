@@ -72,7 +72,7 @@ func _goal() -> Dictionary:
 	if is_instance_valid(home):
 		var p := home.to_global(home.approach_point())
 		return {"pos": p, "vel": SpaceNav.world_velocity(home)}
-	var sys := get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var sys := SolarSystem.of(get_tree())
 	if sys and sys.home_station:
 		var st := sys.home_station
 		return {"pos": st.global_position, "vel": SpaceNav.world_velocity(st)}
@@ -89,10 +89,7 @@ func _arrive() -> void:
 	elif captain:
 		captain.alive = false
 		EventLog.post("%s reached the station with no outpost to return to and retired" % captain.captain_name, EventLog.Kind.LOSS)
-	remove_from_group(GROUP)
-	remove_from_group(Combat.GROUP)
-	remove_from_group(RTSCamera.FOCUS_GROUP)
-	queue_free()
+	_leave_world()
 
 
 func _on_destroyed(killer: Node3D) -> void:
@@ -103,7 +100,5 @@ func _on_destroyed(killer: Node3D) -> void:
 		captain.ship = null
 	if is_instance_valid(home):
 		home.forget_captain(captain)
-	var by := ""
-	if is_instance_valid(killer) and killer.has_method(&"get_display_name"):
-		by = " by %s" % String(killer.call(&"get_display_name"))
+	var by := Combat.by_suffix(killer)
 	EventLog.post("%s was killed in their escape pod%s" % [captain.captain_name, by], EventLog.Kind.LOSS, null, global_position)

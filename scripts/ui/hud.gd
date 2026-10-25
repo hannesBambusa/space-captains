@@ -31,6 +31,8 @@ var zone_placement: ZonePlacement
 var selection: SelectionController
 ## Built in code (bottom right, like the other panels).
 var zone_panel: ZonePanel
+## Built in code: the selected planet or moon (planet raids).
+var planet_panel: PlanetPanel
 ## Built in code: the pilot list under the minimap.
 var pilots: PilotColumn
 ## Built in code: posted contracts, bottom left above the event feed.
@@ -47,9 +49,9 @@ var _layout_left := 0.0
 func _ready() -> void:
 	add_to_group(GROUP)
 	var tree := get_tree()
-	solar_system = tree.get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
-	camera = tree.get_first_node_in_group("rts_camera") as RTSCamera
-	manager = tree.get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	solar_system = SolarSystem.of(tree)
+	camera = RTSCamera.of(tree)
+	manager = BuildingManager.of(tree)
 	placement = tree.get_first_node_in_group(PlacementController.GROUP) as PlacementController
 	zone_placement = tree.get_first_node_in_group(ZonePlacement.GROUP) as ZonePlacement
 	selection = tree.get_first_node_in_group(SelectionController.GROUP) as SelectionController
@@ -67,6 +69,18 @@ func _ready() -> void:
 	zone_panel.offset_bottom = -12.0
 	zone_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	zone_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	planet_panel = PlanetPanel.new()
+	planet_panel.name = "PlanetPanel"
+	$Root.add_child(planet_panel)
+	$Root.move_child(planet_panel, zone_panel.get_index() + 1)
+	for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+		planet_panel.set_anchor(side, 1.0)
+	planet_panel.offset_left = -392.0
+	planet_panel.offset_top = -12.0
+	planet_panel.offset_right = -12.0
+	planet_panel.offset_bottom = -12.0
+	planet_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	planet_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	pilots = PilotColumn.new()
 	pilots.name = "Pilots"
 	$Root.add_child(pilots)
@@ -82,6 +96,7 @@ func _ready() -> void:
 	building_panel.setup(self)
 	belt_panel.setup(self)
 	zone_panel.setup(self)
+	planet_panel.setup(self)
 	captain_panel.setup(self)
 	target_panel.setup(self)
 	event_feed.setup(self)
@@ -89,6 +104,7 @@ func _ready() -> void:
 	minimap.setup(self, ship_markers)
 	pilots.setup(self)
 	top_bar.home_pressed.connect(fly_home)
+	top_bar.research_pressed.connect(select_lab)
 	contracts.setup(self)
 	get_viewport().size_changed.connect(_layout_right)
 	_layout_right.call_deferred()
@@ -105,11 +121,13 @@ func _process(delta: float) -> void:
 		_layout_bottom_left()
 
 
-## The bottom-right selection panels (the Factory panel once it exists).
+## The bottom-right selection panels (the Factory and Science Lab panels once they exist).
 func selection_panels() -> Array[PanelContainer]:
-	var out: Array[PanelContainer] = [building_panel, belt_panel, captain_panel, target_panel, zone_panel]
+	var out: Array[PanelContainer] = [building_panel, belt_panel, captain_panel, target_panel, zone_panel, planet_panel]
 	if building_panel and is_instance_valid(building_panel.factory_panel) and building_panel.factory_panel.is_inside_tree():
 		out.append(building_panel.factory_panel)
+	if building_panel and is_instance_valid(building_panel.lab_panel) and building_panel.lab_panel.is_inside_tree():
+		out.append(building_panel.lab_panel)
 	return out
 
 
@@ -212,6 +230,13 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 ## Flies the camera to the home station and follows it (its focus distance),
 ## like a double click on it.
+## Selects the Science Lab (the top bar's research box).
+func select_lab() -> void:
+	var lab := ScienceLab.find(get_tree())
+	if lab and selection:
+		selection.select(lab.building)
+
+
 func fly_home() -> void:
 	if camera and solar_system and is_instance_valid(solar_system.home_station):
 		camera.focus_on(solar_system.home_station)

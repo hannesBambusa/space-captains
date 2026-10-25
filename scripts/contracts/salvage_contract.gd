@@ -1,5 +1,5 @@
 class_name SalvageContract
-extends Contract
+extends LoadContract
 ## Salvage a scrap field. Every delivered load goes to the salvager's
 ## Salvage Yard, which pays [constant FAIR_REWARD] per load from its own funds
 ## and reprocesses the scrap into ore (SalvageYard). One load is
@@ -32,8 +32,6 @@ static var _free: Dictionary = {}
 static var _next_free_id := -1
 
 var field: ScrapField
-var loads_delivered: int = 0
-var loads_in_flight: int = 0
 var materials_delivered: int = 0
 var rare_chance: float = RARE_CHANCE
 ## Free salvage (not on the board, the yard's pay only).
@@ -63,12 +61,19 @@ static func free_for(f: ScrapField) -> SalvageContract:
 	c.id = _next_free_id
 	_next_free_id -= 1
 	c.created_time = SimClock.time
+	_register_free(f, c)
+	return c
+
+
+## Keeps [param c] as [param f]'s free salvage until the field is stripped
+## or gone.
+static func _register_free(f: ScrapField, c: SalvageContract) -> void:
+	var key := f.get_instance_id()
 	_free[key] = c
 	f.depleted.connect(func(_f: ScrapField) -> void: c.mark_done())
 	f.tree_exiting.connect(func() -> void:
 		c.mark_done()
 		_free.erase(key))
-	return c
 
 
 ## Free salvage contracts open now, one per scrap field with scrap left.
@@ -127,35 +132,13 @@ func is_available() -> bool:
 	return field.amount - reserved_loads(field) * LOAD_SCRAP > 0
 
 
-func add_taker(ship: Node) -> bool:
-	if not super.add_taker(ship):
-		return false
-	loads_in_flight += 1
-	return true
-
-
-## Ends a trip. [param delivered] = the load reached the yard.
-func finish_trip(ship: Node, delivered: bool) -> void:
-	if not takers.has(ship):
-		return
-	loads_in_flight = maxi(loads_in_flight - 1, 0)
-	if delivered:
-		loads_delivered += 1
-	takers.erase(ship)
-	if not is_finished() and (not is_instance_valid(field) or field.amount <= 0) and takers.is_empty():
-		_set_status(Status.COMPLETED)
-	else:
-		_update_status()
+func _is_exhausted() -> bool:
+	return not is_instance_valid(field) or field.amount <= 0
 
 
 ## The field was stripped or left: no new takers; done once the last trip ends.
 func mark_done() -> void:
-	if is_finished():
-		return
-	if takers.is_empty():
-		_set_status(Status.COMPLETED)
-	else:
-		changed.emit(self)
+	_complete_when_idle()
 
 
 func get_target_name() -> String:
@@ -183,22 +166,22 @@ func get_danger() -> int:
 	return danger_at(field.get_tree(), field.global_position)
 
 
-## Danger 1..5 at [param pos]: living dens nearby, else the belt it lies in.
+## Danger 1..5 at [param pos]: living dens nearby, else the cluster it lies in.
 static func danger_at(tree: SceneTree, pos: Vector3) -> int:
-	var sys := tree.get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var sys := SolarSystem.of(tree)
 	if sys == null:
 		return 1
 	var d := 1
 	for den in sys.dens:
 		if not is_instance_valid(den) or not den.is_alive():
 			continue
-		var dist := Combat.flat_distance(pos, den.global_position)
+		var dist := SpaceNav.flat_distance(pos, den.global_position)
 		if dist < DEN_NEAR:
 			d = maxi(d, 4)
 		elif dist < DEN_FAR:
 			d = maxi(d, 3)
 	for b in sys.belts:
-		if SpaceNav.distance_to_belt(b, pos) < b.def.width * 0.5 + 900.0:
+		if b.distance_to(pos) < 900.0:
 			d = maxi(d, b.danger)
 	return d
 
@@ -207,11 +190,6 @@ static func danger_at(tree: SceneTree, pos: Vector3) -> int:
 static func restore_free(f: ScrapField, c: SalvageContract) -> void:
 	if f == null or c == null:
 		return
-	var key := f.get_instance_id()
 	c.free = true
-	_free[key] = c
 	_next_free_id = mini(_next_free_id, c.id - 1)
-	f.depleted.connect(func(_f: ScrapField) -> void: c.mark_done())
-	f.tree_exiting.connect(func() -> void:
-		c.mark_done()
-		_free.erase(key))
+	_register_free(f, c)

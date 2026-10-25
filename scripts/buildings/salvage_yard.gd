@@ -73,11 +73,7 @@ var _buy_timer := 0.0
 
 
 static func find(tree: SceneTree) -> SalvageYard:
-	for n in tree.get_nodes_in_group(GROUP):
-		var y := n as SalvageYard
-		if y and is_instance_valid(y.building) and y.building.is_active():
-			return y
-	return null
+	return Building.first_active_service(tree, GROUP) as SalvageYard
 
 
 ## The yard [param ship] belongs to, or null.
@@ -165,6 +161,11 @@ func accept_load(ship: Ship, amount: int, fraction: float, den_ruins: bool, rare
 	if short > 0 and cap:
 		owed.append({"captain": cap, "amount": short})
 	delivery_count += 1
+	# Salvagers deliver without a mining contract: the yard plays its own
+	# unload (arm, conveyor, silo) for the scrap.
+	var fx := building.get_unload_fx() if building and is_instance_valid(building) else null
+	if fx and amount > 0:
+		fx.play_unload(Economy.Ore.IRON, amount, CaptainBrain.UNLOAD_TIME)
 	deliveries.append({"time": SimClock.time, "captain": cap.captain_name if cap else "?", "scrap": amount, "paid": paid, "owed": short, "rare": rare})
 	if deliveries.size() > MAX_DELIVERIES:
 		deliveries.remove_at(0)
@@ -254,10 +255,10 @@ func _auto_buy() -> void:
 		var before := Economy.credits
 		var n := buy(i, stock[i], credit_floor)
 		if n > 0:
-			parts.append("%d %s" % [n, Economy.ORE_NAMES[i].to_lower()])
+			parts.append("%d %s" % [n, Economy.ore_name(i)])
 			spent += before - Economy.credits
 	if not parts.is_empty():
-		EventLog.post("Bought %s from the Salvage Yard (-%s cr)" % [", ".join(parts), UIUtil.amount(spent)],
+		EventLog.post("Bought %s from the Salvage Yard (-%s cr)" % [", ".join(parts), Fmt.amount(spent)],
 				EventLog.Kind.INFO, building, Vector3.INF, "salvage_yard_buy")
 
 

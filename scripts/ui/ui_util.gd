@@ -36,6 +36,58 @@ static func button(text: String, variation: StringName = &"") -> Button:
 	return b
 
 
+## A small "-" / "+" IconButton for steppers.
+static func step_button(text: String, tip: String = "", size: Vector2 = Vector2(28.0, 24.0)) -> Button:
+	var b := button(text, &"IconButton")
+	b.custom_minimum_size = size
+	b.tooltip_text = tip
+	return b
+
+
+## "Title ... [-] value [+]" row added to [param parent]; [param step] gets
+## -1 or 1. Returns [value Label, minus Button, plus Button].
+static func stepper_row(parent: Container, title: String, step: Callable, minus_tip: String = "", plus_tip: String = "") -> Array:
+	var row := HBoxContainer.new()
+	parent.add_child(row)
+	row.add_child(label(title, &"DimLabel"))
+	row.add_child(spacer())
+	var minus := step_button("-", minus_tip)
+	minus.pressed.connect(step.bind(-1))
+	row.add_child(minus)
+	var value := label("", &"ValueLabel")
+	value.custom_minimum_size.x = 74.0
+	value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	row.add_child(value)
+	var plus := step_button("+", plus_tip)
+	plus.pressed.connect(step.bind(1))
+	row.add_child(plus)
+	return [value, minus, plus]
+
+
+## A thin bar meter (PipMeter BAR, 0..1).
+static func bar(color: Color, size: Vector2) -> PipMeter:
+	var b := PipMeter.new()
+	b.style = PipMeter.Style.BAR
+	b.max_value = 1.0
+	b.color = color
+	b.custom_minimum_size = size
+	return b
+
+
+## "Title [bar] text" in a 3-column [param grid]. Returns [PipMeter, Label].
+static func bar_row(grid: GridContainer, title: String, color: Color, title_width: float, bar_size: Vector2) -> Array:
+	var l := label(title, &"DimLabel")
+	l.custom_minimum_size.x = title_width
+	grid.add_child(l)
+	var b := bar(color, bar_size)
+	grid.add_child(b)
+	var t := label("", &"DimLabel")
+	t.custom_minimum_size.x = 80.0
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	grid.add_child(t)
+	return [b, t]
+
+
 ## Makes every Control under [param node] ignore keyboard focus.
 static func no_focus(node: Node) -> void:
 	if node is Control:
@@ -63,24 +115,16 @@ static func rank_badge(rank: int) -> Label:
 	return l
 
 
-## "3:05" from sim seconds.
+## "3:05" from sim seconds (Fmt.clock).
 static func clock(t: float) -> String:
-	var s := int(t)
-	return "%d:%02d" % [floori(s / 60.0), s % 60]
+	return Fmt.clock(t)
 
 
-## "2,000" style thousands separators.
+## "2,000" style thousands separators (Fmt.amount).
 static func amount(value: int) -> String:
-	var s := str(absi(value))
-	var out := ""
-	while s.length() > 3:
-		out = "," + s.right(3) + out
-		s = s.left(s.length() - 3)
-	return ("-" if value < 0 else "") + s + out
+	return Fmt.amount(value)
 
 
-## "Miner" -> "Miners", "Mercenary" -> "Mercenaries".
+## "Miner" -> "Miners", "Mercenary" -> "Mercenaries" (Fmt.plural).
 static func plural(word: String) -> String:
-	if word.ends_with("y") and word.length() > 1 and not "aeiou".contains(word[word.length() - 2]):
-		return word.left(word.length() - 1) + "ies"
-	return word + "s"
+	return Fmt.plural(word)

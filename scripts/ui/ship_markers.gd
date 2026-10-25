@@ -27,13 +27,15 @@ extends Control
 signal mode_changed(mode: Mode)
 
 enum Mode { ALL, HOSTILES, OFF }
-enum Shape { MINER, MERCENARY, SALVAGER, POD, SCAVENGER, DEN, SHUTTLE }
+enum Shape { MINER, MERCENARY, SALVAGER, POD, SCAVENGER, DEN, SHUTTLE, LANDER }
 enum Glyph { NONE, MINING, CARGO, FIGHT, FLEE, ESCORT, WARP }
 
 const MODE_NAMES: PackedStringArray = ["All", "Hostiles", "Off"]
-const MINER_COLOR := Color(0.45, 0.9, 1.0)
-const MERC_COLOR := Color(0.62, 0.74, 1.0)
-const SALVAGER_COLOR := Color(0.55, 1.0, 0.8)
+## Captain ships wear the role colour of the pilot list (HudStyle.ROLE_COLORS).
+const MINER_COLOR: Color = HudStyle.ROLE_COLORS["Miner"]
+const MERC_COLOR: Color = HudStyle.ROLE_COLORS["Mercenary"]
+const SALVAGER_COLOR: Color = HudStyle.ROLE_COLORS["Salvager"]
+const LANDER_COLOR: Color = HudStyle.ROLE_COLORS["Lander"]
 const POD_COLOR := Color(0.95, 0.97, 1.0)
 ## Cargo shuttles: small and neutral, so they do not crowd the captains.
 const SHUTTLE_COLOR := Color(0.7, 0.73, 0.78)
@@ -175,7 +177,7 @@ func arrow_targets() -> Array[Node3D]:
 	return out
 
 
-## Role colour: player cyan/white with a role tint, hostiles in their
+## Role colour of the pilot list for captain ships, hostiles in their
 ## faction's colour (scavengers red, their raiders orange).
 static func color_for(n: Node3D) -> Color:
 	if n is ScavengerDen:
@@ -197,6 +199,8 @@ static func color_for(n: Node3D) -> Color:
 			return MERC_COLOR
 		Ship.Role.SALVAGER:
 			return SALVAGER_COLOR
+		Ship.Role.LANDER:
+			return LANDER_COLOR
 		Ship.Role.SHUTTLE:
 			return SHUTTLE_COLOR
 	return POD_COLOR
@@ -288,7 +292,7 @@ func _process(delta: float) -> void:
 		if is_parked(s) and not emphasis:
 			continue
 		var p := s.global_position
-		if s.is_hostile() and home != Vector3.INF and Combat.flat_distance(p, home) < home_threat_radius:
+		if s.is_hostile() and home != Vector3.INF and SpaceNav.flat_distance(p, home) < home_threat_radius:
 			_maybe_arrow(cam, s, p, vp, screen, s == selected)
 		elif s == selected:
 			_maybe_arrow(cam, s, p, vp, screen, true)
@@ -385,7 +389,7 @@ func _fill_drop(e: Entry, s: Ship, cam: Camera3D, p: Vector3, home: Vector3) -> 
 	if not (e.emphasis or s == _hover_target or (_zoomed_out and not (s is CargoShuttle))) or s.is_docked():
 		return
 	var ref_y := 0.0
-	if home != Vector3.INF and Combat.flat_distance(p, home) < station_plane_radius:
+	if home != Vector3.INF and SpaceNav.flat_distance(p, home) < station_plane_radius:
 		ref_y = home.y
 	if absf(p.y - ref_y) < drop_line_min_height:
 		return
@@ -438,6 +442,8 @@ func _shape_for(s: Ship) -> Shape:
 			return Shape.MERCENARY
 		Ship.Role.SALVAGER:
 			return Shape.SALVAGER
+		Ship.Role.LANDER:
+			return Shape.LANDER
 		Ship.Role.POD:
 			return Shape.POD
 		Ship.Role.SHUTTLE:
@@ -524,7 +530,7 @@ func _maybe_arrow(cam: Camera3D, target: Node3D, p: Vector3, vp: Rect2, screen: 
 		t = minf(t, half.y / absf(dir.y))
 	var from := hud.camera.global_position if hud.camera else cam.global_position
 	_arrows.append({"target": target, "pos": c + dir * t, "dir": dir, "color": color_for(target),
-			"km": Combat.flat_distance(from, p) / 1000.0, "selected": is_selected})
+			"km": SpaceNav.flat_distance(from, p) / 1000.0, "selected": is_selected})
 
 
 ## Screen area edge arrows sit on: the viewport, inset, right of the overview.
@@ -683,7 +689,7 @@ func _tooltip_text(t: Node3D) -> String:
 		return "%s\n%s ships gathering near %s\n%s" % [a.get_display_name(), a.faction_def.unit_name, a.def.belt_name, a.get_status_text()]
 	if t is ScavengerDen:
 		var d := t as ScavengerDen
-		return "%s\n%s %s, claims %s\n%s\nHull %d%%" % [d.get_display_name(), d.faction_def.display_name, d.faction_def.den_kind, d.belt.def.name if d.belt else "?", d.get_status_text(), roundi(d.hull_fraction() * 100.0)]
+		return "%s\n%s %s, %s\n%s\nHull %d%%" % [d.get_display_name(), d.faction_def.display_name, d.kind_name(), d.claim_text(), d.get_status_text(), roundi(d.hull_fraction() * 100.0)]
 	if t is Building:
 		var b := t as Building
 		return "%s\n%s" % [b.display_name, b.get_status_text()]
@@ -821,6 +827,9 @@ static func _shape_points(shape: Shape) -> PackedVector2Array:
 			return PackedVector2Array([Vector2(0.0, -1.15), Vector2(0.8, 0.85), Vector2(0.0, 0.4), Vector2(-0.8, 0.85)])
 		Shape.SALVAGER:
 			return PackedVector2Array([Vector2(0.0, -1.1), Vector2(0.8, 0.0), Vector2(0.0, 1.0), Vector2(-0.8, 0.0)])
+		Shape.LANDER:
+			# Wide dropship: short nose, broad wings.
+			return PackedVector2Array([Vector2(0.0, -1.0), Vector2(0.45, -0.55), Vector2(0.95, 0.75), Vector2(0.3, 0.55), Vector2(-0.3, 0.55), Vector2(-0.95, 0.75), Vector2(-0.45, -0.55)])
 		Shape.SHUTTLE:
 			# Small box with a blunt nose.
 			return PackedVector2Array([Vector2(0.0, -0.75), Vector2(0.5, -0.45), Vector2(0.5, 0.6), Vector2(-0.5, 0.6), Vector2(-0.5, -0.45)])

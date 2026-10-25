@@ -58,7 +58,7 @@ static var _pads: Dictionary = {}
 var depot: CargoDepot
 var phase: Phase = Phase.PARKED
 ## Aboard: iron, titanium, crystal.
-var cargo := PackedInt32Array([0, 0, 0])
+var cargo := Economy.zero_ore()
 ## Carrying supplies (cosmetic).
 var supplies: bool = false
 ## Docking pad in use or headed for (-1 = none).
@@ -189,14 +189,17 @@ func load_text() -> String:
 	var parts: PackedStringArray = []
 	for i in cargo.size():
 		if cargo[i] > 0:
-			parts.append("%d %s" % [cargo[i], Economy.ORE_NAMES[i].to_lower()])
+			parts.append("%d %s" % [cargo[i], Economy.ore_name(i)])
 	if parts.is_empty():
 		return "supplies" if supplies else "nothing"
 	return ", ".join(parts)
 
 
 func cargo_total() -> int:
-	return cargo[0] + cargo[1] + cargo[2]
+	var n := 0
+	for v in cargo:
+		n += v
+	return n
 
 
 ## True while carrying ore or supplies.
@@ -226,12 +229,14 @@ func sim_step(dt: float) -> void:
 	if mover.avoid_enabled:
 		var st := _station_world()
 		if st != Vector3.INF:
-			min_station_distance = minf(min_station_distance, Combat.flat_distance(global_position, st))
+			min_station_distance = minf(min_station_distance, SpaceNav.flat_distance(global_position, st))
 	match phase:
 		Phase.PARKED:
 			if depot and is_instance_valid(depot) and depot.load_ready() and not depot.loading_busy(self):
 				var got := depot.take_load()
-				var n := got[0] + got[1] + got[2]
+				var n := 0
+				for v in got:
+					n += v
 				if n > 0 or depot.is_supply_only():
 					cargo = got
 					supplies = n == 0
@@ -275,7 +280,7 @@ func sim_step(dt: float) -> void:
 		Phase.DOCKING:
 			if mover.path_done():
 				supplies = false
-				cargo = PackedInt32Array([0, 0, 0])
+				cargo = Economy.zero_ore()
 				_update_cargo_look()
 				mover.hold()
 				phase = Phase.PARKED
@@ -294,7 +299,7 @@ func _fly_to_pad() -> void:
 	set_world_goal(goal, vel, Vector3.ZERO, 20.0, CRUISE_SPEED)
 	if not _handoff_ready(goal):
 		return
-	var mgr := get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	var mgr := BuildingManager.of(get_tree())
 	if mgr and mgr.station_hull and mgr.station_hull.disabled:
 		if phase != Phase.WAITING_PAD:
 			phase = Phase.WAITING_PAD
@@ -333,7 +338,7 @@ func _fly_home() -> void:
 ## Close enough to [param goal] (world) for the frame to take over: on the
 ## plane, in height (the complex rides an inclined orbit) and in speed.
 func _handoff_ready(goal: Vector3) -> bool:
-	return Combat.flat_distance(global_position, goal) <= HANDOFF_DISTANCE \
+	return SpaceNav.flat_distance(global_position, goal) <= HANDOFF_DISTANCE \
 			and absf(global_position.y - goal.y) <= HANDOFF_HEIGHT and mover.relative_speed() <= HANDOFF_SPEED
 
 
@@ -343,13 +348,17 @@ func _deliver() -> void:
 	if n > 0:
 		Economy.receive_cargo(cargo, get_display_name())
 		total_delivered += n
-		show_toast("+%s" % load_text(), Color(0.55, 1.0, 0.65))
+		show_toast("+%s" % load_text(), TOAST_DELIVERY)
 		if is_instance_valid(home) and home.get_service() is SalvageYard:
+			# Bought ore is held back from Factory auto-sell.
+			var f := Factory.find(get_tree())
+			if f:
+				f.market.hold(cargo)
 			# Ore the player bought: say that it arrived (mining loads land too often to log).
 			EventLog.post("Ore bought from %s landed at the station: %s" % [home.display_name, load_text()], EventLog.Kind.INFO, self)
 	if depot and is_instance_valid(depot):
 		depot.note_shipped(cargo)
-	cargo = PackedInt32Array([0, 0, 0])
+	cargo = Economy.zero_ore()
 	supplies = true
 	_update_cargo_look()
 
@@ -366,13 +375,11 @@ func _retire() -> void:
 
 func _on_destroyed(killer: Node3D) -> void:
 	var lost := cargo_total()
-	var by := ""
-	if is_instance_valid(killer) and killer.has_method(&"get_display_name"):
-		by = " by %s" % String(killer.call(&"get_display_name"))
+	var by := Combat.by_suffix(killer)
 	EventLog.post("%s destroyed%s%s" % [get_display_name(), by, ", %s lost" % load_text() if lost > 0 else ""], EventLog.Kind.LOSS, null, global_position)
 	_release_pad()
 	if depot and is_instance_valid(depot):
-		depot.remove_shuttle(self)
+		depot.remove_shuttle(self, true)
 
 
 func _exit_tree() -> void:
@@ -384,17 +391,17 @@ func _exit_tree() -> void:
 
 ## The station's non-rotating structures frame (pads and outposts live in it).
 func _frame() -> Node3D:
-	var mgr := get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	var mgr := BuildingManager.of(get_tree())
 	return mgr.frame if mgr else null
 
 
 func _station() -> HomeStation:
-	var sys := get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var sys := SolarSystem.of(get_tree())
 	return sys.home_station.get_node_or_null(^"Station") as HomeStation if sys and sys.home_station else null
 
 
 func _station_world() -> Vector3:
-	var sys := get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var sys := SolarSystem.of(get_tree())
 	return sys.home_station.global_position if sys and sys.home_station else Vector3.INF
 
 

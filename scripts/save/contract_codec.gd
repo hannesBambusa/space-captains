@@ -37,15 +37,11 @@ static func save_contract(c: Contract, listed: bool) -> Dictionary:
 	d["type"] = c.type
 	d["listed"] = listed
 	d["target"] = SaveIds.of(c.target) if is_instance_valid(c.target) else 0
-	var takers := []
-	for t in c.takers:
-		if is_instance_valid(t):
-			takers.append(SaveIds.of(t))
-	d["takers"] = takers
+	d["takers"] = SaveUtil.ids(c.takers)
 	if c is MiningContract:
 		var mc := c as MiningContract
 		d["belt"] = mc.belt.def.name if is_instance_valid(mc.belt) else ""
-		d["mining"] = SaveUtil.props(mc, ["ore_type", "max_loads", "loads_delivered", "loads_in_flight", "materials_delivered"])
+		d["mining"] = SaveUtil.props(mc, ["ore_type", "max_loads", "loads_delivered", "loads_in_flight", "materials_delivered", "depleted", "site_name"])
 	elif c is BountyContract:
 		var bc := c as BountyContract
 		var solo := bc.solo_runner()
@@ -59,6 +55,10 @@ static func save_contract(c: Contract, listed: bool) -> Dictionary:
 				pairs.append([SaveIds.of(e), SaveIds.of(m)])
 		d["escort"] = {"ward": SaveIds.of(ec.ward) if is_instance_valid(ec.ward) else 0, "mining": SaveIds.of(ec.mining_contract) if ec.mining_contract else 0,
 				"max_escorts": ec.max_escorts, "trips_completed": ec.trips_completed, "assignments": pairs}
+	elif c is PlanetRaidContract:
+		var rc := c as PlanetRaidContract
+		d["planet"] = rc.planet.def.name if is_instance_valid(rc.planet) else ""
+		d["raid"] = SaveUtil.props(rc, ["loot", "max_loads", "loads_delivered", "loads_in_flight", "units_delivered"])
 	elif c is SalvageContract:
 		var sc := c as SalvageContract
 		d["salvage"] = SaveUtil.props(sc, ["loads_delivered", "loads_in_flight", "materials_delivered", "rare_chance", "free"])
@@ -66,8 +66,8 @@ static func save_contract(c: Contract, listed: bool) -> Dictionary:
 
 
 ## Builds, links and lists every saved contract. Needs the ships, dens,
-## scrap fields and belts registered in [param refs] (belts by name in
-## [param belts]).
+## scrap fields and clusters registered in [param refs] (clusters by name in
+## [param belts], old belt names included).
 static func restore_all(d: Dictionary, refs: SaveRefs, belts: Dictionary) -> void:
 	var made: Array[Array] = []
 	for s: Dictionary in d.get("contracts", []):
@@ -94,11 +94,17 @@ static func _make(s: Dictionary, refs: SaveRefs, belts: Dictionary) -> Contract:
 	var c: Contract
 	match int(s["type"]):
 		Contract.Type.MINING:
-			var belt := belts.get(String(s.get("belt", ""))) as SystemBelt
-			if belt == null:
-				return null
+			# Old saves name the belt ("Cinder Belt"): the map holds those
+			# names for their starting clusters too. A cluster that is gone
+			# (mined out) leaves the contract without a target: trips on it
+			# still deliver, then it completes.
+			var belt := belts.get(String(s.get("belt", ""))) as AsteroidCluster
 			var mc := MiningContract.new(belt, int(s["reward"]))
 			SaveUtil.apply_props(mc, s.get("mining", {}))
+			if mc.site_name.is_empty():
+				mc.site_name = String(s.get("belt", ""))
+			if belt == null:
+				mc.depleted = true
 			c = mc
 		Contract.Type.BOUNTY:
 			var bc := BountyContract.new(target, int(s["reward"]), int(s["max_takers"]))
@@ -122,6 +128,14 @@ static func _make(s: Dictionary, refs: SaveRefs, belts: Dictionary) -> Contract:
 			var ec := EscortContract.new(ward, null, int(s["reward"]), int(ed.get("max_escorts", 2)))
 			ec.trips_completed = int(ed.get("trips_completed", 0))
 			c = ec
+		Contract.Type.PLANET_RAID:
+			var tree := Engine.get_main_loop() as SceneTree
+			var body := PlanetRaidContract.find_planet(tree, String(s.get("planet", ""))) if tree else null
+			if body == null:
+				return null
+			var rc := PlanetRaidContract.new(body, int(s["reward"]))
+			SaveUtil.apply_props(rc, s.get("raid", {}))
+			c = rc
 		Contract.Type.SALVAGE:
 			var field := target as ScrapField
 			if field == null:

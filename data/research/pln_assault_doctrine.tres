@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"pln_assault_doctrine"
+display_name = "Planetary assault doctrine"
+field = 2
+tier = 2
+cost_credits = 900
+cost_iron = 120
+cost_titanium = 60
+research_time = 220.0
+prerequisites = Array[StringName]([&"pln_orbital_survey"])
+unlock_buildings = Array[StringName]([&"raider_dock"])
+tags = PackedStringArray("building")
+description = "Drop tactics for landing on hostile worlds. Unlocks the Raider Dock, where pilots fly dropships down to the planets for loot."

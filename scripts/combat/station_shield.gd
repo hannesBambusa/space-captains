@@ -1,5 +1,5 @@
 class_name StationShield
-extends Node3D
+extends StaticCombatant
 ## The station shield bubble projected by the Shield Generator: a flattened
 ## sphere (vertical semi-axis [member height_ratio] of the radius) centred on
 ## the station complex, in the non-rotating "Structures" frame. Its radius
@@ -214,9 +214,9 @@ func refit() -> void:
 	var box := manager.complex_bounds()
 	var c := box.get_center()
 	var centre := Vector3(c.x, 0.0, c.y)
-	var r := Vector2(centre.x, centre.z).length() + manager.station_radius
+	var r := SpaceNav.flat_length(centre) + manager.station_radius
 	for b in manager.complex_structures():
-		r = maxf(r, Vector2(b.position.x - centre.x, b.position.z - centre.z).length() + b.def.footprint_radius)
+		r = maxf(r, SpaceNav.flat_distance(b.position, centre) + b.def.footprint_radius)
 	_target_center = centre
 	_target_radius = maxf(r + margin, min_radius)
 
@@ -283,7 +283,7 @@ func absorb(amount: float, attacker: Node3D, at: Vector3) -> void:
 	ColonyAlarm.raise(get_tree(), self, "the station shield", attacker)
 	if is_instance_valid(attacker) and attacker is ScavengerShip:
 		var f := (attacker as ScavengerShip).faction_def
-		var who := "Raiders" if f == null or f.id == Factions.DEFAULT_ID else "%s raiders" % f.unit_name
+		var who := f.raiders_label() if f else "Raiders"
 		EventLog.post("%s are attacking the station shield" % who, EventLog.Kind.THREAT, self, Vector3.INF, "shield_attack", f.id if f else &"")
 	if hp <= 0.0:
 		_collapse()
@@ -302,10 +302,6 @@ func shutdown() -> void:
 
 # --- Combatant API (see Combat) ---------------------------------------------
 
-func get_faction() -> int:
-	return Combat.Faction.PLAYER
-
-
 func is_alive() -> bool:
 	return not _closing
 
@@ -316,14 +312,6 @@ func is_targetable() -> bool:
 
 func get_hit_radius() -> float:
 	return radius
-
-
-func get_aim_velocity() -> Vector3:
-	return SpaceNav.world_velocity(self)
-
-
-func get_dodge() -> float:
-	return 0.0
 
 
 func get_display_name() -> String:

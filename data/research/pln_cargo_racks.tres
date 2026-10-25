@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"pln_cargo_racks"
+display_name = "Modular cargo racks"
+field = 2
+tier = 1
+cost_credits = 220
+cost_iron = 40
+research_time = 90.0
+tags = PackedStringArray("economy")
+miner_hold = 0.1
+description = "Standard racks in every miner's hold: miners carry 10% more per trip. Leads to the Bulk cargo holds."

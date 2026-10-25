@@ -30,6 +30,9 @@ extends Node
 ## miner's delivery). Every payment to a captain also collects the station's
 ## share of it back (Economy.collect_fees).
 ##
+## Phase C2: planet raids (PlanetRaidContract), paid per load like mining;
+## the loot is a planet good by planet type.
+##
 ## Stage 3: salvage. Salvagers work scrap fields on their own (free salvage,
 ## paid by their Salvage Yard, which reprocesses the scrap and sells the ore
 ## to the player); a posted salvage contract adds a per-load bonus from the
@@ -76,7 +79,7 @@ func post(contract: Contract) -> Contract:
 	return contract
 
 
-func post_mining(belt: SystemBelt, credits_per_load: int, max_loads: int = 0) -> MiningContract:
+func post_mining(belt: AsteroidCluster, credits_per_load: int, max_loads: int = 0) -> MiningContract:
 	if belt == null or not post_problem(credits_per_load).is_empty():
 		return null
 	return post(MiningContract.new(belt, maxi(credits_per_load, 0), max_loads)) as MiningContract
@@ -89,8 +92,8 @@ func post_problem(credits: int, reserved: bool = false) -> String:
 	if credits <= 0 or Economy.credits >= credits:
 		return ""
 	if reserved:
-		return "Needs %s cr: a bounty is reserved from your credits when posted (you have %s)" % [UIUtil.amount(credits), UIUtil.amount(Economy.credits)]
-	return "Needs %s cr: you must be able to pay one %s (you have %s)" % [UIUtil.amount(credits), "payment", UIUtil.amount(Economy.credits)]
+		return "Needs %s cr: a bounty is reserved from your credits when posted (you have %s)" % [Fmt.amount(credits), Fmt.amount(Economy.credits)]
+	return "Needs %s cr: you must be able to pay one %s (you have %s)" % [Fmt.amount(credits), "payment", Fmt.amount(Economy.credits)]
 
 
 ## Bounty on a scavenger ship or den. Completes when the target dies. The
@@ -135,10 +138,10 @@ func reserve(credits: int) -> bool:
 	return credits <= 0 or (Economy.credits >= credits and Economy.spend(credits))
 
 
-## Gives [param credits] of an escrow back to the player.
+## Gives [param credits] of an escrow back to the player (bounties,
+## defence zone budgets; nothing for 0).
 func release(credits: int, source: String) -> void:
-	if credits > 0:
-		Economy.add_income(credits, source)
+	Economy.add_income(credits, source)
 
 
 ## Salvage bonus on a scrap field, paid per delivered load on top of the
@@ -149,6 +152,13 @@ func post_salvage(field: ScrapField, credits_per_load: int, max_takers: int = 3)
 	var c := post(SalvageContract.new(field, maxi(credits_per_load, 0), max_takers)) as SalvageContract
 	_wire(c)
 	return c
+
+
+## Planet raid on a planet or moon, paid per delivered load (phase C2).
+func post_planet_raid(body: PlanetBody, credits_per_load: int, max_loads: int = 0) -> PlanetRaidContract:
+	if body == null or not is_instance_valid(body) or not post_problem(credits_per_load).is_empty():
+		return null
+	return post(PlanetRaidContract.new(body, maxi(credits_per_load, 0), max_loads)) as PlanetRaidContract
 
 
 ## Escort on one miner.
@@ -293,7 +303,7 @@ func _credit_captain(ship: Ship, pay: int, contract: Contract) -> void:
 ## The feed line when a payment could not be paid in full (once a minute
 ## per contract): the contract is paused until credits come in.
 func note_short_pay(contract: Contract, due: int, paid: int) -> void:
-	EventLog.post("Station can't pay %s in full (%s of %s cr): paused until credits come in" % [contract.get_title(), UIUtil.amount(paid), UIUtil.amount(due)],
+	EventLog.post("Station can't pay %s in full (%s of %s cr): paused until credits come in" % [contract.get_title(), Fmt.amount(paid), Fmt.amount(due)],
 			EventLog.Kind.LOSS, null, contract.get_site_position(), "short_pay:%d" % contract.id)
 
 
@@ -316,9 +326,9 @@ func cancel_text(contract: Contract) -> String:
 		return "Cancel this contract. Trips already under way are still paid."
 	var t := cancel_terms(contract)
 	if int(t["takers"]) == 0:
-		return "Cancel: refunds all %s cr (nobody has taken it yet)." % UIUtil.amount(int(t["refund"]))
-	return "Cancel: refunds %s cr (%d%%). %d captain%s took it: they share %s cr as compensation." % [UIUtil.amount(int(t["refund"])),
-			roundi((1.0 - CANCEL_COMPENSATION) * 100.0), int(t["takers"]), "" if int(t["takers"]) == 1 else "s", UIUtil.amount(int(t["compensation"]))]
+		return "Cancel: refunds all %s cr (nobody has taken it yet)." % Fmt.amount(int(t["refund"]))
+	return "Cancel: refunds %s cr (%d%%). %d captain%s took it: they share %s cr as compensation." % [Fmt.amount(int(t["refund"])),
+			roundi((1.0 - CANCEL_COMPENSATION) * 100.0), int(t["takers"]), "" if int(t["takers"]) == 1 else "s", Fmt.amount(int(t["compensation"]))]
 
 
 ## Withdraws a contract: no new takers. Ships already on a trip finish it.
@@ -333,18 +343,17 @@ func cancel(contract: Contract, refund_all: bool = false) -> void:
 		var ships := _bounty_takers(bc)
 		if not refund_all and not ships.is_empty():
 			var comp := mini(roundi(float(bc.reward) * CANCEL_COMPENSATION), bc.escrow)
-			var each := floori(float(comp) / float(ships.size()))
+			var parts := Economy.split_evenly(comp, ships.size())
 			var paid_total := 0
 			for i in ships.size():
 				var s := ships[i]
-				var part := each + (comp - each * ships.size() if i == 0 else 0)
-				var got := pay_captain(s, part, bc)
+				var got := pay_captain(s, parts[i], bc)
 				paid_total += got
-				s.show_toast("+%d cr compensation" % got, Color(1.0, 0.85, 0.4))
+				s.show_toast("+%d cr compensation" % got, Ship.TOAST_REWARD)
 				if s.brain:
-					s.brain.note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Got %s cr compensation: the %s was cancelled" % [UIUtil.amount(got), DecisionNotes.job_name(bc)],
-							"The station cancelled a bounty we had taken: half of the %s cr goes back, the other half is split evenly between the %d on it" % [UIUtil.amount(bc.reward), ships.size()])
-			EventLog.post("Bounty on %s cancelled: %s cr back, %s cr compensation to %d captain%s" % [bc.get_target_name(), UIUtil.amount(bc.escrow), UIUtil.amount(paid_total),
+					s.brain.note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Got %s cr compensation: the %s was cancelled" % [Fmt.amount(got), DecisionNotes.job_name(bc)],
+							"The station cancelled a bounty we had taken: half of the %s cr goes back, the other half is split evenly between the %d on it" % [Fmt.amount(bc.reward), ships.size()])
+			EventLog.post("Bounty on %s cancelled: %s cr back, %s cr compensation to %d captain%s" % [bc.get_target_name(), Fmt.amount(bc.escrow), Fmt.amount(paid_total),
 					ships.size(), "" if ships.size() == 1 else "s"], EventLog.Kind.INFO)
 		_refund_escrow(bc, "Bounty refund")
 	contract.mark_cancelled()
@@ -354,8 +363,11 @@ func cancel(contract: Contract, refund_all: bool = false) -> void:
 func _bounty_takers(bc: BountyContract) -> Array[Ship]:
 	var out: Array[Ship] = []
 	for t in bc.takers:
+		# Freed takers (scene teardown) can't be cast, so check first.
+		if not is_instance_valid(t):
+			continue
 		var s := t as Ship
-		if s and is_instance_valid(s) and not s.dead and s.captain and not out.has(s):
+		if s and not s.dead and s.captain and not out.has(s):
 			out.append(s)
 	if bc.fleet:
 		for s in bc.fleet.members:
@@ -368,8 +380,7 @@ func _bounty_takers(bc: BountyContract) -> Array[Ship]:
 func _refund_escrow(bc: BountyContract, source: String) -> int:
 	var left := maxi(bc.escrow, 0)
 	bc.escrow = 0
-	if left > 0:
-		Economy.add_income(left, source)
+	release(left, source)
 	return left
 
 
@@ -406,27 +417,12 @@ func deliver_mining_load(contract: MiningContract, ship: Node, ore: int, fractio
 	var yield_mult := s.stats.yield_mult if s and s.stats else 1.0
 	var full_pay := roundi(float(contract.reward) * fraction)
 	var full_mat := roundi(float(mining_rules.materials_for(ore)) * fraction * yield_mult)
-	var pay := mini(full_pay, maxi(Economy.credits, 0))
-	var mat := full_mat
-	if pay < full_pay:
-		mat = floori(float(full_mat) * float(pay) / maxf(float(full_pay), 1.0))
-		note_short_pay(contract, full_pay, pay)
-	if pay > 0:
-		Economy.spend(pay)
-	if mat > 0:
-		# Into the outpost's stock; a cargo shuttle brings it to the station.
-		var depot := CargoDepot.of_ship(ship)
-		if depot:
-			depot.add_stock(Economy.ore_of_belt(ore), mat)
-		else:
-			Economy.add_ore_of(Economy.ore_of_belt(ore), mat)
+	var pay := _pay_for_load(contract, full_pay)
+	var mat := _paid_share(full_mat, pay, full_pay)
+	_stock_materials(ship, Economy.ore_of_belt(ore), mat)
 	contract.credits_paid += pay
 	contract.materials_delivered += mat
-	if s and s.captain and pay > 0:
-		Economy.collect_fees(s.captain, pay)
-	contract.finish_trip(ship, true)
-	delivery_made.emit(contract, ship, pay, mat, ore)
-	var escorted := _pay_escorts(s, contract) > 0 if s else false
+	var escorted := _finish_delivery(contract, ship, pay, mat, ore)
 	return {"credits": pay, "materials": mat, "partial": pay < full_pay, "escorted": escorted}
 
 
@@ -442,14 +438,9 @@ func deliver_salvage_load(contract: SalvageContract, ship: Node, scrap: int) -> 
 	var fraction := clampf(float(scrap) / float(SalvageContract.LOAD_SCRAP), 0.0, 2.0)
 	var yield_mult := s.stats.yield_mult if s and s.stats else 1.0
 	var sorted := roundi(float(scrap) * SalvageContract.MATERIALS_PER_SCRAP * yield_mult)
-	var full_bonus := roundi(float(contract.reward) * fraction)
-	var bonus := mini(full_bonus, maxi(Economy.credits, 0))
-	if bonus < full_bonus:
-		note_short_pay(contract, full_bonus, bonus)
-	if bonus > 0:
-		Economy.spend(bonus)
-		if s and s.captain:
-			Economy.collect_fees(s.captain, bonus)
+	var bonus := _pay_for_load(contract, roundi(float(contract.reward) * fraction))
+	if bonus > 0 and s and s.captain:
+		Economy.collect_fees(s.captain, bonus)
 	contract.credits_paid += bonus
 	var rare := ""
 	if scrap > 0 and s and SalvageContract.rng.randf() < contract.rare_chance:
@@ -471,6 +462,70 @@ func deliver_salvage_load(contract: SalvageContract, ship: Node, scrap: int) -> 
 	delivery_made.emit(contract, ship, bonus, mat, -1)
 	var escorted := _pay_escorts(s, contract) > 0 if s else false
 	return {"credits": bonus + yard_pay, "bonus": bonus, "yard": yard_pay, "owed": owed, "scrap": sorted, "materials": mat, "escorted": escorted, "rare": rare}
+
+
+## Pays for one delivered planet raid load of [param units] (already
+## scaled by what scavengers left aboard; [param fraction] of a full load).
+## Partial payment when credits run short, like a mining load. The loot
+## goes into the lander's dock stock (a cargo shuttle brings it to the
+## station), else straight into the player's stock. Returns {credits,
+## materials, partial, escorted}.
+func deliver_raid_load(contract: PlanetRaidContract, ship: Node, units: int, fraction: float = 1.0) -> Dictionary:
+	fraction = clampf(fraction, 0.0, 2.0)
+	var s := ship as Ship
+	var full_pay := roundi(float(contract.reward) * fraction)
+	var pay := _pay_for_load(contract, full_pay)
+	var mat := _paid_share(units, pay, full_pay)
+	_stock_materials(ship, contract.loot, mat)
+	contract.credits_paid += pay
+	contract.units_delivered += mat
+	PlanetRaidContract.note_raid(contract.planet, mat, pay)
+	var escorted := _finish_delivery(contract, ship, pay, mat, -1)
+	return {"credits": pay, "materials": mat, "partial": pay < full_pay, "escorted": escorted}
+
+
+## Pays what the player can of [param full_pay] for a delivered load from
+## their credits; when short, the feed says so (see the class notes).
+## Returns the credits paid.
+func _pay_for_load(contract: Contract, full_pay: int) -> int:
+	var pay := mini(full_pay, maxi(Economy.credits, 0))
+	if pay < full_pay:
+		note_short_pay(contract, full_pay, pay)
+	if pay > 0:
+		Economy.spend(pay)
+	return pay
+
+
+## The part of [param amount] that [param pay] of [param full_pay] covers
+## (all of it when paid in full).
+static func _paid_share(amount: int, pay: int, full_pay: int) -> int:
+	if pay >= full_pay:
+		return amount
+	return floori(float(amount) * float(pay) / maxf(float(full_pay), 1.0))
+
+
+## Puts [param amount] of [param ore] (Economy.Ore) into the ship's home
+## stock (CargoDepot; a cargo shuttle brings it to the station), else
+## straight into the player's.
+func _stock_materials(ship: Node, ore: int, amount: int) -> void:
+	if amount <= 0:
+		return
+	var depot := CargoDepot.of_ship(ship)
+	if depot:
+		depot.add_stock(ore, amount)
+	else:
+		Economy.add_ore_of(ore as Economy.Ore, amount)
+
+
+## The station's fee on [param pay], the trip ends, the escorts are paid.
+## Returns true when an escort was.
+func _finish_delivery(contract: LoadContract, ship: Node, pay: int, mat: int, ore: int) -> bool:
+	var s := ship as Ship
+	if s and s.captain and pay > 0:
+		Economy.collect_fees(s.captain, pay)
+	contract.finish_trip(ship, true)
+	delivery_made.emit(contract, ship, pay, mat, ore)
+	return _pay_escorts(s, contract) > 0 if s else false
 
 
 ## A rare Mk II/III part in the haul: it goes into the Factory warehouse and
@@ -515,7 +570,7 @@ func _pay_escorts(miner: Ship, contract: Contract) -> int:
 				escort.captain.escorts_completed += 1
 				escort.captain.add_reputation(Reputation.ESCORT_TRIP)
 				escort.captain.note_job(true)
-			escort.show_toast("+%d cr escort" % pay, Color(0.55, 1.0, 0.65))
+			escort.show_toast("+%d cr escort" % pay, Ship.TOAST_DELIVERY)
 			if escort.brain:
 				escort.brain.call(&"on_escort_trip_completed", e, miner)
 		if paid_any:
@@ -547,7 +602,7 @@ func _resolve_bounty(c: BountyContract, killer: Node3D) -> void:
 		var pay := pay_captain(s, share, c)
 		total += pay
 		c.payouts.append({"ship_name": s.get_display_name(), "credits": pay})
-		s.show_toast("+%d cr bounty" % pay, Color(1.0, 0.85, 0.4))
+		s.show_toast("+%d cr bounty" % pay, Ship.TOAST_REWARD)
 	var who := c.killer_name if not c.killer_name.is_empty() else ("%d mercenaries" % earners.size() if earners.size() > 1 else "")
 	var solo := c.solo_runner()
 	if earners.size() == 1 and solo == earners[0]:
@@ -559,7 +614,7 @@ func _resolve_bounty(c: BountyContract, killer: Node3D) -> void:
 		EventLog.post("%s destroyed by %s (+%d cr bounty)" % [tname, who, total], EventLog.Kind.REWARD, null, target.global_position if is_instance_valid(target) else Vector3.INF)
 	var back := _refund_escrow(c, "Bounty leftover")
 	if back > 0:
-		EventLog.post("%s cr of the bounty on %s came back: %s" % [UIUtil.amount(back), tname, "nobody earned it" if earners.is_empty() else "left over after the split"],
+		EventLog.post("%s cr of the bounty on %s came back: %s" % [Fmt.amount(back), tname, "nobody earned it" if earners.is_empty() else "left over after the split"],
 				EventLog.Kind.INFO)
 	c.mark_completed()
 
@@ -581,12 +636,12 @@ func _resolve_fleet_bounty(c: BountyContract, killer: Node3D, d: Durability) -> 
 		var pay := pay_captain(s, int(p["credits"]), c)
 		total += pay
 		c.payouts.append({"ship_name": s.get_display_name(), "credits": pay})
-		lines.append("%s %s%s" % [String(p["name"]).get_slice(" ", 0), UIUtil.amount(pay), " (left early)" if bool(p["left_early"]) else ""])
-		s.show_toast("+%d cr fleet share" % pay, Color(1.0, 0.85, 0.4))
+		lines.append("%s %s%s" % [String(p["name"]).get_slice(" ", 0), Fmt.amount(pay), " (left early)" if bool(p["left_early"]) else ""])
+		s.show_toast("+%d cr fleet share" % pay, Ship.TOAST_REWARD)
 		if s.captain:
 			s.captain.note_job(true)
 	var target := c.target
-	EventLog.post("%s's fleet (%d) destroyed %s, %s cr split: %s" % [f.leader_name, f.roster.size(), c.get_target_name(), UIUtil.amount(total), ", ".join(lines)],
+	EventLog.post("%s's fleet (%d) destroyed %s, %s cr split: %s" % [f.leader_name, f.roster.size(), c.get_target_name(), Fmt.amount(total), ", ".join(lines)],
 			EventLog.Kind.REWARD, null, target.global_position if is_instance_valid(target) else Vector3.INF)
 	f.state = MercFleet.State.DONE
 	c.fleet = null

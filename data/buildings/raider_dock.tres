@@ -1,0 +1,31 @@
+[gd_resource type="Resource" script_class="BuildingDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_def.gd" id="1_bdef"]
+[ext_resource type="Script" path="res://scripts/lander_ship.gd" id="2_land"]
+
+[resource]
+script = ExtResource("1_bdef")
+id = &"raider_dock"
+display_name = "Raider Dock"
+short_label = "Raider Dock"
+description = "Outpost for planet raiders. Landers hired here fly dropships down to planets and moons with a planet raid contract and bring back fuel, water, rare metals, silicates or heavy ore, by planet type. Cargo shuttles fly the loot to the station."
+model_path = "res://assets/models/buildings/raider_dock.glb"
+cost_credits = 900
+cost_iron = 180
+cost_titanium = 60
+build_time = 30.0
+footprint_radius = 36.0
+max_count = 1
+structure_hull = 1600.0
+placeholder_tint = Color(0.95, 0.5, 0.35, 1)
+max_shuttles = 3
+shuttle_capacity = 60
+max_hires = 4
+hire_cost_credits = 300
+hire_role = "Lander"
+hire_ship_path = "res://assets/models/ships/dropship.glb"
+hire_ship_script = ExtResource("2_land")
+ship_cost = 550
+inner_berths = 2
+berth_spacing = 10.0
+berth_depth = 11.0

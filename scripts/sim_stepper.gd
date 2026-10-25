@@ -1,7 +1,7 @@
 class_name SimStepper
 extends RefCounted
 ## Fast-forwards the simulation inside one frame: advances SimClock, moves
-## the orbits and belts, steps every ship and every other sim node (group
+## the orbits and clusters, steps every ship and every other sim node (group
 ## [constant GROUP]: projectiles, effects, dens, scrap fields, the raid
 ## director), in fixed steps. Used by the demos (--advance) and by tests.
 ## Ignores pause on purpose.
@@ -13,7 +13,7 @@ const GROUP := "sim_step"
 ## Advances up to [param seconds] sim seconds in [param step] increments.
 ## Stops early when [param until] returns true. Returns the seconds advanced.
 static func run(tree: SceneTree, seconds: float, step: float = 0.1, until: Callable = Callable()) -> float:
-	var sys := tree.get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var sys := SolarSystem.of(tree)
 	var done := 0.0
 	while done < seconds:
 		var h := minf(step, seconds - done)

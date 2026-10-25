@@ -29,17 +29,18 @@ extends Node3D
 ##
 ## Cruise arcs: on travel legs (the brain says when, [method cruise_free])
 ## a ship does not fly the straight line from its start height to its
-## goal's height (the plane for goals in a belt band) but an arc off it
+## goal's height (the plane for goals in a cluster) but an arc off it
 ## ([CruiseLeg]): its personality band ([method cruise_band]: Bold low and
 ## direct, Cautious far off the line) scaled by the leg length, above the
 ## line outbound and below it inbound (the highway rule, so opposing traffic
 ## passes at different heights). Fights, formations and docking fly
 ## straight at the goal's height.
-## Belt lanes: ships leave that height to clear asteroid belts
-## ([method _update_altitude]); the lane altitude wins over the arc unless
-## the arc already clears the band on the same side. Before the route enters a belt band the ship
-## climbs over it or dives under it (its lane, [method lane_sign], splits the
-## traffic), and comes back down after the band. Near a goal that has its own
+## Cluster lanes: ships leave that height only when the way ahead crosses
+## an asteroid cluster's footprint ([method _update_altitude]); the lane
+## altitude wins over the arc unless the arc already clears the clump on the
+## same side. Before the route enters a cluster the ship climbs over it or
+## dives under it (its lane, [method lane_sign], splits the traffic), and
+## comes back down after it; routes that miss every cluster fly level. Near a goal that has its own
 ## height (a miner beside its rock) it takes that height; caught low inside
 ## a band it climbs straight out, riding with the rocks.
 ##
@@ -48,7 +49,7 @@ extends Node3D
 ## to drop out ([method warp_drop_distance]) and whose hop to follow
 ## ([method warp_lead]: fleets, escorts). While spooling the hull shakes and
 ## the engines run hot; in the hop a stretched streak trails it and a flash
-## marks the entry and the exit. The lane height of any belt band on the hop
+## marks the entry and the exit. The lane height of any cluster on the hop
 ## is held throughout; a hop with no band flies the straight 3D line from
 ## the (levelled) spool height to the arc's height at the drop-out point.
 ##
@@ -69,13 +70,16 @@ signal destroyed(ship: Ship, killer: Node3D)
 const GROUP := "ships"
 const RENDER_LAYER := 2
 const GLOW_NODE := "engine_glow"
+## Toast colours: goods delivered (and escort pay), credits earned.
+const TOAST_DELIVERY := Color(0.55, 1.0, 0.65)
+const TOAST_REWARD := Color(1.0, 0.85, 0.4)
 ## Largest sim step per update. Bigger frame deltas are split.
 const MAX_STEP := 0.1
 const MAX_SUBSTEPS := 40
 
-enum Role { MINER, MERCENARY, SCAVENGER, SALVAGER, POD, SHUTTLE }
+enum Role { MINER, MERCENARY, SCAVENGER, SALVAGER, POD, SHUTTLE, LANDER }
 
-const ROLE_NAMES: PackedStringArray = ["Miner", "Mercenary", "Scavenger", "Salvager", "Pod", "Cargo shuttle"]
+const ROLE_NAMES: PackedStringArray = ["Miner", "Mercenary", "Scavenger", "Salvager", "Pod", "Cargo shuttle", "Lander"]
 ## Docked captains look in at the Outfitter this often, sim seconds.
 const IDLE_VISIT_INTERVAL := 45.0
 const TRAIT_INTERVAL := 2.0
@@ -204,6 +208,8 @@ func _ready() -> void:
 	if captain and faction == Combat.Faction.PLAYER:
 		loadout.unlocked_slots = Reputation.slots_for(captain.rank)
 	stats = loadout.derive(captain)
+	if faction == Combat.Faction.PLAYER and not Research.tech_completed.is_connected(_on_research_done):
+		Research.tech_completed.connect(_on_research_done)
 	max_speed = stats.max_speed
 	acceleration = stats.acceleration
 	turn_rate_deg = stats.turn_rate_deg
@@ -343,7 +349,7 @@ func warp_destination() -> String:
 	return brain.destination_name() if brain else ""
 
 
-## "Spooling warp to Cinder Belt", "Warping to home"; "" when not warping.
+## "Spooling warp to Cinder Cluster", "Warping to home"; "" when not warping.
 func warp_status_text() -> String:
 	if mover == null or mover.warp_state == ShipMover.Warp.IDLE:
 		return ""
@@ -429,6 +435,12 @@ func get_dodge() -> float:
 	return stats.dodge if stats else 0.0
 
 
+## The nearest live hostile to this ship within [param radius] (on the
+## plane), or null (Combat.nearest_hostile).
+func nearest_hostile(radius: float) -> Node3D:
+	return Combat.nearest_hostile(get_tree(), global_position, radius, faction)
+
+
 func take_hit(amount: float, attacker: Node3D, _at: Vector3) -> void:
 	if dead:
 		return
@@ -439,6 +451,14 @@ func take_hit(amount: float, attacker: Node3D, _at: Vector3) -> void:
 	_on_damaged(amount, attacker)
 	if durability.is_dead():
 		destroy(attacker)
+
+
+## Out of every list (ships, combatants, camera focus), then freed.
+func _leave_world() -> void:
+	remove_from_group(GROUP)
+	remove_from_group(Combat.GROUP)
+	remove_from_group(RTSCamera.FOCUS_GROUP)
+	queue_free()
 
 
 ## Blows the ship up: explosion, scrap field, events; then frees it.
@@ -456,10 +476,7 @@ func destroy(killer: Node3D = null) -> void:
 	destroyed.emit(self, killer)
 	if world:
 		world.notify_destroyed(self, killer)
-	remove_from_group(GROUP)
-	remove_from_group(Combat.GROUP)
-	remove_from_group(RTSCamera.FOCUS_GROUP)
-	queue_free()
+	_leave_world()
 
 
 ## Re-derives the stats after a loadout change (module installed), keeping
@@ -489,6 +506,12 @@ func refit() -> void:
 		weapon.stats = stats
 
 
+## Techs that add a mercenary accuracy or miner hold apply at once.
+func _on_research_done(t: TechDef) -> void:
+	if t and (t.merc_accuracy != 0.0 or t.miner_hold != 0.0) and not dead:
+		refit()
+
+
 ## Chance this ship's captain ejects when it is destroyed.
 func eject_chance() -> float:
 	return captain.eject_chance(stats) if captain else 0.0
@@ -515,10 +538,7 @@ func retire() -> void:
 		home.remove_ship(self)
 	if captain and captain.ship == self:
 		captain.ship = null
-	remove_from_group(GROUP)
-	remove_from_group(Combat.GROUP)
-	remove_from_group(RTSCamera.FOCUS_GROUP)
-	queue_free()
+	_leave_world()
 
 
 ## Walk to the station services on the next sim step while docked (or on
@@ -661,7 +681,7 @@ func _update_aim(dt: float) -> void:
 	var want := 0.0
 	if fighting:
 		var d := _fight_target.global_position - global_position
-		want = clampf(atan2(d.y, maxf(Vector2(d.x, d.z).length(), 1.0)), -deg_to_rad(AIM_PITCH_MAX_DEG), deg_to_rad(AIM_PITCH_MAX_DEG))
+		want = clampf(atan2(d.y, maxf(SpaceNav.flat_length(d), 1.0)), -deg_to_rad(AIM_PITCH_MAX_DEG), deg_to_rad(AIM_PITCH_MAX_DEG))
 	_aim_pitch = move_toward(_aim_pitch, want if fighting else mover.pitch, deg_to_rad(AIM_PITCH_RATE_DEG) * dt)
 	_aim_blend = move_toward(_aim_blend, 1.0 if fighting else 0.0, dt * 2.0)
 	if not fighting:
@@ -687,14 +707,14 @@ func set_world_goal(pos: Vector3, vel: Vector3 = Vector3.ZERO, face: Vector3 = V
 	_goal_vy_at = SimClock.time
 
 
-## +1 = flies over belts, -1 = under. Stable per ship (name hash), so the
+## +1 = flies over clusters, -1 = under. Stable per ship (name hash), so the
 ## traffic splits into two lanes.
 func lane_sign() -> float:
 	return _lane
 
 
 ## Sets the mover's height for this step (world frame only, see the class
-## notes). Cheap: one ring test per belt.
+## notes). Cheap: one disc test per cluster.
 func _update_altitude(dt: float) -> void:
 	mover.cruise_active = mover.avoid_enabled
 	mover.hold_climb = false
@@ -711,7 +731,7 @@ func _update_altitude(dt: float) -> void:
 	var goal := parent.to_global(mover.goal_pos) if parent else mover.goal_pos
 	var tree := get_tree()
 	# The goal's own height (the station complex on its planet's inclined
-	# orbit, a den above the plane), or the plane for goals in a belt band
+	# orbit, a den above the plane), or the plane for goals in a cluster
 	# (miners take their rock's height only beside it).
 	var base := goal.y if SpaceNav.rock_band_at(tree, goal) == null else 0.0
 	if fighting:
@@ -732,12 +752,12 @@ func _update_altitude(dt: float) -> void:
 			# In the hop: the mover flies the 3D line to the cruise height
 			# at the drop-out point, then eases on from there.
 			var end := mover.warp_end
-			var rem := Combat.flat_distance(end, goal)
+			var rem := SpaceNav.flat_distance(end, goal)
 			var exit_y := _leg.height(rem, base, goal) if _leg.active else base
 			mover.warp_exit_y = exit_y
 			mover.cruise_y = exit_y
 		return
-	var goal_flat := Combat.flat_distance(pos, goal)
+	var goal_flat := SpaceNav.flat_distance(pos, goal)
 	if not mover.goal_has_altitude:
 		_at_goal_height = false
 	elif _at_goal_height:
@@ -807,8 +827,8 @@ func _track_leg(pos: Vector3, goal: Vector3, dt: float) -> void:
 	if p:
 		gv = p.global_basis * gv + SpaceNav.world_velocity(p)
 	if not _leg.active or _leg.goal_jumped(goal, gv, dt):
-		var leg_len := Combat.flat_distance(pos, goal)
-		var sys := get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+		var leg_len := SpaceNav.flat_distance(pos, goal)
+		var sys := SolarSystem.of(get_tree())
 		var st := sys.home_station.global_position if sys and sys.home_station else Vector3.INF
 		_leg.begin(pos, goal, CruiseLeg.plan_offset(leg_len, cruise_band(), _cruise_roll, CruiseLeg.highway_sign(pos, goal, st)))
 
@@ -877,7 +897,7 @@ func _update_evade() -> void:
 	if flat_combat or not mover.avoid_enabled or not is_fleeing() or durability.seconds_since_hit() > 6.0:
 		_evade_want = 0.0
 		return
-	var h := Combat.nearest_hostile(get_tree(), global_position, EVADE_RANGE, faction)
+	var h := nearest_hostile(EVADE_RANGE)
 	if h == null:
 		_evade_want = 0.0
 		return
@@ -896,6 +916,22 @@ func get_world_velocity() -> Vector3:
 
 
 # --- Frames, docking ----------------------------------------------------------
+
+## Faces [param yaw] (the mover's heading and the node's).
+func set_heading(yaw: float) -> void:
+	mover.yaw = yaw
+	rotation.y = yaw
+
+
+## Puts the ship at [param pos] in the world frame, heading [param yaw] and
+## moving at [param vel] (its climb rate from vel.y), holding its course.
+func place_in_space(pos: Vector3, yaw: float, vel: Vector3) -> void:
+	global_position = pos
+	set_heading(yaw)
+	mover.velocity = Vector3(vel.x, 0.0, vel.z)
+	mover.climb_rate = vel.y
+	mover.hold()
+
 
 func enter_space() -> void:
 	mover.change_frame(SpaceNav.space_root(get_tree()), true)
@@ -1040,8 +1076,7 @@ func _launch_pod() -> void:
 	root.add_child(pod)
 	# Same height: a pod launched in a belt lane starts clear of the rocks.
 	pod.global_position = global_position
-	pod.mover.yaw = mover.yaw
-	pod.rotation.y = mover.yaw
+	pod.set_heading(mover.yaw)
 
 
 ## Wingmates (same home, or close by) take a loss to raiders personally.
@@ -1051,7 +1086,7 @@ func _spread_grudge(by: FactionDef) -> void:
 		var s := n as Ship
 		if s == null or s == self or s.dead or s.faction != Combat.Faction.PLAYER or s.captain == null or s is EscapePod:
 			continue
-		if (is_instance_valid(home) and s.home == home) or Combat.flat_distance(pos, s.global_position) < CaptainTraits.GRUDGE_RADIUS:
+		if (is_instance_valid(home) and s.home == home) or SpaceNav.flat_distance(pos, s.global_position) < CaptainTraits.GRUDGE_RADIUS:
 			s.captain.add_trait(CaptainTraits.GRUDGE, "%s destroyed %s nearby" % [by.display_name if by else "Raiders", get_display_name()])
 
 

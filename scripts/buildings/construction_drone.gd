@@ -218,11 +218,11 @@ func _move(h: float) -> void:
 func _pose(dt: float, paused: bool) -> void:
 	var bob := Vector3(0.0, sin(_clock * 1.9 + _phase) * 0.22, 0.0) * _scale
 	position = _pos + bob
-	var speed := Vector3(_vel.x, 0.0, _vel.z).length()
+	var speed := SpaceNav.flat_length(_vel)
 	var want := _yaw
 	if mode == Mode.WELD or mode == Mode.SETTLE:
 		var d := work_point - _pos
-		if Vector2(d.x, d.z).length() > 0.2:
+		if SpaceNav.flat_length(d) > 0.2:
 			want = ShipMover.yaw_for(d)
 	elif speed > 1.5:
 		want = ShipMover.yaw_for(_vel)

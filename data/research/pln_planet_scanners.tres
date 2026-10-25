@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"pln_planet_scanners"
+display_name = "Planet scanners"
+field = 2
+tier = 2
+cost_credits = 800
+cost_iron = 60
+cost_titanium = 40
+research_time = 200.0
+prerequisites = Array[StringName]([&"pln_orbital_survey"])
+tags = PackedStringArray("economy")
+hidden = true
+description = "Orbital scanners that show a planet's yield before a raid. Prepared for a later phase."

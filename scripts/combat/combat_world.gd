@@ -1,7 +1,7 @@
 class_name CombatWorld
 extends Node3D
 ## Scene node that owns the shared combat systems: the tracer pool, the
-## effects pool, the scrap fields, the raid director, the threat director (base arrivals), the defence zones
+## effects pool, the scrap fields, the raid director, the threat director (base arrivals), the planet claims, the defence zones
 ## and the colony alarm, and knows the
 ## station shield bubbles the tracers test against. Also the hub for
 ## combat events the UI listens to (spawns, deaths, scrap fields).
@@ -26,6 +26,8 @@ var projectiles: ProjectilePool
 var fx: CombatFx
 var raids: RaidDirector
 var threats: ThreatDirector
+## Faction planet claims: garrisons and re-claims (phase C3).
+var claims: PlanetClaims
 ## Defence zones and the colony alarm (mercenaries answer attacks).
 var zones: DefenseZones
 var alarm: ColonyAlarm
@@ -65,6 +67,9 @@ func _ready() -> void:
 	threats = ThreatDirector.new()
 	threats.name = "ThreatDirector"
 	add_child(threats)
+	claims = PlanetClaims.new()
+	claims.name = "PlanetClaims"
+	add_child(claims)
 	zones = DefenseZones.new()
 	zones.name = "DefenseZones"
 	add_child(zones)

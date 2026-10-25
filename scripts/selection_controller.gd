@@ -2,17 +2,18 @@ class_name SelectionController
 extends Node3D
 ## Click selection: buildings (by footprint), ships (hostile scavengers get a
 ## red ring), Scavenger Dens, scrap fields, defence zones (their centre
-## label or their rim; a selected zone brightens instead of a ring), and asteroid belts (a
-## click near the belt ring or on its label anchor). Draws a ring on the plane
+## label or their rim; a selected zone brightens instead of a ring), and asteroid
+## clusters (a click on the clump or its label). Draws a ring on the plane
 ## around the selection. Escape or a click on empty space deselects (Escape is
 ## marked handled so the pause menu does not open as well). Double-clicks are
 ## left to the camera (fly-to). Clicks act on release; a left press that moves
 ## more than [member click_slop_px] is a camera orbit, not a click.
 ##
 ## Clicking a building or a ship also makes the camera follow it; clicking a
-## belt anchor follows the anchor; clicking the belt ring selects the belt and
-## leaves the camera alone. Planets, moons, gates and the star are followed
-## but not selected.
+## cluster's label selects the cluster, a double click follows it; clicking
+## the clump itself selects it and leaves the camera alone. Planets and moons are selected (the planet
+## panel: loot, raids, the planet raid contract); gates and the star are
+## followed but not selected.
 
 signal selection_changed(target: Node3D)
 
@@ -29,14 +30,14 @@ const SCRAP_RING_COLOR := Color(0.9, 0.82, 0.62, 0.8)
 @export var ring_scale: float = 1.2
 ## Ship pick radius on screen, pixels (at least).
 @export var ship_pick_px: float = 16.0
-## Extra pick tolerance around a belt's band, pixels.
+## Extra pick tolerance around a cluster's footprint, pixels.
 @export var belt_pick_px: float = 10.0
 @export var ship_ring_radius: float = 14.0
 ## Max mouse travel (px) between press and release that still counts as a click.
 @export var click_slop_px: float = 3.0
 
 var manager: BuildingManager
-## A Building, a Ship or a SystemBelt (or null).
+## A Building, a Ship or a AsteroidCluster (asteroid cluster) (or null).
 var selected: Node3D
 
 var _ring: MeshInstance3D
@@ -62,8 +63,12 @@ func get_selected_ship() -> Ship:
 	return selected as Ship
 
 
-func get_selected_belt() -> SystemBelt:
-	return selected as SystemBelt
+func get_selected_belt() -> AsteroidCluster:
+	return selected as AsteroidCluster
+
+
+func get_selected_planet() -> PlanetBody:
+	return selected as PlanetBody
 
 
 func select(target: Node3D) -> void:
@@ -91,11 +96,14 @@ func select(target: Node3D) -> void:
 		target.add_child(_ring)
 	elif target is DefenseZone:
 		(target as DefenseZone).set_selected(true)
-	elif target is SystemBelt:
-		var belt := target as SystemBelt
-		_ring = RingUtil.make_ring(belt.def.orbit_radius, BELT_RING_COLOR, 1.6, 1024)
-		belt.get_parent().add_child(_ring)
-		_ring.global_position = belt.global_position
+	elif target is PlanetBody:
+		var pb := target as PlanetBody
+		_ring = RingUtil.make_ring(SpaceNav.body_reach(pb.def) * 1.12, RING_COLOR, 2.4, 256)
+		pb.add_child(_ring)
+	elif target is AsteroidCluster:
+		var belt := target as AsteroidCluster
+		_ring = RingUtil.make_ring(belt.rock_half_width() * 1.12, BELT_RING_COLOR, 1.6, 256)
+		belt.add_child(_ring)
 	if _ring:
 		_ring.name = "SelectionRing"
 	if target:
@@ -173,23 +181,23 @@ func pick_group(screen_pos: Vector2, group: String) -> Node3D:
 	return best
 
 
-## Belt whose band (plus a few pixels) contains the ground point under
-## [param screen_pos], or null.
-func pick_belt(screen_pos: Vector2) -> SystemBelt:
-	var cam := get_tree().get_first_node_in_group("rts_camera") as RTSCamera
-	var sys := get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+## Cluster whose footprint (plus a few pixels) contains the point under
+## [param screen_pos] (on the plane at the cluster's height), or null.
+func pick_belt(screen_pos: Vector2) -> AsteroidCluster:
+	var cam := RTSCamera.of(get_tree())
+	var sys := SolarSystem.of(get_tree())
 	if cam == null or sys == null:
-		return null
-	var g := cam.screen_to_ground(screen_pos)
-	if g == Vector3.INF:
 		return null
 	var c3d := cam.get_camera()
 	var world_per_px := cam.get_distance() / maxf(_px_per_rad(c3d), 1.0)
-	var best: SystemBelt = null
+	var best: AsteroidCluster = null
 	var best_off := INF
 	for belt in sys.belts:
-		var off := absf(Vector2(g.x - belt.global_position.x, g.z - belt.global_position.z).length() - belt.def.orbit_radius)
-		var tol := belt.def.width * 0.5 + belt_pick_px * world_per_px
+		var g := cam.screen_to_ground(screen_pos, belt.global_position.y)
+		if g == Vector3.INF:
+			continue
+		var off := SpaceNav.flat_distance(g, belt.global_position)
+		var tol := belt.rock_half_width() + belt_pick_px * world_per_px
 		if off <= tol and off < best_off:
 			best_off = off
 			best = belt
@@ -201,7 +209,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mb := event as InputEventMouseButton
 		if mb.button_index != MOUSE_BUTTON_LEFT:
 			return
-		var cam := get_tree().get_first_node_in_group("rts_camera") as RTSCamera
+		var cam := RTSCamera.of(get_tree())
 		# Select on release, so a left drag can orbit the camera instead. A
 		# single click only selects; a double click also centres the camera.
 		if mb.pressed:
@@ -223,11 +231,15 @@ func _unhandled_input(event: InputEvent) -> void:
 			select(hit)
 			get_viewport().set_input_as_handled()
 			return
-		# Planets, moons, gates, belt anchors: a click selects the belt; a
+		# Planets, moons, gates, clusters: a click selects the cluster; a
 		# double click follows the body (RTSCamera).
 		var body := cam.pick_focusable(mb.position) if cam else null
+		if body is PlanetBody:
+			select(body)
+			get_viewport().set_input_as_handled()
+			return
 		if body:
-			select(body.get_meta(&"belt", null) as SystemBelt)
+			select(body.get_meta(&"belt", null) as AsteroidCluster)
 			get_viewport().set_input_as_handled()
 			return
 		var belt := pick_belt(mb.position)
@@ -258,7 +270,7 @@ func _pick_selectable(screen_pos: Vector2) -> Node3D:
 ## Defence zone whose centre label or rim is under [param screen_pos], or null.
 func pick_zone(screen_pos: Vector2) -> DefenseZone:
 	var zones := DefenseZones.of(get_tree())
-	var cam := get_tree().get_first_node_in_group("rts_camera") as RTSCamera
+	var cam := RTSCamera.of(get_tree())
 	if zones == null or cam == null or zones.count() == 0:
 		return null
 	var c3d := cam.get_camera()
@@ -276,7 +288,7 @@ func pick_zone(screen_pos: Vector2) -> DefenseZone:
 		var g := cam.screen_to_ground(screen_pos, z.global_position.y)
 		if g == Vector3.INF:
 			continue
-		var rim := absf(Combat.flat_distance(g, z.global_position) - z.radius) / maxf(world_per_px, 0.01)
+		var rim := absf(SpaceNav.flat_distance(g, z.global_position) - z.radius) / maxf(world_per_px, 0.01)
 		if rim <= belt_pick_px and rim < best_off:
 			best_off = rim
 			best = z

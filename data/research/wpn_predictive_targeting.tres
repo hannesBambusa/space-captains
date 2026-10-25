@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"wpn_predictive_targeting"
+display_name = "Predictive targeting"
+field = 1
+tier = 3
+cost_credits = 1300
+cost_titanium = 70
+cost_crystal = 60
+research_time = 280.0
+prerequisites = Array[StringName]([&"wpn_fire_control", &"wpn_linked_feeds"])
+unlock_modules = Array[StringName]([&"targeting_array_3", &"ammo_rack_3"])
+tags = PackedStringArray("weapons")
+description = "Targeting that reads a pilot's habits: Mk III targeting arrays and ammo racks."

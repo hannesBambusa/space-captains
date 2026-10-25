@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"eng_laminated_alloys"
+display_name = "Laminated alloys"
+field = 0
+tier = 2
+cost_credits = 600
+cost_iron = 80
+cost_titanium = 40
+research_time = 170.0
+unlock_modules = Array[StringName]([&"reinforced_plating_2", &"armor_plating_2"])
+tags = PackedStringArray("defence")
+description = "Layered titanium hull plates: Mk II plating and armour."

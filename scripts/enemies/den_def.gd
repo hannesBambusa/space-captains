@@ -1,12 +1,12 @@
 class_name DenDef
 extends Resource
 ## A hostile base in a SystemDef (Scavenger Hideout, Corsair Nest, Syndicate
-## Fortress: [member faction]). Placed at a fixed point next to the belt
-## it claims: [member angle_deg] around the star (0 = +X, 90 = +Z) at the
-## belt's centre-line radius plus [member radial_offset].
-## Belt danger: the claimed belt's authored danger includes this den's
-## [member danger_bonus]; destroying the den takes it off (min 1), so the
-## ratings agree with where the dens are.
+## Fortress: [member faction]). Placed at a fixed point in its region:
+## [member angle_deg] around the star (0 = +X, 90 = +Z) at
+## [member anchor_radius] plus [member radial_offset].
+## Danger: while the base lives, asteroid clusters within
+## AsteroidCluster.DEN_REACH of it get its [member danger_bonus] on top of their
+## base rating; clusters drift past on their orbits, so the danger moves too.
 ## Arrival (ThreatDirector): a den with [member arrival_order] 0 is there
 ## from the start; the others arrive one by one in that order, each once
 ## [member min_arrival_time] has passed and the colony has grown to
@@ -20,12 +20,14 @@ extends Resource
 ## Gang name ("Rustjaw" -> "Scavenger Rustjaw-3"; factions with a name pool
 ## use it for their callsigns instead).
 @export var gang: String = "Rustjaw"
+## Region the base claims, for feed lines ("gathering near Talon Reach").
 @export var belt_name: String = ""
+## Distance of the base's spot from the star before [member radial_offset], metres.
+@export var anchor_radius: float = 0.0
 @export_range(0.0, 360.0, 0.1, "degrees") var angle_deg: float = 0.0
-## Metres out from (+) or in toward (-) the star from the belt centre line.
+## Metres out from (+) or in toward (-) the star from [member anchor_radius].
 @export var radial_offset: float = 900.0
-## Metres above (+) or below (-) the system plane. Keep it clear of the
-## belt's rock layer only if the den sits inside the band radially.
+## Metres above (+) or below (-) the system plane.
 @export var height: float = 0.0
 
 @export_group("Arrival")
@@ -37,6 +39,12 @@ extends Resource
 ## captains and active structures (the start Factory counts).
 @export var growth_captains: int = 0
 @export var growth_structures: int = 0
+
+## Planet claim (PlanetClaims): the faction first claims this planet or
+## moon (by name) with an orbital garrison, [member claim_lead] sim seconds
+## before the base itself arrives, so the player sees it coming. "" = no claim.
+@export var claim_planet: String = ""
+@export var claim_lead: float = 240.0
 
 @export_group("Spawning")
 ## Ships alive at once from this den.
@@ -53,11 +61,11 @@ extends Resource
 @export var shield_regen: float = 10.0
 
 @export_group("Territory")
-## Danger levels this den adds to its belt.
+## Danger levels this den adds to clusters near it.
 @export_range(0, 4) var danger_bonus: int = 2
-## Its ships roam within this arc of the belt around the den, degrees.
+## Its ships roam within this arc around the den (along its orbit radius), degrees.
 @export var roam_arc_deg: float = 22.0
-## Prey on the claimed belt closer than this to the den is hunted, metres.
+## Prey at a cluster closer than this to the den is hunted, metres.
 @export var hunt_range: float = 9000.0
 
 

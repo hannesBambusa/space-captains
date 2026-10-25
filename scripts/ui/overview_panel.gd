@@ -3,7 +3,8 @@ extends VBoxContainer
 ## Left panel, tabbed (the tab row stays when collapsed with its button or
 ## Tab). The pilots have their own list on the right ([PilotColumn]).
 ## - ALL (default): contracts, threats and the system in one scrolling view.
-## - SYSTEM: star, planets (moons nested), asteroid belts, jump gates,
+## - SYSTEM: star, planets (moons nested), asteroid clusters (live: new
+##   ones appear, mined-out ones go), jump gates,
 ##   stations and structures (player buildings with live status), scrap fields.
 ## - CONTRACTS: posted contracts (with cancel) and what is reserved for
 ##   bounties and zone budgets.
@@ -54,6 +55,9 @@ var _threat_rows: Array[OverviewRow] = []
 var _scrap: VBoxContainer
 var _scrap_header: Label
 var _scrap_rows: Array[OverviewRow] = []
+var _clusters: VBoxContainer
+var _clusters_header: Label
+var _cluster_rows: Array[OverviewRow] = []
 var _threats_dirty := false
 var _outlook: Label
 var _refresh_timer := 0.0
@@ -189,6 +193,8 @@ func setup(owner_hud: HUD) -> void:
 			world.threats.changed.connect(func() -> void: _threats_dirty = true)
 	if hud.solar_system:
 		hud.solar_system.den_added.connect(func(_d: ScavengerDen) -> void: _threats_dirty = true)
+		hud.solar_system.cluster_added.connect(func(_b: AsteroidCluster) -> void: _rebuild_clusters.call_deferred())
+		hud.solar_system.cluster_removed.connect(func(_b: AsteroidCluster) -> void: _rebuild_clusters.call_deferred())
 	_rebuild()
 
 
@@ -234,6 +240,27 @@ func _process(delta: float) -> void:
 	for r in _scrap_rows:
 		if is_instance_valid(r.target):
 			r.set_subtitle((r.target as ScrapField).get_status_text())
+	_refresh_planet_rows()
+	for r in _cluster_rows:
+		if is_instance_valid(r.target):
+			_refresh_cluster_row(r)
+
+
+## Planet and moon rows: type, plus the claim (phase C3).
+func _refresh_planet_rows() -> void:
+	var sys := hud.solar_system if hud else null
+	if sys == null:
+		return
+	var claims := PlanetClaims.of(get_tree())
+	for p in sys.planets:
+		for b in [p] + p.get_children().filter(func(n: Node) -> bool: return n is PlanetBody):
+			var body := b as PlanetBody
+			var r := find_row(body)
+			if r == null:
+				continue
+			var kind: String = (MOON_TYPES if body != p else PLANET_TYPES)[body.def.type]
+			var g := claims.garrison_of(body) if claims else null
+			r.set_subtitle("%s, held by %s" % [kind, g.gang if not g.gang.is_empty() else g.faction_def.display_name] if g else kind)
 
 
 # --- Build the list -----------------------------------------------------------
@@ -262,10 +289,11 @@ func _rebuild() -> void:
 				var m := c as PlanetBody
 				_add_row(_list, m, m.def.name, MOON_TYPES[m.def.type], 1)
 
-	if not sys.belts.is_empty():
-		_section(_list, "ASTEROID BELTS", sys.belts.size(), &"belt")
-		for i in sys.belts.size():
-			_add_belt_row(sys.belts[i], sys.belt_anchors[i] if i < sys.belt_anchors.size() else null)
+	_clusters_header = _section(_list, "ASTEROID CLUSTERS", sys.belts.size(), &"belt")
+	_clusters = VBoxContainer.new()
+	_clusters.add_theme_constant_override("separation", 1)
+	_list.add_child(_clusters)
+	_rebuild_clusters()
 
 	_section(_list, "STATIONS AND STRUCTURES", -1, &"station")
 	_structures = VBoxContainer.new()
@@ -387,15 +415,11 @@ func _faction_header(f: FactionDef) -> HBoxContainer:
 func _add_den_rows(d: ScavengerDen, f: FactionDef) -> int:
 	var row := _add_row(_threats_box, d, d.get_display_name(), _den_subtitle(d))
 	row.title_label.add_theme_color_override("font_color", f.color.lerp(Color.WHITE, 0.3) if d.is_alive() else Color(0.55, 0.55, 0.58))
-	var bar := PipMeter.new()
-	bar.style = PipMeter.Style.BAR
-	bar.max_value = 1.0
+	var bar := UIUtil.bar(f.color, Vector2(36.0, 4.0))
 	bar.value = d.hull_fraction()
-	bar.custom_minimum_size = Vector2(36.0, 4.0)
-	bar.color = f.color
 	bar.name = "Hull"
 	row.add_right(bar)
-	row.tooltip_text = "%s\n%s %s, claims %s\nSelect it to post a bounty." % [d.get_display_name(), f.display_name, f.den_kind, d.belt.def.name if d.belt else "?"]
+	row.tooltip_text = "%s\n%s %s, %s\nSelect it to post a bounty." % [d.get_display_name(), f.display_name, d.kind_name(), d.claim_text()]
 	_threat_rows.append(row)
 	var ships := _live_ships(d)
 	for sc in ships:
@@ -555,7 +579,7 @@ func _rebuild_contracts() -> void:
 		_contracts_header.text = str(list.size())
 	_set_count(Tab.CONTRACTS, str(list.size()))
 	if list.is_empty():
-		var none := UIUtil.label("None. Select a belt, ship or scrap field to post one.", &"DimLabel")
+		var none := UIUtil.label("None. Select a cluster, ship or scrap field to post one.", &"DimLabel")
 		var m := MarginContainer.new()
 		m.add_theme_constant_override("margin_left", 8)
 		m.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -637,33 +661,58 @@ func _add_row(parent: Container, target: Node3D, title: String, subtitle: String
 	return row
 
 
-func _add_belt_row(belt: SystemBelt, anchor: Node3D) -> void:
+func _rebuild_clusters() -> void:
+	if _clusters == null or hud == null or hud.solar_system == null:
+		return
+	_clear_rows(_clusters, _cluster_rows)
+	var sys := hud.solar_system
+	if _clusters_header:
+		_clusters_header.text = str(sys.belts.size())
+	for b in sys.belts:
+		if is_instance_valid(b):
+			_add_belt_row(b)
+	_fit_height.call_deferred()
+
+
+func _add_belt_row(belt: AsteroidCluster) -> void:
 	var d := belt.def
 	var ore := ORE_NAMES[d.ore_type]
-	var ores := ore
-	if d.secondary_ore != AsteroidBelt.OreType.ROCK and d.secondary_ore != d.ore_type:
-		ores += ", " + ORE_NAMES[d.secondary_ore]
-	var row := _add_row(_list, anchor if anchor else belt, d.name, ore)
-	var bar := PipMeter.new()
-	bar.style = PipMeter.Style.BAR
-	bar.max_value = 1.0
+	var row := _add_row(_clusters, belt, d.name, ore)
+	_cluster_rows.append(row)
+	var bar := UIUtil.bar(Color(0.85, 0.88, 0.95), Vector2(36.0, 4.0))
 	bar.value = d.richness
-	bar.custom_minimum_size = Vector2(36.0, 4.0)
-	bar.color = Color(0.85, 0.88, 0.95)
 	row.add_right(bar)
 	var pct := UIUtil.label("%d%%" % roundi(d.richness * 100.0), &"DimLabel")
 	pct.custom_minimum_size.x = 32.0
 	pct.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	row.add_right(pct)
 	var pips := PipMeter.new()
+	pips.name = "Danger"
 	pips.style = PipMeter.Style.PIPS
 	pips.max_value = 5.0
-	pips.value = float(d.danger)
 	pips.graded = true
 	pips.pip_size = 6.0
 	pips.pip_gap = 2.0
 	row.add_right(pips)
-	row.tooltip_text = "%s\nOre: %s\nRichness %d%%\nDanger %d of 5" % [d.name, ores, roundi(d.richness * 100.0), d.danger]
+	row.set_meta(&"danger_pips", pips)
+	_refresh_cluster_row(row)
+
+
+## Live parts of a cluster row: what is left, the danger (bases drift in and out of reach).
+func _refresh_cluster_row(row: OverviewRow) -> void:
+	var belt := row.target as AsteroidCluster
+	if belt == null:
+		return
+	var d := belt.def
+	var ores := ORE_NAMES[d.ore_type]
+	if d.secondary_ore != AsteroidBelt.OreType.ROCK and d.secondary_ore != d.ore_type:
+		ores += ", " + ORE_NAMES[d.secondary_ore]
+	var left := "mined out" if belt.is_depleted else "%d%% left" % roundi(belt.fill_fraction() * 100.0)
+	row.set_subtitle("%s, %s" % [ORE_NAMES[d.ore_type], left])
+	var pips := row.get_meta(&"danger_pips", null) as PipMeter
+	if pips:
+		pips.value = float(belt.danger)
+	row.tooltip_text = "%s\nOre: %s\nRichness %d%%\n%d of %d loads left\nDanger %d of 5" % [d.name, ores, roundi(d.richness * 100.0), belt.loads_left, belt.reserve, belt.danger]
 
 
 # --- Interaction --------------------------------------------------------------
@@ -674,10 +723,10 @@ func _on_row_pressed(row: OverviewRow) -> void:
 	if hud.camera:
 		hud.camera.focus_on(row.target)
 	if hud.selection:
-		if row.target is Building or row.target is Ship or row.target is ScavengerDen or row.target is ScrapField:
+		if row.target is Building or row.target is Ship or row.target is ScavengerDen or row.target is ScrapField or row.target is PlanetBody:
 			hud.selection.select(row.target)
-		elif row.target.get_meta(&"belt", null) is SystemBelt:
-			hud.selection.select(row.target.get_meta(&"belt") as SystemBelt)
+		elif row.target.get_meta(&"belt", null) is AsteroidCluster:
+			hud.selection.select(row.target.get_meta(&"belt") as AsteroidCluster)
 	_sync_pressed(hud.camera.get_follow_target() if hud.camera else null)
 
 

@@ -49,7 +49,7 @@ func _ready() -> void:
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	# Motes are moved in the shader anywhere inside the sector, so never cull.
 	custom_aabb = AABB(Vector3(-4000, -100, -4000), Vector3(8000, 200, 8000))
-	_focus_node = get_tree().get_first_node_in_group("rts_camera") as Node3D
+	_focus_node = RTSCamera.of(get_tree())
 	if _focus_node and max_camera_distance > 0.0 and _focus_node.has_signal("view_changed"):
 		_focus_node.view_changed.connect(_on_view_changed)
 
@@ -60,7 +60,7 @@ func _on_view_changed(_pivot: Vector3, distance: float, _yaw_deg: float) -> void
 
 func _process(_delta: float) -> void:
 	if _focus_node == null:
-		_focus_node = get_tree().get_first_node_in_group("rts_camera") as Node3D
+		_focus_node = RTSCamera.of(get_tree())
 		if _focus_node == null:
 			return
 	var focus := _focus_node.global_position

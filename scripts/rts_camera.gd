@@ -25,6 +25,7 @@ extends Node3D
 signal view_changed(pivot: Vector3, distance: float, yaw_deg: float)
 signal follow_changed(target: Node3D)
 
+const GROUP := "rts_camera"
 const FOCUS_GROUP := "focusable"
 
 @export_group("Zoom")
@@ -114,8 +115,12 @@ var _left_pending := Vector2.ZERO
 var _orbiting := false
 
 
+static func of(tree: SceneTree) -> RTSCamera:
+	return tree.get_first_node_in_group(GROUP) as RTSCamera if tree else null
+
+
 func _ready() -> void:
-	add_to_group("rts_camera")
+	add_to_group(GROUP)
 	reset_view(true)
 	# Launched from a terminal on macOS the window can open without keyboard focus.
 	if DisplayServer.get_name() != "headless" and not Engine.is_editor_hint():

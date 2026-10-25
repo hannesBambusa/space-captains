@@ -61,7 +61,7 @@ static func appeal(captain: Captain, target: String) -> float:
 
 ## Active outpost of [param role] with a free berth, or null.
 static func find_berth(tree: SceneTree, role: String) -> Building:
-	var mgr := tree.get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	var mgr := BuildingManager.of(tree)
 	if mgr == null:
 		return null
 	for b in mgr.buildings:
@@ -81,7 +81,7 @@ static func block_reason(ship: Ship, target: String, offered: bool) -> String:
 	if b == null:
 		return "No free berth at a %s outpost" % target.to_lower()
 	if c.wallet < b.def.ship_cost:
-		return "Can't afford a new ship (%s of %s cr)" % [UIUtil.amount(c.wallet), UIUtil.amount(b.def.ship_cost)]
+		return "Can't afford a new ship (%s of %s cr)" % [Fmt.amount(c.wallet), Fmt.amount(b.def.ship_cost)]
 	if appeal(c, target) + (OFFER_BONUS if offered else 0.0) < WANT:
 		return "Not interested"
 	return ""
@@ -166,7 +166,7 @@ static func switch(ship: Ship, target: String, why: String = "") -> Ship:
 	c.career_since = SimClock.time
 	c.add_history("Left %s, %s to %s at %s" % [old_home, old_role.to_lower(), target.to_lower(), b.display_name])
 	c.flight_log.note(CaptainLog.Kind.CAREER, CaptainLog.Outcome.DID, "Switched from %s to %s work at %s" % [old_role.to_lower(), target.to_lower(), b.display_name],
-			why, "Paid %s cr for the new ship; rank, traits and reputation carry over, the %s skill starts at %d" % [UIUtil.amount(b.def.ship_cost), c.get_specialty_name(), c.skill])
+			why, "Paid %s cr for the new ship; rank, traits and reputation carry over, the %s skill starts at %d" % [Fmt.amount(b.def.ship_cost), c.get_specialty_name(), c.skill])
 	var ns := b.adopt(c)
 	EventLog.post("%s quit mining to fly as a %s" % [c.captain_name, target.to_lower()] if old_role == "Miner" else
 			"%s quit %s work to fly as a %s" % [c.captain_name, old_role.to_lower(), target.to_lower()],

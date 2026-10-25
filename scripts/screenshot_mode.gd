@@ -47,7 +47,7 @@ func _ready() -> void:
 	if clock and advance != 0.0:
 		clock.call("advance", advance)
 	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
-	var cam := get_tree().get_first_node_in_group("rts_camera")
+	var cam := RTSCamera.of(get_tree())
 	if cam:
 		cam.set("edge_pan_enabled", false)
 	_apply_view.call_deferred(cam_spec, focus_name)
@@ -56,7 +56,7 @@ func _ready() -> void:
 func _apply_view(cam_spec: String, focus_name: String) -> void:
 	# Let the system builder configure the camera first (it defers too).
 	await get_tree().process_frame
-	var cam := get_tree().get_first_node_in_group("rts_camera") as Node3D
+	var cam := RTSCamera.of(get_tree())
 	if cam == null:
 		return
 	var parts := cam_spec.split(",") if not cam_spec.is_empty() else PackedStringArray()

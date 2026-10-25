@@ -31,7 +31,7 @@ func _init() -> void:
 
 
 func _on_setup() -> void:
-	var mgr := building.get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	var mgr := BuildingManager.of(building.get_tree())
 	shield = StationShield.new()
 	shield.setup(self, mgr)
 	var frame := building.get_parent()
@@ -61,7 +61,7 @@ func get_status_text() -> String:
 		text += " %d%%" % roundi(shield.charge() * 100.0)
 	elif shield.state == StationShield.State.DOWN:
 		text += ", back in %d s" % ceili(shield.cooldown_left)
-	return text + (", repairing" if repairing else "")
+	return text + (", repairing" if repair.repairing else "")
 
 
 func _on_destroyed() -> void:

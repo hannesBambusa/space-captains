@@ -52,7 +52,11 @@ func orbit_angle(sim_time: float) -> float:
 
 ## Offset from the parent's origin at [param sim_time].
 func orbit_offset(sim_time: float) -> Vector3:
-	var a := orbit_angle(sim_time)
+	return orbit_point(orbit_angle(sim_time))
+
+
+## Offset from the parent's origin at orbit angle [param a] (radians).
+func orbit_point(a: float) -> Vector3:
 	return orbit_basis * Vector3(cos(a), 0.0, sin(a)) * orbit_radius
 
 

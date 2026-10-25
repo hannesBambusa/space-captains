@@ -68,12 +68,14 @@ func _on_pressed() -> void:
 		return
 	if hud.camera and is_instance_valid(target):
 		hud.camera.focus_on(target)
-	if hud.selection and is_instance_valid(contract.target) and (contract.target is SystemBelt or contract.target is Ship or contract.target is ScavengerDen or contract.target is ScrapField):
+	if hud.selection and is_instance_valid(contract.target) and (contract.target is AsteroidCluster or contract.target is PlanetBody or contract.target is Ship or contract.target is ScavengerDen or contract.target is ScrapField):
 		hud.selection.select(contract.target)
 
 
 ## The contract's beacon when there is one, else its target.
 static func _focus_target(c: Contract, owner_hud: HUD) -> Node3D:
+	if c is PlanetRaidContract:
+		return c.target
 	if owner_hud and owner_hud.is_inside_tree():
 		var markers := owner_hud.get_tree().get_first_node_in_group(ContractMarkers.GROUP) as ContractMarkers
 		var m := markers.get_marker(c) if markers else null

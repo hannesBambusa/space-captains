@@ -5,7 +5,9 @@ extends PanelContainer
 ## Stage 3: captains without a ship (ejected, waiting here or still in their
 ## pod) with a "Buy ship" button (the player pays), and for the Outfitter the
 ## Factory warehouse stock it sells from, what the Factory is making,
-## open buy orders and recent sales. The Factory has its own panel (FactoryPanel).
+## open buy orders and recent sales, and which modules research has unlocked
+## (hover for the list with their numbers). The Factory and the Science Lab
+## have their own panels (FactoryPanel, ScienceLabPanel).
 ## Defense Turrets and the Shield Generator get a DefenseSection, the
 ## Salvage Yard a SalvageYardSection (its scrap, ore for sale, auto-buy).
 
@@ -46,6 +48,9 @@ var _defense: DefenseSection
 var _salvage: SalvageYardSection
 ## Sibling panel for Factory selections (made in [method setup]).
 var factory_panel: FactoryPanel
+## Sibling panel for Science Lab selections (made in [method setup]).
+var lab_panel: ScienceLabPanel
+var _outfit_research: Label
 
 
 func _ready() -> void:
@@ -109,6 +114,9 @@ func _ready() -> void:
 	_outfit_section.add_child(UIUtil.label("STOCK FROM THE FACTORY", &"HeaderLabel"))
 	_outfit_stock = UIUtil.label("", &"ValueLabel")
 	_outfit_section.add_child(_outfit_stock)
+	_outfit_research = UIUtil.label("", &"DimLabel")
+	_outfit_research.mouse_filter = Control.MOUSE_FILTER_PASS
+	_outfit_section.add_child(_outfit_research)
 	_outfit_making = UIUtil.label("", &"DimLabel")
 	_outfit_making.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_outfit_making.custom_minimum_size.x = panel_width - 24.0
@@ -150,6 +158,17 @@ func setup(owner_hud: HUD) -> void:
 	factory_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	factory_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	get_parent().add_child.call_deferred(factory_panel)
+	lab_panel = ScienceLabPanel.new()
+	lab_panel.name = "ScienceLabPanel"
+	lab_panel.layout_mode = layout_mode
+	lab_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	lab_panel.offset_left = offset_left - (lab_panel.panel_width - panel_width)
+	lab_panel.offset_top = offset_top
+	lab_panel.offset_right = offset_right
+	lab_panel.offset_bottom = offset_bottom
+	lab_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	lab_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	get_parent().add_child.call_deferred(lab_panel)
 	_setup_factory_panel.call_deferred()
 	if hud.selection:
 		hud.selection.selection_changed.connect(func(t: Node3D) -> void: show_building(t as Building))
@@ -159,10 +178,12 @@ func setup(owner_hud: HUD) -> void:
 func _setup_factory_panel() -> void:
 	UIUtil.no_focus(factory_panel)
 	factory_panel.setup(hud)
+	UIUtil.no_focus(lab_panel)
+	lab_panel.setup(hud)
 
 
 func show_building(b: Building) -> void:
-	if b and b.get_service() is Factory:
+	if b and (b.get_service() is Factory or b.get_service() is ScienceLab):
 		b = null
 	if building and is_instance_valid(building):
 		if building.state_changed.is_connected(_on_building_event):
@@ -260,9 +281,13 @@ func _refresh_outfitter() -> void:
 	var f := _factory if is_instance_valid(_factory) else null
 	if f == null:
 		_outfit_stock.text = "No Factory: nothing to sell"
+		_outfit_research.text = ""
 		_outfit_making.text = ""
 	else:
 		_outfit_stock.text = "%d parts in stock  (%s)" % [f.warehouse_total(), stock_summary(f)]
+		var offered := ModuleTips.offered_count()
+		_outfit_research.text = "Researched: %d of %d modules (hover for the list)" % [offered.x, offered.y]
+		_outfit_research.tooltip_text = ModuleTips.catalogue_tip(f)
 		var orders := f.backorders.size()
 		_outfit_making.text = "Factory: %s.%s" % [f.status_text(), "  %d open order%s." % [orders, "" if orders == 1 else "s"] if orders > 0 else ""]
 	_outfit_tier.text = "Factory tooled to %s. Captains also need the rank: Mk II from Veteran, Mk III from Ace. You get %d%% of each sale (%s cr so far)." % [

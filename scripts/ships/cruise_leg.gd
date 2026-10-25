@@ -54,7 +54,7 @@ func begin(from: Vector3, to: Vector3, offset: float) -> void:
 	start = from
 	start_y = from.y
 	goal = to
-	length = maxf(Vector2(to.x - from.x, to.z - from.z).length(), 1.0)
+	length = maxf(SpaceNav.flat_distance(to, from), 1.0)
 	amplitude = offset
 	end_pad = clampf(length * 0.06, 40.0, 400.0)
 	var span := maxf(length - end_pad, 0.0)
@@ -106,8 +106,8 @@ func peak(end_y: float) -> float:
 ## -1 toward it (inbound). Without a station: by the leg's heading.
 static func highway_sign(from: Vector3, to: Vector3, station: Vector3) -> float:
 	if station != Vector3.INF:
-		var d_from := Vector2(from.x - station.x, from.z - station.z).length()
-		var d_to := Vector2(to.x - station.x, to.z - station.z).length()
+		var d_from := SpaceNav.flat_distance(from, station)
+		var d_to := SpaceNav.flat_distance(to, station)
 		return 1.0 if d_to >= d_from else -1.0
 	return 1.0 if (to.x - from.x) >= 0.0 else -1.0
 

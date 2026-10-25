@@ -92,7 +92,7 @@ func arm(building_def: BuildingDef) -> void:
 		return
 	cancel()
 	def = building_def
-	_camera = get_tree().get_first_node_in_group("rts_camera") as RTSCamera
+	_camera = RTSCamera.of(get_tree())
 	if def.station_addon:
 		_build_bay_ghosts()
 	else:
@@ -260,7 +260,7 @@ func _update_bays(hit: Vector3) -> void:
 		var best_d := def.footprint_radius * 2.0 + 12.0
 		for i: int in _bay_ghosts:
 			var c: Vector3 = _bay_ghosts[i]["center"]
-			var d := Vector2(c.x - local.x, c.z - local.z).length()
+			var d := SpaceNav.flat_distance(c, local)
 			if d < best_d:
 				best_d = d
 				best = i

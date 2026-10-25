@@ -76,7 +76,7 @@ func job_target(trip: CaptainBrain.Trip, working: bool) -> Dictionary:
 	var pos: Vector3 = trip.meta["hover"]
 	var cut: Vector3 = trip.meta["cut"]
 	var out := {"pos": pos, "vel": Vector3.ZERO}
-	if working or Combat.flat_distance(pos, global_position) < 60.0:
+	if working or SpaceNav.flat_distance(pos, global_position) < 60.0:
 		out["face"] = Vector3(cut.x - pos.x, 0.0, cut.z - pos.z)
 	return out
 
@@ -110,7 +110,7 @@ func separation_key() -> int:
 	var t := brain.trip if brain else null
 	if _slot_field == 0 or t == null or not t.meta.has("hover"):
 		return 0
-	return _slot_field if Combat.flat_distance(global_position, t.meta["hover"]) < WORK_ZONE else 0
+	return _slot_field if SpaceNav.flat_distance(global_position, t.meta["hover"]) < WORK_ZONE else 0
 
 
 ## First free spot index around [param f] (wraps past SLOT_COUNT when full).

@@ -121,8 +121,20 @@ static func _save_scavenger(s: ScavengerShip, d: Dictionary) -> void:
 			"faction": String(s.faction_def.id) if s.faction_def else String(Factions.DEFAULT_ID)}
 	if s.ai and s.ai.lead():
 		d["scavenger"]["lead"] = SaveIds.of(s.ai.lead())
+	if s is ClaimConstructor:
+		var c := s as ClaimConstructor
+		d["constructor"] = {"planet": c.planet.def.name if is_instance_valid(c.planet) else "", "angle": c.site_angle, "gang": c.gang,
+				"deploying": c.deploying, "progress": c.deploy_progress}
 	if s.ai:
-		d["ai"] = SaveUtil.props(s.ai, ["state", "stolen_from", "credits_looted", "_loot_clock"])
+		d["ai"] = SaveUtil.props(s.ai, ["state", "stolen_from", "credits_looted", "_loot_clock", "withdraw"])
+		# Guarding: a planet by name (garrison patrols) or a ship by save id (escorts).
+		if s.ai.is_guarding():
+			if s.ai.guard is PlanetBody:
+				d["scavenger"]["guard_body"] = (s.ai.guard as PlanetBody).def.name
+			else:
+				d["scavenger"]["guard"] = SaveIds.of(s.ai.guard)
+			d["scavenger"]["guard_radius"] = s.ai.guard_radius
+			d["scavenger"]["guard_inner"] = s.ai.guard_inner
 		# Raid objective: a building or shuttle by save id, -1 = the station hull.
 		var obj := s.ai.raid_objective
 		if is_instance_valid(obj):
@@ -157,14 +169,7 @@ static func create(tree: SceneTree, d: Dictionary, refs: SaveRefs) -> Ship:
 
 ## Space placement: position, heading and speed in the world frame.
 static func _place_in_space(s: Ship, d: Dictionary) -> void:
-	s.global_position = d["position"] as Vector3
-	var yaw := float(d.get("yaw", 0.0))
-	s.mover.yaw = yaw
-	s.rotation.y = yaw
-	var v := d.get("velocity", Vector3.ZERO) as Vector3
-	s.mover.velocity = Vector3(v.x, 0.0, v.z)
-	s.mover.climb_rate = v.y
-	s.mover.hold()
+	s.place_in_space(d["position"] as Vector3, float(d.get("yaw", 0.0)), d.get("velocity", Vector3.ZERO) as Vector3)
 
 
 static func _create_hired(d: Dictionary, refs: SaveRefs) -> Ship:
@@ -239,7 +244,7 @@ static func _create_shuttle(tree: SceneTree, d: Dictionary, refs: SaveRefs) -> S
 		s.mover.avoid_enabled = true
 		_place_in_space(s, d)
 	depot.shuttles.append(s)
-	s.cargo = PackedInt32Array(sd.get("cargo", [0, 0, 0]))
+	s.cargo = Economy.padded(PackedInt32Array(sd.get("cargo", [0, 0, 0])))
 	s.supplies = bool(sd.get("supplies", false))
 	s.min_station_distance = float(sd.get("min_station_distance", INF))
 	s.total_delivered = int(sd.get("total_delivered", 0))
@@ -267,8 +272,21 @@ static func _create_shuttle(tree: SceneTree, d: Dictionary, refs: SaveRefs) -> S
 static func _create_scavenger(tree: SceneTree, d: Dictionary, refs: SaveRefs) -> Ship:
 	var den := refs.find(int(d.get("den", 0))) as ScavengerDen
 	var sd: Dictionary = d.get("scavenger", {})
-	var s := ScavengerShip.new()
-	s.setup_scavenger(den, String(sd.get("callsign", "?")), bool(sd.get("raider", false)), Factions.get_def(StringName(sd.get("faction", Factions.DEFAULT_ID))))
+	var fdef := Factions.get_def(StringName(sd.get("faction", Factions.DEFAULT_ID)))
+	var s: ScavengerShip
+	var cd: Dictionary = d.get("constructor", {})
+	if not cd.is_empty():
+		var body := PlanetRaidContract.find_planet(tree, String(cd.get("planet", "")))
+		if body == null:
+			return null
+		var c := ClaimConstructor.new()
+		c.setup_constructor(body, float(cd.get("angle", 0.0)), fdef, String(cd.get("gang", "")))
+		c.deploying = bool(cd.get("deploying", false))
+		c.deploy_progress = float(cd.get("progress", 0.0))
+		s = c
+	else:
+		s = ScavengerShip.new()
+		s.setup_scavenger(den, String(sd.get("callsign", "?")), bool(sd.get("raider", false)), fdef)
 	SpaceNav.space_root(tree).add_child(s)
 	s.mover.avoid_enabled = true
 	_place_in_space(s, d)
@@ -305,9 +323,14 @@ static func finish(s: Ship, d: Dictionary, refs: SaveRefs) -> void:
 		var lead_id := int(sd.get("lead", 0))
 		if lead_id != 0:
 			(s as ScavengerShip).ai.set_lead(refs.ship(lead_id) as ScavengerShip)
+		var gb := String(sd.get("guard_body", ""))
+		var gid := int(sd.get("guard", 0))
+		var gnode: Node3D = PlanetRaidContract.find_planet(s.get_tree(), gb) if not gb.is_empty() else (refs.node3d(gid) if gid != 0 else null)
+		if gnode:
+			(s as ScavengerShip).ai.set_guard(gnode, float(sd.get("guard_radius", 3000.0)), float(sd.get("guard_inner", 0.0)))
 		var obj_id := int(sd.get("objective", 0))
 		if obj_id == -1:
-			var mgr := s.get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+			var mgr := BuildingManager.of(s.get_tree())
 			if mgr and mgr.station_hull:
 				(s as ScavengerShip).ai.set_raid_objective(mgr.station_hull)
 		elif obj_id != 0:
@@ -408,6 +431,9 @@ static func _restore_worker_space(s: Ship, state: CaptainBrain.State, trip: Capt
 
 ## Takes back the rock (miners) or the work spot (salvagers) the trip had.
 static func _reclaim_job(s: Ship, trip: CaptainBrain.Trip) -> bool:
+	if s is LanderShip:
+		var rc := trip.contract as PlanetRaidContract
+		return rc != null and is_instance_valid(rc.planet) and trip.meta.has("n")
 	if s is SalvagerShip:
 		var sc := trip.contract as SalvageContract
 		if sc == null or not is_instance_valid(sc.field) or not trip.meta.has("hover"):
@@ -415,8 +441,12 @@ static func _reclaim_job(s: Ship, trip: CaptainBrain.Trip) -> bool:
 		(s as SalvagerShip)._take_slot(sc.field)
 		return true
 	var mc := trip.contract as MiningContract
-	if mc == null or not is_instance_valid(mc.belt) or trip.asteroid < 0 or trip.asteroid >= mc.belt.get_asteroid_count():
+	if mc == null or not is_instance_valid(mc.belt):
 		return false
+	if trip.asteroid < 0 or trip.asteroid >= mc.belt.get_asteroid_count() \
+			or trip.standoff_local.length() > mc.belt.rock_half_width() + 500.0:
+		# A trip from an older save (belt rocks): pick a rock in the cluster now.
+		return (s as MinerShip).job_begin(trip)
 	(s as MinerShip)._claim(mc.belt, trip.asteroid)
 	return true
 
@@ -441,10 +471,7 @@ static func _restore_merc_space(s: Ship, mb: MercenaryBrain, state: CaptainBrain
 # --- Fleets -------------------------------------------------------------------
 
 static func save_fleet(f: MercFleet) -> Dictionary:
-	var members := []
-	for m in f.members:
-		if is_instance_valid(m):
-			members.append(SaveIds.of(m))
+	var members := SaveUtil.ids(f.members)
 	var roster := []
 	for key in f.roster:
 		var r: Dictionary = f.roster[key]

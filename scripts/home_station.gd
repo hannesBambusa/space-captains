@@ -53,15 +53,12 @@ func _process(delta: float) -> void:
 
 
 func _load_model() -> Node3D:
-	if ResourceLoader.exists(STATION_PATH):
-		var packed := load(STATION_PATH) as PackedScene
-		if packed:
-			var inst := packed.instantiate() as Node3D
-			if inst:
-				ModelLoader.dim_emission(inst)
-				return inst
-	print("HomeStation: %s not found, using placeholder" % STATION_PATH)
-	return _build_placeholder()
+	var m := ModelLoader.instantiate(STATION_PATH, func() -> Node3D:
+		print("HomeStation: %s not found, using placeholder" % STATION_PATH)
+		return _build_placeholder())
+	if m.name != "station_placeholder":
+		ModelLoader.dim_emission(m)
+	return m
 
 
 func _build_placeholder() -> Node3D:

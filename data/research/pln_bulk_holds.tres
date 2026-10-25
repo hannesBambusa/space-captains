@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"pln_bulk_holds"
+display_name = "Bulk cargo holds"
+field = 2
+tier = 2
+cost_credits = 500
+cost_iron = 70
+cost_titanium = 30
+research_time = 140.0
+prerequisites = Array[StringName]([&"pln_cargo_racks"])
+unlock_modules = Array[StringName]([&"ore_hold_2", &"salvage_hold_2"])
+tags = PackedStringArray("economy")
+description = "Folding hold frames: Mk II ore and salvage holds carry bigger loads."

@@ -24,6 +24,7 @@ SaveManager="*res://scripts/save/save_manager.gd"
 AudioDirector="*res://scripts/audio_director.gd"
 ContractBoard="*res://scripts/contracts/contract_board.gd"
 EventLog="*res://scripts/event_log.gd"
+Research="*res://scripts/research/research.gd"
 
 [display]
 

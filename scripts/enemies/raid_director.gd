@@ -85,7 +85,7 @@ func sim_step(_dt: float) -> void:
 	if SimClock.time < _next_raid:
 		return
 	_next_raid = SimClock.time + interval() + _rng.randf_range(-raid_jitter, raid_jitter)
-	var mgr := get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	var mgr := BuildingManager.of(get_tree())
 	if mgr == null or mgr.buildings.is_empty():
 		return
 	var den := pick_den()
@@ -139,11 +139,11 @@ func seconds_to_next() -> float:
 func pick_den() -> ScavengerDen:
 	var by_faction: Dictionary = {}
 	var order: Array[FactionDef] = []
-	var sys := get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var sys := SolarSystem.of(get_tree())
 	var grace := sys.system_def.arrival_raid_grace if sys and sys.system_def else 0.0
 	for n in get_tree().get_nodes_in_group(ScavengerDen.GROUP):
 		var d := n as ScavengerDen
-		if d == null or not d.is_alive() or SimClock.time - d.arrived_at < grace:
+		if d == null or not d.is_alive() or not d.is_raid_base() or SimClock.time - d.arrived_at < grace:
 			continue
 		var f := d.faction_def
 		if f.raid_weight <= 0.0 or SimClock.time < f.raid_after:
@@ -178,7 +178,7 @@ func pick_den() -> ScavengerDen:
 ## [member station_after_raids] raids (Syndicate 2), turrets 1 for the
 ## Syndicate only. Disabled structures are skipped.
 func pick_objective(den: ScavengerDen) -> Dictionary:
-	var mgr := get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	var mgr := BuildingManager.of(get_tree())
 	var none := {"aim": Aim.NEAREST, "target": null}
 	if mgr == null:
 		return none
@@ -237,7 +237,7 @@ func warn_raid(den: ScavengerDen, size: int) -> void:
 	pending_target = o["target"]
 	pending_at = SimClock.time + warning_time
 	var f := den.faction_def
-	var what := "%d %s" % [size, UIUtil.plural(f.unit_name.to_lower()) if size != 1 else f.unit_name.to_lower()]
+	var what := "%d %s" % [size, Fmt.plural(f.unit_name.to_lower()) if size != 1 else f.unit_name.to_lower()]
 	var text := "Raid incoming from %s toward %s: %s, launching in %d s" % [den.get_display_name(), objective_text(pending_aim, pending_target), what, roundi(warning_time)]
 	EventLog.post(text, EventLog.Kind.THREAT, den, Vector3.INF, "", f.id)
 	_toast("Raid incoming toward %s" % objective_text(pending_aim, pending_target))
@@ -341,7 +341,7 @@ func load_state(d: Dictionary, refs: SaveRefs = null) -> void:
 	var p: Dictionary = d.get("pending", {})
 	if p.is_empty():
 		return
-	var sys := get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var sys := SolarSystem.of(get_tree())
 	if sys:
 		for den in sys.dens:
 			if is_instance_valid(den) and den.def and den.def.name == String(p.get("den", "")):
@@ -353,7 +353,7 @@ func load_state(d: Dictionary, refs: SaveRefs = null) -> void:
 	pending_at = float(p.get("at", SimClock.time))
 	var tid := int(p.get("target", 0))
 	if tid == -1:
-		var mgr := get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+		var mgr := BuildingManager.of(get_tree())
 		pending_target = mgr.station_hull if mgr else null
 	elif tid != 0 and refs:
 		pending_target = refs.node3d(tid)

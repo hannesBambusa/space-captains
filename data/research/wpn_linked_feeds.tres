@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"wpn_linked_feeds"
+display_name = "Linked ammo feeds"
+field = 1
+tier = 2
+cost_credits = 500
+cost_iron = 60
+cost_titanium = 30
+research_time = 140.0
+unlock_modules = Array[StringName]([&"ammo_rack_2"])
+tags = PackedStringArray("weapons")
+description = "Belt-linked feeds that never jam: the Mk II ammo rack fires faster."

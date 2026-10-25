@@ -82,10 +82,10 @@ func _ready() -> void:
 	_bars.add_theme_constant_override("h_separation", 10)
 	_bars.add_theme_constant_override("v_separation", 3)
 	v.add_child(_bars)
-	var hb := _bar_row("Hull", Combat.HOSTILE_COLOR)
+	var hb := UIUtil.bar_row(_bars, "Hull", Combat.HOSTILE_COLOR, 70.0, Vector2(180.0, 6.0))
 	_hull = hb[0]
 	_hull_text = hb[1]
-	var sb := _bar_row("Shields", Color(1.0, 0.6, 0.35))
+	var sb := UIUtil.bar_row(_bars, "Shields", Color(1.0, 0.6, 0.35), 70.0, Vector2(180.0, 6.0))
 	_shield = sb[0]
 	_shield_text = sb[1]
 
@@ -162,12 +162,22 @@ func show_target(t: Node3D) -> void:
 	_post.text = "Post salvage contract" if t is ScrapField else "Post bounty"
 	if t is ScavengerDen:
 		var d := t as ScavengerDen
-		_header.text = fac.den_kind.to_upper()
-		_info.text = fac.den_info % [d.belt.def.name if d.belt else "?", d.def.spawn_cap]
+		_header.text = d.kind_name().to_upper()
+		_info.text = d.info_text()
 	elif t is ScavengerShip:
 		var sc := t as ScavengerShip
 		_header.text = fac.unit_name.to_upper()
-		_info.text = fac.ship_info % (sc.den.get_display_name() if is_instance_valid(sc.den) else "a destroyed %s" % fac.den_kind)
+		if sc is ClaimConstructor:
+			var cc := sc as ClaimConstructor
+			_header.text = "CLAIM CONSTRUCTOR"
+			_info.text = "Garrison core of %s, flying to %s to claim it. Once it reaches the claim site it deploys a garrison over %d s. Shoot it down and the re-claim fails." % [
+					cc.gang, cc.planet.def.name if is_instance_valid(cc.planet) else "a planet", roundi(ClaimConstructor.DEPLOY_TIME)]
+		elif sc.den is ClaimGarrison:
+			_info.text = "Patrol ship of %s. Attacks any of your ships near %s." % [sc.den.get_display_name(), (sc.den as ClaimGarrison).planet.def.name if is_instance_valid((sc.den as ClaimGarrison).planet) else "its planet"]
+		elif sc.ai and sc.ai.is_guarding() and sc.ai.guard is ClaimConstructor:
+			_info.text = "Escort of a claim group. Guards its constructor and becomes a garrison patrol once the garrison stands."
+		else:
+			_info.text = fac.ship_info % (sc.den.get_display_name() if is_instance_valid(sc.den) else "a destroyed %s" % fac.den_kind)
 	elif t is CargoShuttle:
 		_header.text = "CARGO SHUTTLE"
 		_info.text = ""
@@ -307,18 +317,3 @@ func _on_post() -> void:
 		ContractBoard.post_bounty(target, reward, MercFleet.MAX_SIZE if target is ScavengerDen else 2)
 
 
-func _bar_row(title: String, color: Color) -> Array:
-	var l := UIUtil.label(title, &"DimLabel")
-	l.custom_minimum_size.x = 70.0
-	_bars.add_child(l)
-	var bar := PipMeter.new()
-	bar.style = PipMeter.Style.BAR
-	bar.max_value = 1.0
-	bar.color = color
-	bar.custom_minimum_size = Vector2(180.0, 6.0)
-	_bars.add_child(bar)
-	var t := UIUtil.label("", &"DimLabel")
-	t.custom_minimum_size.x = 80.0
-	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_bars.add_child(t)
-	return [bar, t]

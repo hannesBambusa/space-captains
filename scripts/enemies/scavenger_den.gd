@@ -1,13 +1,14 @@
 class_name ScavengerDen
-extends Node3D
+extends StaticCombatant
 ## A hostile base, built by SolarSystem from a [DenDef]: a Scavenger
 ## Hideout (a hollowed rock with a salvage hangar), a Corsair Nest or a
 ## Syndicate Fortress, by its [FactionDef]. Launches its faction's ships up
 ## to its spawn cap (one per respawn time, a whole pack for pack factions),
 ## sends raiders for the RaidDirector, shoots at player ships that come
 ## close (the faction's point-defence guns) and can be destroyed: a chain of
-## explosions, a large scrap field, its belt's danger drops by the den's
-## danger bonus and no more ships come from it.
+## explosions, a large scrap field, nearby asteroid clusters lose its
+## danger bonus and no more ships come from it. It sits at a fixed spot;
+## [member belt] is the cluster nearest to it right now (clusters drift).
 ## Base defence: a hit from the player's side raises the alarm for
 ## [constant ALERT_TIME] s after the last hit ("Rustjaw Hideout is calling
 ## its raiders home", at most every [constant ALERT_REPEAT] s). Its own
@@ -30,7 +31,9 @@ const RENDER_LAYER := 2
 
 var def: DenDef
 var faction_def: FactionDef
-var belt: SystemBelt
+## The cluster within AsteroidCluster.DEN_REACH of the base right now, or null.
+var belt: AsteroidCluster:
+	get: return _near_cluster()
 var durability: Durability
 var faction: Combat.Faction = Combat.Faction.SCAVENGER
 var dead: bool = false
@@ -80,10 +83,9 @@ var _alert_line_at: float = -1.0e9
 var _call_timer: float = 0.0
 
 
-func setup(den_def: DenDef, claimed: SystemBelt) -> void:
+func setup(den_def: DenDef, _unused: Variant = null) -> void:
 	def = den_def
 	faction_def = den_def.get_faction()
-	belt = claimed
 	name = StringName(def.name.validate_node_name().replace(" ", ""))
 
 
@@ -114,7 +116,7 @@ func _ready() -> void:
 	_hangar_light.light_cull_mask = RENDER_LAYER
 	# In front of the mouth (spawn_point, local +Z out): (0, 4, 30) on the scavenger den.
 	var sp := _model.find_child("spawn_point", true, false) as Node3D
-	var k := faction_def.den_hit_radius / 42.0
+	var k := faction_def.den_scale()
 	if sp:
 		var o := ModelLoader.relative_transform(self, sp).origin
 		_hangar_light.position = Vector3(o.x, 4.0 * k, o.z + 6.0 * k)
@@ -169,13 +171,9 @@ func sim_step(dt: float) -> void:
 ## at once.
 func play_arrival() -> void:
 	arrived_at = SimClock.time
-	var k := faction_def.den_hit_radius / 42.0
+	var k := faction_def.den_scale()
 	WarpFx.flash(get_tree(), global_position, 110.0 * k)
-	_arrival_mat = ShaderMaterial.new()
-	_arrival_mat.shader = Building.CONSTRUCTION_SHADER
-	_arrival_mat.set_shader_parameter("grid_size", 6.0 * k)
-	_arrival_mat.set_shader_parameter("holo_color", faction_def.color.lerp(Color.WHITE, 0.2))
-	_arrival_mat.set_shader_parameter("seam_color", faction_def.light_color)
+	_arrival_mat = faction_def.holo_material(6.0 * k)
 	for mi in ModelLoader.meshes_of(_model):
 		mi.material_override = _arrival_mat
 	_arrival_left = ARRIVAL_LOOK_TIME
@@ -184,7 +182,7 @@ func play_arrival() -> void:
 
 func _step_arrival(dt: float) -> void:
 	_arrival_left = maxf(_arrival_left - dt, 0.0)
-	var k := faction_def.den_hit_radius / 42.0
+	var k := faction_def.den_scale()
 	var p := 1.0 - _arrival_left / ARRIVAL_LOOK_TIME
 	if _arrival_mat:
 		_arrival_mat.set_shader_parameter("fill_y", global_position.y + lerpf(-70.0, 70.0, p) * k)
@@ -220,10 +218,6 @@ func get_aim_velocity() -> Vector3:
 	return Vector3.ZERO
 
 
-func get_dodge() -> float:
-	return 0.0
-
-
 func get_display_name() -> String:
 	return def.name if def else "Hostile base"
 
@@ -238,6 +232,47 @@ func get_status_text() -> String:
 
 func hull_fraction() -> float:
 	return durability.fraction()
+
+
+## Target panel blurb.
+func info_text() -> String:
+	return faction_def.den_info % [claim_name(), def.spawn_cap]
+
+
+## Lower-case kind for headers and tooltips: "scavenger hideout".
+func kind_name() -> String:
+	return faction_def.den_kind
+
+
+## What it holds, for tooltips: "claims Talon Reach".
+func claim_text() -> String:
+	return "claims %s" % claim_name()
+
+
+## The cluster it preys on now, else its region ("Talon Reach").
+func claim_name() -> String:
+	var b := belt
+	if b:
+		return b.def.name
+	return def.belt_name if def and not def.belt_name.is_empty() else "the outer dark"
+
+
+func _near_cluster() -> AsteroidCluster:
+	if not is_inside_tree():
+		return null
+	var sys := SolarSystem.of(get_tree())
+	return sys.cluster_near(global_position, AsteroidCluster.DEN_REACH) if sys else null
+
+
+## Damage per second of its own guns (MercFleet's need estimate).
+func gun_dps() -> float:
+	return faction_def.den_gun_dps()
+
+
+## Sends raids at the colony (RaidDirector) and counts as a hostile base
+## for the threat clock (ThreatDirector). Garrisons do neither.
+func is_raid_base() -> bool:
+	return true
 
 
 func take_hit(amount: float, attacker: Node3D, at: Vector3) -> void:
@@ -345,8 +380,7 @@ func spawn(raid: bool = false, out_already: bool = false) -> ScavengerShip:
 	var root := SpaceNav.space_root(get_tree())
 	root.add_child(s)
 	s.global_position = pos
-	s.mover.yaw = ShipMover.yaw_for(out_dir)
-	s.rotation.y = s.mover.yaw
+	s.set_heading(ShipMover.yaw_for(out_dir))
 	s.mover.avoid_enabled = true
 	s.mover.velocity = out_dir * 40.0
 	if raid:
@@ -424,7 +458,7 @@ func _guns(dt: float) -> void:
 	var pool := CombatWorld.projectiles_of(get_tree())
 	if pool == null:
 		return
-	var spread := f.den_hit_radius / 42.0
+	var spread := f.den_scale()
 	for g in f.den_guns:
 		var from := global_transform * (Vector3(_rng.randf_range(-25.0, 25.0), 14.0, _rng.randf_range(-20.0, 20.0)) * spread)
 		var tp := _gun_target.global_position
@@ -443,7 +477,7 @@ func destroy(killer: Node3D = null) -> void:
 	dead = true
 	var world := CombatWorld.of(get_tree())
 	if world:
-		var size := faction_def.den_hit_radius / 42.0
+		var size := faction_def.den_scale()
 		world.fx.explode_chain(global_position, 45.0 * size, 7, 2.4)
 		var ruins := world.spawn_scrap(global_position + get_outward() * 20.0, roundi(world.den_scrap * faction_def.loot_mult), world.den_scrap_life, 130.0 * size, "%s ruins" % get_display_name())
 		ruins.set_meta(&"den_ruins", true)
@@ -453,13 +487,9 @@ func destroy(killer: Node3D = null) -> void:
 			EventLog.post("%s's stash of stolen cargo spilled into the ruins (+%d scrap)" % [get_display_name(), extra], EventLog.Kind.REWARD, ruins, Vector3.INF, "", faction_def.id)
 			stash = 0.0
 	_apply_ruined_look()
-	if belt:
-		belt.danger_reduction += def.danger_bonus
 	_credit_den_kill(killer)
 	remove_from_group(Combat.GROUP)
-	var by := ""
-	if is_instance_valid(killer) and killer.has_method(&"get_display_name"):
-		by = " by %s" % String(killer.call(&"get_display_name"))
+	var by := Combat.by_suffix(killer)
 	var has_bounty := false
 	for c in ContractBoard.get_for_target(self):
 		if c is BountyContract:
@@ -547,14 +577,8 @@ func _animate() -> void:
 ## Hull, stash, spawn counters and its ships (by save id; the ships are
 ## saved with the other ships).
 func save_state() -> Dictionary:
-	var sp := []
-	for s in spawns:
-		if is_instance_valid(s) and not s.dead:
-			sp.append(SaveIds.of(s))
-	var rd := []
-	for s in raiders:
-		if is_instance_valid(s) and not s.dead:
-			rd.append(SaveIds.of(s))
+	var sp := SaveUtil.ids(spawns, true)
+	var rd := SaveUtil.ids(raiders, true)
 	return {"id": SaveIds.of(self), "name": def.name if def else String(name), "dead": dead, "durability": SaveUtil.durability(durability),
 			"total_spawned": total_spawned, "stash": stash, "respawn_clock": _respawn_clock, "spawn_seq": _spawn_seq,
 			"gun_cooldown": _gun_cooldown, "arrived_at": arrived_at, "rng": SaveUtil.rng_state(_rng), "spawns": sp, "raiders": rd,

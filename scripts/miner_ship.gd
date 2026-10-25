@@ -1,9 +1,12 @@
 class_name MinerShip
 extends Ship
-## A hired miner. Works mining contracts: picks an ore asteroid on the
-## contract's belt (nearest to where it reaches the belt), hovers next to it,
-## drills one load (beam + sparks, hold fills), and brings it home.
-## Belt lanes: the miner crosses the belt in its lane (over or under, see
+## A hired miner. Works mining contracts: picks an ore asteroid in the
+## contract's cluster (nearest to where it reaches the cluster), hovers next
+## to it, drills one load (beam + sparks, hold fills; the load leaves the
+## cluster's reserve, AsteroidCluster.take_load), and brings it home. A mined-out
+## cluster, or one whose last loads are already being drilled, sends the
+## miner home with a log line.
+## Cluster lanes: the miner crosses the clump in its lane (over or under, see
 ## Ship), stops above (below) the hover point, drops to the rock's real
 ## height beside it and climbs back out the same way. The hover point is
 ## picked so it and the climb column stay clear of the neighbouring rocks.
@@ -60,16 +63,21 @@ func job_begin(trip: CaptainBrain.Trip) -> bool:
 	if mc == null or not is_instance_valid(mc.belt):
 		return false
 	var belt := mc.belt
+	if not belt.has_ore_for_new_trip():
+		_note_mined_out(mc)
+		return false
 	var base := SpaceNav.nearest_belt_point(belt, global_position)
-	var radial := Vector3(base.x, 0.0, base.z).normalized()
-	var tangent := radial.cross(Vector3.UP)
+	var inward := belt.global_position - base
+	inward.y = 0.0
+	inward = inward.normalized() if inward.length() > 1.0 else Vector3.RIGHT
+	var tangent := inward.cross(Vector3.UP)
 	var idx := -1
 	for attempt in 5:
 		var q := base + tangent * _rng.randf_range(-search_spread, search_spread) \
-				+ radial * _rng.randf_range(-0.25, 0.25) * belt.def.width
-		# Search on this ship's lane side of the thick band: a rock in that
+				+ inward * _rng.randf_range(0.0, 0.35) * belt.rock_half_width()
+		# Search on this ship's lane side of the thick clump: a rock in that
 		# half means a short drop from the lane.
-		q.y = lane_sign() * belt.def.vertical_spread * 0.45
+		q.y = belt.global_position.y + lane_sign() * belt.def.vertical_spread * 0.45
 		var found := belt.find_nearest_ore(q, mc.ore_type)
 		if found < 0:
 			found = belt.find_nearest_ore(q, -1)
@@ -86,11 +94,11 @@ func job_begin(trip: CaptainBrain.Trip) -> bool:
 	trip.work_time = ContractBoard.mining_rules.mine_time_for(trip.ore) * (stats.drill_mult if stats else 1.0) * load_time_scale()
 	trip.progress = 0.0
 	trip.cargo = stats.cargo if stats else 1.0
-	# Hover point, preferably on the side facing the ship, fixed in belt space so it turns with the ring.
+	# Hover point, preferably on the side facing the ship, fixed in cluster space so it drifts with the clump.
 	var to_ship := global_position - (ast["position"] as Vector3)
 	to_ship.y = 0.0
 	if to_ship.length() < 1.0:
-		to_ship = -radial
+		to_ship = -inward
 	trip.standoff_local = _pick_standoff(belt, idx, to_ship.normalized())
 	_claim(belt, idx)
 	return true
@@ -104,7 +112,7 @@ func job_target(trip: CaptainBrain.Trip, working: bool) -> Dictionary:
 	var ast_pos := belt.get_asteroid_position(trip.asteroid)
 	var pos := belt.global_transform * trip.standoff_local
 	var out := {"pos": pos, "vel": SpaceNav.belt_point_velocity(belt, pos)}
-	var dist := Vector2(pos.x - global_position.x, pos.z - global_position.z).length()
+	var dist := SpaceNav.flat_distance(pos, global_position)
 	if working or dist < 60.0:
 		out["face"] = Vector3(ast_pos.x - pos.x, 0.0, ast_pos.z - pos.z)
 	return out
@@ -115,7 +123,7 @@ func job_target(trip: CaptainBrain.Trip, working: bool) -> Dictionary:
 ## and growing gaps; takes the first whose spot and climb column up (down)
 ## to the lane keep [member hover_clearance] from every neighbour, else the
 ## clearest. Only the rocks near this one are checked.
-func _pick_standoff(belt: SystemBelt, idx: int, toward: Vector3) -> Vector3:
+func _pick_standoff(belt: AsteroidCluster, idx: int, toward: Vector3) -> Vector3:
 	var c := belt.get_asteroid_local(idx)
 	var r := belt.get_asteroid_radius(idx)
 	var dir0 := belt.global_basis.inverse() * toward
@@ -153,7 +161,22 @@ func job_work(trip: CaptainBrain.Trip, dt: float) -> bool:
 	trip.progress = clampf(trip.progress + dt / maxf(trip.work_time, 0.1), 0.0, 1.0)
 	hold_fill = trip.progress
 	hold_ore = trip.ore
-	return trip.progress >= 1.0
+	if trip.progress >= 1.0:
+		var mc := trip.contract as MiningContract
+		if mc and is_instance_valid(mc.belt):
+			mc.belt.take_load()
+		return true
+	return false
+
+
+## Logs the turn back from a cluster with no load left for this trip.
+func _note_mined_out(mc: MiningContract) -> void:
+	if brain == null:
+		return
+	var where := mc.get_target_name()
+	var why := "%s is mined out" % where if mc.depleted or (is_instance_valid(mc.belt) and mc.belt.is_depleted) \
+			else "the last loads in %s are already being drilled" % where
+	brain.note(CaptainLog.Kind.CONTRACT, CaptainLog.Outcome.FAILED, "Turned back from %s" % where, "Nothing left to mine: %s" % why)
 
 
 ## Work time multiplier for the hold size: half the extra load in time.
@@ -238,11 +261,21 @@ func _update_beam() -> void:
 
 # --- Claims -------------------------------------------------------------------
 
-static func _key(belt: SystemBelt, idx: int) -> String:
+## Rocks on [param belt] being drilled (or headed for) right now.
+static func claims_on(belt: AsteroidCluster) -> int:
+	var prefix := "%s:" % belt.name
+	var n := 0
+	for k: String in _claims:
+		if k.begins_with(prefix):
+			n += 1
+	return n
+
+
+static func _key(belt: AsteroidCluster, idx: int) -> String:
 	return "%s:%d" % [belt.name, idx]
 
 
-func _claim(belt: SystemBelt, idx: int) -> void:
+func _claim(belt: AsteroidCluster, idx: int) -> void:
 	_release_claim()
 	_claim_key = _key(belt, idx)
 	_claims[_claim_key] = self

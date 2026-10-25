@@ -30,6 +30,16 @@ func ship(id: int) -> Ship:
 	return find(id) as Ship
 
 
+## The captains of [param ids] that were restored.
+func captains(ids: Array) -> Array[Captain]:
+	var out: Array[Captain] = []
+	for id in ids:
+		var c := captain(int(id))
+		if c:
+			out.append(c)
+	return out
+
+
 func building(id: int) -> Building:
 	return find(id) as Building
 

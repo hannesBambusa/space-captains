@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"wpn_mass_drivers"
+display_name = "Mass driver cannons"
+field = 1
+tier = 3
+cost_credits = 1500
+cost_titanium = 90
+cost_crystal = 80
+research_time = 320.0
+prerequisites = Array[StringName]([&"wpn_rail_cannons", &"wpn_fire_control"])
+unlock_modules = Array[StringName]([&"autocannon_3"])
+tags = PackedStringArray("weapons")
+description = "Full mass drivers in a gun turret: the Mk III autocannon."

@@ -24,7 +24,7 @@ func setup(den_def: DenDef, at_time: float) -> void:
 
 func _ready() -> void:
 	add_to_group(GROUP)
-	var k := faction_def.den_hit_radius / 42.0
+	var k := faction_def.den_scale()
 	set_meta(&"focus_radius", 60.0 * k)
 	set_meta(&"focus_distance", 520.0 * k)
 	var path := FactionDef.pick_model(faction_def.den_model_path, ScavengerDen.MODEL_PATH)
@@ -34,11 +34,7 @@ func _ready() -> void:
 	if path != faction_def.den_model_path:
 		model.scale *= faction_def.den_fallback_scale
 	MeshUtil.set_layers_recursive(model, ScavengerDen.RENDER_LAYER)
-	var mat := ShaderMaterial.new()
-	mat.shader = Building.CONSTRUCTION_SHADER
-	mat.set_shader_parameter("grid_size", 6.0 * k)
-	mat.set_shader_parameter("holo_color", faction_def.color.lerp(Color.WHITE, 0.2))
-	mat.set_shader_parameter("seam_color", faction_def.light_color)
+	var mat := faction_def.holo_material(6.0 * k)
 	mat.set_shader_parameter("fill_y", -1.0e6)
 	for mi in ModelLoader.meshes_of(model):
 		mi.material_override = mat
@@ -51,8 +47,7 @@ func time_left() -> float:
 
 ## "1:05"
 func countdown_text() -> String:
-	var s := ceili(time_left())
-	return "%d:%02d" % [s / 60, s % 60]
+	return Fmt.clock(ceili(time_left()))
 
 
 ## "Unknown corsair nest" (the faction is known from the warning, the base is not).

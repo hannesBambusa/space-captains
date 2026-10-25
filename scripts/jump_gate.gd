@@ -143,14 +143,9 @@ func _collect_emitters(model: Node) -> void:
 
 
 func _load_model() -> Node3D:
-	if ResourceLoader.exists(GATE_PATH):
-		var packed := load(GATE_PATH) as PackedScene
-		if packed:
-			var inst := packed.instantiate() as Node3D
-			if inst:
-				return inst
-	print("JumpGate: %s not found, using torus fallback" % GATE_PATH)
-	return _build_fallback()
+	return ModelLoader.instantiate(GATE_PATH, func() -> Node3D:
+		print("JumpGate: %s not found, using torus fallback" % GATE_PATH)
+		return _build_fallback())
 
 
 func _build_fallback() -> Node3D:

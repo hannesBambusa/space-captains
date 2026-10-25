@@ -16,10 +16,23 @@ extends Resource
 
 @export_group("Bodies")
 @export var planets: Array[PlanetDef] = []
-@export var belts: Array[BeltDef] = []
+## Starting asteroid clusters (ClusterSpawner adds new ones as these are mined out).
+@export var belts: Array[ClusterDef] = []
 @export var gates: Array[GateDef] = []
-## Scavenger Dens, each claiming a belt (its danger includes the den).
+## Hostile bases at fixed spots; each adds its danger to clusters nearby.
 @export var dens: Array[DenDef] = []
+
+@export_group("Asteroid clusters")
+## Clusters kept in the system: below the minimum a new one is surveyed.
+@export var cluster_min: int = 4
+@export var cluster_max: int = 6
+## Sim seconds from a cluster running out (or the count falling under the
+## minimum) to a new one showing up, random in this range.
+@export var cluster_respawn: Vector2 = Vector2(180.0, 360.0)
+## Orbit radius range new clusters may take, metres.
+@export var cluster_orbit_range: Vector2 = Vector2(5000.0, 44000.0)
+## Names for new clusters, used in order, skipping names in use.
+@export var cluster_names: PackedStringArray = []
 
 @export_group("Threat escalation")
 ## A den arrives at the latest at its min arrival time times this, growth or not.
@@ -63,7 +76,7 @@ func get_extent() -> float:
 			moon_reach = maxf(moon_reach, m.orbit_radius + m.radius)
 		r = maxf(r, p.orbit_radius + moon_reach)
 	for b in belts:
-		r = maxf(r, b.orbit_radius + b.width * 0.5)
+		r = maxf(r, b.orbit_radius + b.radius())
 	for g in gates:
 		r = maxf(r, g.orbit_radius + 300.0)
 	return r + 1500.0

@@ -1,7 +1,7 @@
 class_name Minimap
 extends PanelContainer
 ## Top-right minimap of the system plane, turned with the camera (view
-## forward is up): the star, planet orbits and planets, belts as rings, dens,
+## forward is up): the star, planet orbits and planets, asteroid clusters as blobs on faint orbit lines, dens,
 ## the home station and its shield bubble ring (while it is up), the defence
 ## zones (cyan, gold with a kill bounty, red with raiders inside), the camera's
 ## view on the plane, and a dot for every ship in the [ShipMarkers] colours.
@@ -15,6 +15,8 @@ const STAR_COLOR := Color(1.0, 0.86, 0.55)
 const ORBIT_COLOR := Color(0.6, 0.72, 0.9, 0.22)
 const PLANET_COLOR := Color(0.75, 0.82, 0.95)
 const BELT_COLOR := Color(0.75, 0.62, 0.48, 0.28)
+## Cluster blob tint per ore (rock, iron, titanium, crystal).
+const CLUSTER_COLORS: Array[Color] = [Color(0.7, 0.66, 0.6), Color(0.86, 0.6, 0.42), Color(0.74, 0.8, 0.9), Color(0.5, 0.88, 1.0)]
 const HOME_COLOR := Color(1.0, 0.7, 0.35)
 const VIEW_COLOR := Color(0.85, 0.92, 1.0, 0.55)
 
@@ -26,6 +28,8 @@ var markers: ShipMarkers
 var is_open := true
 
 var _canvas: Control
+## Orbiter -> its orbit as top-down points ([method _orbit_points]).
+var _orbit_cache: Dictionary = {}
 var _mode_button: Button
 var _toggle_button: Button
 var _zoom_button: Button
@@ -138,6 +142,29 @@ func _to_map(p: Vector3) -> Vector2:
 	return Vector2(d.dot(right), d.dot(back)) / _scale() + Vector2(map_px, map_px) * 0.5
 
 
+## World (x, z) to map pixels as one transform (cheap for whole point arrays).
+func _map_xform() -> Transform2D:
+	var yaw := _yaw()
+	var sc := _scale()
+	var x_axis := Vector2(cos(yaw), sin(yaw)) / sc
+	var y_axis := Vector2(-sin(yaw), cos(yaw)) / sc
+	var c := _center_world()
+	return Transform2D(x_axis, y_axis, Vector2(map_px, map_px) * 0.5 - x_axis * c.x - y_axis * c.z)
+
+
+## Top-down (x, z) points of an orbit, cached per body: the orbit never changes.
+func _orbit_points(body: Orbiter) -> PackedVector2Array:
+	var pts: PackedVector2Array = _orbit_cache.get(body, PackedVector2Array())
+	if pts.is_empty():
+		pts.resize(97)
+		for i in 97:
+			var a := TAU * float(i) / 96.0
+			var w := body.orbit_point(a)
+			pts[i] = Vector2(w.x, w.z)
+		_orbit_cache[body] = pts
+	return pts
+
+
 func _to_world(m: Vector2) -> Vector3:
 	var yaw := _yaw()
 	var right := Vector3(cos(yaw), 0.0, -sin(yaw))
@@ -207,6 +234,26 @@ func _fly_to(p: Vector3) -> void:
 
 # --- Drawing --------------------------------------------------------------------
 
+## Asteroid clusters: a faint dotted orbit and a soft blob sized to the
+## clump, fading with what is left in it.
+func _draw_clusters(c: Control, sys: SolarSystem, sc: float, xf: Transform2D) -> void:
+	for k in _orbit_cache.keys():
+		if not is_instance_valid(k):
+			_orbit_cache.erase(k)
+	for belt in sys.belts:
+		c.draw_polyline(xf * _orbit_points(belt), Color(BELT_COLOR, 0.35), 1.0, true)
+		var bc := xf * Vector2(belt.global_position.x, belt.global_position.z)
+		var r := maxf(belt.rock_half_width() / sc, 4.0)
+		var tint: Color = CLUSTER_COLORS[clampi(belt.def.ore_type, 0, CLUSTER_COLORS.size() - 1)]
+		var fill := clampf(1.0 - belt.thin_level, 0.25, 1.0)
+		c.draw_circle(bc, r * 1.7, Color(tint, 0.14 * fill))
+		var seed_v := float(belt.def.seed % 89)
+		for k in 4:
+			var a := seed_v + float(k) * 1.9
+			c.draw_circle(bc + Vector2(cos(a), sin(a)) * r * 0.45, r * 0.55, Color(tint, 0.45 * fill))
+		c.draw_circle(bc, r * 0.6, Color(tint, 0.8 * fill))
+
+
 func _draw_map() -> void:
 	var c := _canvas
 	var size := Vector2(map_px, map_px)
@@ -228,21 +275,22 @@ func _draw_map() -> void:
 	var sys := hud.solar_system
 	var sc := _scale()
 	var origin := _to_map(Vector3.ZERO)
-	for belt in sys.belts:
-		var bc := _to_map(belt.global_position)
-		var w := maxf(belt.def.width / sc, 2.0)
-		c.draw_arc(bc, belt.def.orbit_radius / sc, 0.0, TAU, 96, BELT_COLOR, w, true)
+	var xf := _map_xform()
 	for p in sys.planets:
 		# Top-down projection of the inclined orbit (a slight ellipse).
-		var pts := PackedVector2Array()
-		pts.resize(97)
-		for i in 97:
-			var a := TAU * float(i) / 96.0
-			pts[i] = _to_map(p.orbit_basis * Vector3(cos(a), 0.0, sin(a)) * p.def.orbit_radius)
-		c.draw_polyline(pts, ORBIT_COLOR, 1.0, true)
+		c.draw_polyline(xf * _orbit_points(p), ORBIT_COLOR, 1.0, true)
+	_draw_clusters(c, sys, sc, xf)
+	var claims := PlanetClaims.of(get_tree())
 	for p in sys.planets:
 		var pm := _to_map(p.global_position)
-		c.draw_circle(pm, clampf(p.def.radius / sc, 2.0, 6.0), PLANET_COLOR.darkened(0.25))
+		var pr := clampf(p.def.radius / sc, 2.0, 6.0)
+		c.draw_circle(pm, pr, PLANET_COLOR.darkened(0.25))
+		if claims:
+			# Claimed worlds (and moons) get a ring in the faction colour.
+			for b in [p] + p.get_children().filter(func(n: Node) -> bool: return n is PlanetBody):
+				var g := claims.garrison_of(b as Node3D)
+				if g:
+					c.draw_arc(_to_map((b as Node3D).global_position), pr + 2.5, 0.0, TAU, 20, Color(g.faction_def.color, 0.9), 1.5, true)
 	c.draw_circle(origin, 4.0, STAR_COLOR)
 	c.draw_circle(origin, 7.0, Color(STAR_COLOR, 0.25))
 	if is_instance_valid(sys.home_station):

@@ -34,7 +34,15 @@ const DEFAULT_PATHS := {
 	"Mercenary": "res://data/loadouts/mercenary_default.tres",
 	"Scavenger": "res://data/loadouts/scavenger_default.tres",
 	"Salvager": "res://data/loadouts/salvager_default.tres",
+	"Lander": "res://data/loadouts/lander_default.tres",
 }
+## Dropship research (Research autoload) for landers: more cargo per raid,
+## tougher hulls.
+const HEAVY_DROPSHIPS := &"pln_heavy_dropships"
+const ARMOURED_DROPSHIPS := &"eng_armoured_dropships"
+const HEAVY_CARGO_BONUS := 0.4
+const ARMOURED_HULL_MULT := 1.4
+const ARMOURED_SHIELD_BONUS := 60.0
 
 
 ## The module in [param slot], or null when the slot is empty.
@@ -128,6 +136,16 @@ func derive(captain: Captain = null) -> ShipStats:
 			s.fire_rate = m.fire_rate
 			s.drill_mult = m.drill_mult
 	s.fire_rate *= fire_mult
+	if role_name == "Mercenary":
+		s.accuracy_bonus += Research.merc_accuracy()
+	elif role_name == "Miner":
+		s.cargo += Research.miner_hold()
+	if role_name == "Lander":
+		if Research.is_done(HEAVY_DROPSHIPS):
+			s.cargo += HEAVY_CARGO_BONUS
+		if Research.is_done(ARMOURED_DROPSHIPS):
+			s.max_hull *= ARMOURED_HULL_MULT
+			s.max_shields += ARMOURED_SHIELD_BONUS
 	if captain:
 		var p := captain.piloting_scale()
 		s.max_speed *= p

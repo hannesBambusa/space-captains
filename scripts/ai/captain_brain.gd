@@ -93,7 +93,7 @@ var rng := RandomNumberGenerator.new()
 ## Last refusal, for the UI ("" when the last decision was a yes).
 var last_refusal: String = ""
 var last_refusal_target: String = ""
-## Last decision line for the UI ("Took Cinder Belt", "Refused Talon Reach: ...").
+## Last decision line for the UI ("Took Cinder Cluster", "Refused Talon Reach: ...").
 var last_decision: String = ""
 
 var _timer: float = 0.0
@@ -150,7 +150,7 @@ func can_warp() -> bool:
 		State.TRAVELING_TO_JOB, State.RETURNING:
 			return _threat < 0.05 and _calm()
 		State.FLEEING:
-			return _calm() and Combat.nearest_hostile(ship.get_tree(), ship.global_position, PANIC_WARP_CLEAR, ship.faction) == null
+			return _calm() and ship.nearest_hostile(PANIC_WARP_CLEAR) == null
 	return false
 
 
@@ -180,7 +180,7 @@ func warp_lead() -> ShipMover:
 	return null
 
 
-## Where the ship is heading, for status lines ("Cinder Belt", "home").
+## Where the ship is heading, for status lines ("Cinder Cluster", "home").
 func destination_name() -> String:
 	match state:
 		State.TRAVELING_TO_JOB, State.MINING:
@@ -278,6 +278,12 @@ func update(dt: float) -> void:
 
 # --- Decisions ----------------------------------------------------------------
 
+## [param text] with its first letter in lower case (keeps names in
+## reasons like "Claimed by Redwake Corsairs" capitalised).
+static func lower_first(text: String) -> String:
+	return text.left(1).to_lower() + text.substr(1) if not text.is_empty() else text
+
+
 ## Scores the available contracts now. Returns the chosen evaluation (or the
 ## best refused one, or null when there is nothing for this role).
 func score_contracts(contracts: Array[Contract] = []) -> RoleEvaluator.Evaluation:
@@ -287,7 +293,7 @@ func score_contracts(contracts: Array[Contract] = []) -> RoleEvaluator.Evaluatio
 
 
 func _decide() -> void:
-	if ship.hull_fraction() < MercenaryEvaluator.MIN_HULL and RepairBay.can_afford(ship):
+	if RepairBay.should_repair(ship, MercenaryEvaluator.MIN_HULL):
 		last_decision = "Repairing first (hull %d%%)" % roundi(ship.hull_fraction() * 100.0)
 		note_repairs_first()
 		_back_to_docked()
@@ -308,19 +314,25 @@ func _decide() -> void:
 			note(CaptainLog.Kind.REST, CaptainLog.Outcome.DID, "Took a break instead of working",
 					"%s, Diligence %d: break chance %d%% per look at the board (profile %d%%)" % [captain.get_personality_name(), captain.diligence,
 					roundi(break_chance() * 100.0), roundi(profile.break_chance * 100.0)],
-					"Break of %s (profile %s to %s, sim time)" % [UIUtil.clock(_timer), UIUtil.clock(profile.break_time.x), UIUtil.clock(profile.break_time.y)], "break")
+					"Break of %s (profile %s to %s, sim time)" % [Fmt.clock(_timer), Fmt.clock(profile.break_time.x), Fmt.clock(profile.break_time.y)], "break")
 		return
 	if e.accept and _take(e.contract, e):
 		return
+	last_decision = "Refused %s: %s" % [e.contract.get_target_name(), lower_first(e.reason)]
+	_record_refusal(e)
+	_back_to_docked()
+
+
+## Remembers the refusal of [param e] for the decision log; the HUD hears of
+## it when it is new (another reason or another contract).
+func _record_refusal(e: RoleEvaluator.Evaluation) -> void:
 	var target := e.contract.get_target_name()
 	var changed := e.reason != last_refusal or target != last_refusal_target
 	last_refusal = e.reason
 	last_refusal_target = target
-	last_decision = "Refused %s: %s" % [target, e.reason.to_lower()]
 	note_refusal(e, changed)
 	if changed:
 		decided.emit(self, false, "%s: %s" % [target, e.reason])
-	_back_to_docked()
 
 
 # --- Decision log -------------------------------------------------------------
@@ -340,14 +352,14 @@ func note_refusal(e: RoleEvaluator.Evaluation, changed: bool) -> void:
 		# Same line as the answer to the fleet's call (MercenaryBrain.decline_fleet).
 		var dkey := DecisionNotes.key_for("decline", e.contract, e.reason)
 		if not captain.flight_log.bump(dkey):
-			note(CaptainLog.Kind.FLEET, CaptainLog.Outcome.REFUSED, "Declined %s's fleet for %s: %s" % [bounty.fleet.leader_name, DecisionNotes.job_name(e.contract), e.reason.to_lower()],
+			note(CaptainLog.Kind.FLEET, CaptainLog.Outcome.REFUSED, "Declined %s's fleet for %s: %s" % [bounty.fleet.leader_name, DecisionNotes.job_name(e.contract), lower_first(e.reason)],
 					DecisionNotes.why(self, e), DecisionNotes.detail(self, e), dkey)
 		return
 	var key := DecisionNotes.key_for("no", e.contract, e.reason)
 	if not changed and captain.flight_log.bump(key):
 		return
 	var kind := CaptainLog.Kind.FLEET if e.terms.has("join_fleet") or e.reason == MercenaryEvaluator.FLEET_FULL else CaptainLog.Kind.CONTRACT
-	note(kind, CaptainLog.Outcome.REFUSED, "Refused %s: %s" % [DecisionNotes.job_name(e.contract), e.reason.to_lower()],
+	note(kind, CaptainLog.Outcome.REFUSED, "Refused %s: %s" % [DecisionNotes.job_name(e.contract), lower_first(e.reason)],
 			DecisionNotes.why(self, e), DecisionNotes.detail(self, e), key)
 
 
@@ -361,7 +373,7 @@ func note_accept(e: RoleEvaluator.Evaluation, headline: String, kind: CaptainLog
 func note_repairs_first() -> void:
 	note(CaptainLog.Kind.REPAIR, CaptainLog.Outcome.DID, "Stayed in the berth for repairs",
 			"Hull %d%%, below %d%%, and the wallet (%s cr) can pay the %s cr bill" % [roundi(ship.hull_fraction() * 100.0), roundi(MercenaryEvaluator.MIN_HULL * 100.0),
-			UIUtil.amount(captain.wallet if captain else 0), UIUtil.amount(RepairBay.cost_to_repair(ship))], "", "repairs_first")
+			Fmt.amount(captain.wallet if captain else 0), Fmt.amount(RepairBay.cost_to_repair(ship))], "", "repairs_first")
 
 
 func note_idle() -> void:
@@ -373,17 +385,24 @@ func note_idle() -> void:
 func _take(contract: Contract, e: RoleEvaluator.Evaluation = null) -> bool:
 	if not contract.add_taker(ship):
 		return false
-	trip = Trip.new()
-	trip.contract = contract
-	trip.started_at = SimClock.time
-	last_refusal = ""
-	last_refusal_target = ""
+	trip = _begin_trip(contract)
 	last_decision = "Took %s, %s" % [contract.get_target_name(), contract.get_reward_text()]
 	note_accept(e, "Accepted %s, %s" % [DecisionNotes.job_name(contract), contract.get_reward_text()])
 	decided.emit(self, true, "Took %s, %s" % [contract.get_target_name(), contract.get_reward_text()])
 	ship.start_undock()
 	_set_state(State.UNDOCKING)
 	return true
+
+
+## A new trip on [param contract] (the taker is on it already); the last
+## refusal is forgotten.
+func _begin_trip(contract: Contract) -> Trip:
+	var t := Trip.new()
+	t.contract = contract
+	t.started_at = SimClock.time
+	last_refusal = ""
+	last_refusal_target = ""
+	return t
 
 
 ## Rest after a trip, sim seconds (profile range scaled by Diligence).
@@ -444,43 +463,56 @@ func _deliver() -> void:
 	var c := trip.contract
 	if trip.loaded and c is MiningContract:
 		var res := ContractBoard.deliver_mining_load(c as MiningContract, ship, trip.ore, trip.cargo)
-		var credits: int = res["credits"]
-		var mats: int = res["materials"]
+		var ore := trip.ore
 		if captain:
 			captain.loads_delivered += 1
-			captain.credits_earned += credits
-			captain.add_reputation(Reputation.for_load(trip.ore, c.get_danger()))
-			if trip.ore == AsteroidBelt.OreType.CRYSTAL:
-				captain.crystal_loads += 1
-				if captain.crystal_loads >= CaptainTraits.CRYSTAL_LOADS:
-					captain.add_trait(CaptainTraits.CRYSTAL_HOUND, "%d crystal loads delivered" % captain.crystal_loads)
-			captain.note_job(bool(res.get("escorted", false)))
-		ship.on_cargo_delivered()
-		ship.show_toast("+%d %s" % [mats, Economy.ORE_NAMES[Economy.ore_of_belt(trip.ore)].to_lower()], Color(0.55, 1.0, 0.65))
+		_record_delivery(res, Reputation.for_load(ore, c.get_danger()), "+%d %s" % [int(res["materials"]), Economy.ore_name(Economy.ore_of_belt(ore))],
+				func() -> void:
+					if ore == AsteroidBelt.OreType.CRYSTAL:
+						captain.crystal_loads += 1
+						if captain.crystal_loads >= CaptainTraits.CRYSTAL_LOADS:
+							captain.add_trait(CaptainTraits.CRYSTAL_HOUND, "%d crystal loads delivered" % captain.crystal_loads))
 	elif trip.loaded and c is SalvageContract:
 		var scrap := roundi(float(trip.meta.get("scrap", 0)) * trip.cargo)
 		var res := ContractBoard.deliver_salvage_load(c as SalvageContract, ship, scrap)
 		if captain:
 			captain.salvage_loads += 1
-			captain.credits_earned += int(res["credits"])
-			captain.add_reputation(Reputation.SALVAGE_LOAD * clampf(float(scrap) / float(SalvageContract.LOAD_SCRAP), 0.3, 1.5))
-			captain.note_job(bool(res.get("escorted", false)))
-		ship.on_cargo_delivered()
 		var owed: int = res["owed"]
-		ship.show_toast("+%d cr, %d scrap to the yard%s" % [int(res["credits"]), int(res["scrap"]), ", %d cr owed" % owed if owed > 0 else ""], Color(0.55, 1.0, 0.65))
+		_record_delivery(res, Reputation.SALVAGE_LOAD * clampf(float(scrap) / float(SalvageContract.LOAD_SCRAP), 0.3, 1.5),
+				"+%d cr, %d scrap to the yard%s" % [int(res["credits"]), int(res["scrap"]), ", %d cr owed" % owed if owed > 0 else ""])
+	elif trip.loaded and c is PlanetRaidContract:
+		var rc := c as PlanetRaidContract
+		var units := roundi(float(trip.meta.get("units", 0)) * trip.cargo / maxf(float(trip.meta.get("cargo_full", 1.0)), 0.01))
+		var res := ContractBoard.deliver_raid_load(rc, ship, units, trip.cargo / maxf(float(trip.meta.get("cargo_full", 1.0)), 0.01))
+		if captain:
+			captain.loads_delivered += 1
+			captain.raid_loads += 1
+		_record_delivery(res, Reputation.for_load(AsteroidBelt.OreType.TITANIUM, c.get_danger()), "+%d %s" % [int(res["materials"]), Economy.ore_name(rc.loot)])
 	else:
 		_release(c)
 	trip = null
+
+
+## The captain's tally for a delivered load the board paid ([param res]):
+## credits, [param rep] reputation, [param extra] (more tallies, before the
+## job counts), the job; then the ship's [param toast].
+func _record_delivery(res: Dictionary, rep: float, toast: String, extra: Callable = Callable()) -> void:
+	if captain:
+		captain.credits_earned += int(res["credits"])
+		captain.add_reputation(rep)
+		if extra.is_valid():
+			extra.call()
+		captain.note_job(bool(res.get("escorted", false)))
+	ship.on_cargo_delivered()
+	ship.show_toast(toast, Ship.TOAST_DELIVERY)
 
 
 ## Ends [param c] for this ship without a delivery.
 func _release(c: Contract) -> void:
 	if c == null:
 		return
-	if c is MiningContract:
-		(c as MiningContract).finish_trip(ship, false)
-	elif c is SalvageContract:
-		(c as SalvageContract).finish_trip(ship, false)
+	if c is LoadContract:
+		(c as LoadContract).finish_trip(ship, false)
 	else:
 		c.remove_taker(ship)
 
@@ -506,7 +538,7 @@ func assess_threat() -> float:
 	var pos := ship.global_position
 	var hostiles := Combat.hostiles_near(ship.get_tree(), pos, THREAT_RADIUS, ship.faction)
 	for h in hostiles:
-		var d := Combat.flat_distance(pos, h.global_position)
+		var d := SpaceNav.flat_distance(pos, h.global_position)
 		t += 0.1 + 0.35 * (1.0 - d / THREAT_RADIUS)
 	if t > 0.0:
 		t -= 0.2 * float(_friendly_guns_near(pos, COVER_RADIUS).size())
@@ -569,11 +601,11 @@ func _update_flee(dt: float) -> void:
 ## Nearest armed friendly ship in open space closer than home, or null.
 func _nearest_guardian() -> Ship:
 	var pos := ship.global_position
-	var home_d := Combat.flat_distance(pos, home_position())
+	var home_d := SpaceNav.flat_distance(pos, home_position())
 	var best: Ship = null
 	var best_d := minf(RUN_TO_MERC_RANGE, home_d)
 	for s in _friendly_guns_near(pos, RUN_TO_MERC_RANGE):
-		var d := Combat.flat_distance(pos, s.global_position)
+		var d := SpaceNav.flat_distance(pos, s.global_position)
 		if d < best_d:
 			best_d = d
 			best = s
@@ -586,7 +618,7 @@ func _friendly_guns_near(pos: Vector3, radius: float) -> Array[Ship]:
 		var s := n as Ship
 		if s == ship or s.dead or s.faction != ship.faction or s.weapon == null or not s.is_targetable():
 			continue
-		if Combat.flat_distance(pos, s.global_position) <= radius:
+		if SpaceNav.flat_distance(pos, s.global_position) <= radius:
 			out.append(s)
 	return out
 

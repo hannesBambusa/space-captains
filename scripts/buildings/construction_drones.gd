@@ -203,7 +203,7 @@ func route(from: Vector3, to: Vector3) -> Array[Vector3]:
 	var c := _box.get_center()
 	var a0 := atan2(from.z - c.z, from.x - c.x)
 	var diff := wrapf(atan2(to.z - c.z, to.x - c.x) - a0, -PI, PI)
-	var r := clampf(maxf(Vector2(from.x - c.x, from.z - c.z).length(), Vector2(to.x - c.x, to.z - c.z).length()),
+	var r := clampf(maxf(SpaceNav.flat_distance(from, c), SpaceNav.flat_distance(to, c)),
 			_core_radius() + 3.0, maxf(_ring_radius(), _core_radius() + 3.0))
 	var steps := maxi(ceili(absf(diff) / (PI * 0.25)), 2)
 	for k in range(1, steps):
@@ -364,7 +364,7 @@ func _sector_angle(index: int) -> float:
 
 
 func _ring_radius() -> float:
-	return Vector2(_box.size.x, _box.size.z).length() * 0.5 + standoff + 2.0
+	return SpaceNav.flat_length(_box.size) * 0.5 + standoff + 2.0
 
 
 func _band() -> float:
@@ -383,7 +383,7 @@ func _crosses(a: Vector3, b: Vector3) -> bool:
 	var r := _core_radius()
 	for k in range(1, 8):
 		var q := a.lerp(b, float(k) / 8.0)
-		if q.y < _box.end.y and Vector2(q.x - c.x, q.z - c.z).length() < r:
+		if q.y < _box.end.y and SpaceNav.flat_distance(q, c) < r:
 			return true
 	return false
 

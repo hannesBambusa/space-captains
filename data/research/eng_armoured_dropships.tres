@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"eng_armoured_dropships"
+display_name = "Armoured dropship hulls"
+field = 0
+tier = 3
+cost_credits = 1300
+cost_titanium = 120
+cost_crystal = 40
+research_time = 280.0
+prerequisites = Array[StringName]([&"pln_assault_doctrine"])
+tags = PackedStringArray("defence")
+description = "Armoured dropship hulls: landers get 40% more hull and +60 shields, so they survive raiders on the way to the planets."

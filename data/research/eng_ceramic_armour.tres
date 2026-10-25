@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"eng_ceramic_armour"
+display_name = "Ceramic composite armour"
+field = 0
+tier = 3
+cost_credits = 1300
+cost_titanium = 80
+cost_crystal = 60
+research_time = 280.0
+prerequisites = Array[StringName]([&"eng_laminated_alloys"])
+unlock_modules = Array[StringName]([&"reinforced_plating_3", &"armor_plating_3"])
+tags = PackedStringArray("defence")
+description = "Crystal-bonded ceramic plates: Mk III plating and armour."

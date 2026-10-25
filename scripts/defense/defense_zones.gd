@@ -6,7 +6,9 @@ extends Node
 ## Placing: a centre anywhere in the system (ZonePlacement) and a radius
 ## ([constant RADIUS_RANGE]). A centre within [constant ANCHOR_REACH] of the
 ## Home Station rides the station's Structures frame (it moves with the
-## station on its orbit); farther out it stays fixed in space.
+## station on its orbit); one within [constant PLANET_ANCHOR_REACH] of a
+## planet's or moon's visible reach rides that body (phase C3: guard a
+## planet against a re-claim); anywhere else it stays fixed in space.
 ##
 ## Kill bounty: credits per raider killed inside, paid from the zone's
 ## budget. The budget is reserved from the player's credits like a bounty
@@ -33,6 +35,8 @@ const BOUNTY_MAX := 300
 const BOUNTY_STEP := 10
 ## A zone centre this close to the station moves with it, m.
 const ANCHOR_REACH := 5000.0
+## A zone centre this close to a planet's or moon's visible reach moves with it, m.
+const PLANET_ANCHOR_REACH := 4000.0
 ## Mercenaries this far past a zone's edge still answer raiders inside it, m.
 const ENGAGE_REACH := 2500.0
 const NAMES: PackedStringArray = ["Picket Alpha", "Picket Bravo", "Picket Charlie", "Picket Delta"]
@@ -123,12 +127,12 @@ func threats_near(pos: Vector3, reach: float = ENGAGE_REACH) -> Array[Node3D]:
 	for z in zones:
 		if not is_instance_valid(z) or z.raiders_inside <= 0:
 			continue
-		if Combat.flat_distance(pos, z.global_position) > z.radius + reach:
+		if SpaceNav.flat_distance(pos, z.global_position) > z.radius + reach:
 			continue
 		for h in z.hostiles_inside():
 			if out.has(h):
 				continue
-			var d := Combat.flat_distance(pos, h.global_position)
+			var d := SpaceNav.flat_distance(pos, h.global_position)
 			var i := dists.bsearch(d)
 			dists.insert(i, d)
 			out.insert(i, h)
@@ -139,16 +143,50 @@ func threats_near(pos: Vector3, reach: float = ENGAGE_REACH) -> Array[Node3D]:
 func place_problem(world_pos: Vector3) -> String:
 	if zones.size() >= MAX_ZONES:
 		return "All %d defence zones are placed (remove one first)" % MAX_ZONES
-	var sys := get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
-	if sys and sys.get_extent() > 0.0 and Vector2(world_pos.x, world_pos.z).length() > sys.get_extent():
+	var sys := SolarSystem.of(get_tree())
+	if sys and sys.get_extent() > 0.0 and SpaceNav.flat_length(world_pos) > sys.get_extent():
 		return "Outside the system"
 	return ""
 
 
 ## Would a zone at [param world_pos] move with the station?
 func anchors_at(world_pos: Vector3) -> bool:
-	var mgr := get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
-	return mgr != null and mgr.frame != null and Combat.flat_distance(world_pos, mgr.frame.global_position) <= ANCHOR_REACH
+	var mgr := BuildingManager.of(get_tree())
+	return mgr != null and mgr.frame != null and SpaceNav.flat_distance(world_pos, mgr.frame.global_position) <= ANCHOR_REACH
+
+
+## The planet or moon a zone at [param world_pos] would ride (not near the
+## station), or null: the nearest whose reach is within
+## [constant PLANET_ANCHOR_REACH].
+func anchor_body_at(world_pos: Vector3) -> PlanetBody:
+	if anchors_at(world_pos):
+		return null
+	var sys := SolarSystem.of(get_tree())
+	if sys == null:
+		return null
+	var best: PlanetBody = null
+	var best_gap := PLANET_ANCHOR_REACH
+	for p in sys.planets:
+		var bodies: Array[PlanetBody] = [p]
+		for c in p.get_children():
+			if c is PlanetBody:
+				bodies.append(c as PlanetBody)
+		for b in bodies:
+			var gap := SpaceNav.flat_distance(world_pos, b.global_position) - SpaceNav.body_reach(b.def)
+			if gap <= best_gap:
+				best_gap = gap
+				best = b
+	return best
+
+
+## "Moves with the station", "Moves with Tavros" or "Fixed in space" for a zone at [param world_pos].
+func anchor_text_at(world_pos: Vector3) -> String:
+	if anchors_at(world_pos):
+		return "Moves with the station"
+	var b := anchor_body_at(world_pos)
+	if b:
+		return "Moves with %s" % b.def.name
+	return "Fixed in space"
 
 
 # --- Changes ------------------------------------------------------------------
@@ -159,12 +197,15 @@ func place(world_pos: Vector3, radius: float = DEFAULT_RADIUS) -> DefenseZone:
 	if not place_problem(world_pos).is_empty():
 		return null
 	var z := _make(_free_name(), anchors_at(world_pos))
+	if not z.anchored:
+		var body := anchor_body_at(world_pos)
+		z.anchor_body = body.def.name if body else ""
 	z.uid = _next_uid
 	_next_uid += 1
 	z.radius = clampf(snappedf(radius, RADIUS_STEP), RADIUS_RANGE.x, RADIUS_RANGE.y)
 	z.placed_at = SimClock.time
 	_attach(z, world_pos, true)
-	EventLog.post("%s placed (%.1f km, %s)" % [z.zone_name, z.radius / 1000.0, "moves with the station" if z.anchored else "fixed in space"], EventLog.Kind.INFO, z)
+	EventLog.post("%s placed (%.1f km, %s)" % [z.zone_name, z.radius / 1000.0, CaptainBrain.lower_first(z.anchor_text())], EventLog.Kind.INFO, z)
 	zones_changed.emit()
 	return z
 
@@ -177,7 +218,7 @@ func remove(z: DefenseZone) -> void:
 	z.budget = 0
 	ContractBoard.release(back, "Zone budget refund")
 	zones.erase(z)
-	EventLog.post("%s removed%s" % [z.zone_name, ", %s cr of its budget came back" % UIUtil.amount(back) if back > 0 else ""], EventLog.Kind.INFO)
+	EventLog.post("%s removed%s" % [z.zone_name, ", %s cr of its budget came back" % Fmt.amount(back) if back > 0 else ""], EventLog.Kind.INFO)
 	z.queue_free()
 	zones_changed.emit()
 
@@ -241,12 +282,19 @@ func _make(label: String, anchored: bool) -> DefenseZone:
 ## Puts [param z] in its parent: the Structures frame (anchored, [param pos]
 ## frame-local unless [param world]) or the space root (world position).
 func _attach(z: DefenseZone, pos: Vector3, world: bool) -> void:
-	var mgr := get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	var mgr := BuildingManager.of(get_tree())
+	var body := PlanetRaidContract.find_planet(get_tree(), z.anchor_body) if not z.anchored and not z.anchor_body.is_empty() else null
 	if z.anchored and mgr and mgr.frame:
 		mgr.frame.add_child(z)
 		var local := mgr.frame.to_local(pos) if world else pos
 		z.position = Vector3(local.x, 0.0, local.z)
+	elif body:
+		body.add_child(z)
+		var local := body.to_local(pos) if world else pos
+		z.position = Vector3(local.x, 0.0, local.z)
+		z.body = body
 	else:
+		z.anchor_body = ""
 		z.anchored = false
 		SpaceNav.space_root(get_tree()).add_child(z)
 		z.global_position = pos
@@ -285,30 +333,30 @@ func pay_kill(z: DefenseZone, raider: Ship, killer: Node3D) -> int:
 	var pot := mini(z.kill_bounty, z.budget)
 	if pot <= 0:
 		return 0
-	var each := floori(float(pot) / float(earners.size()))
+	var parts := Economy.split_evenly(pot, earners.size())
 	var total := 0
 	var names: PackedStringArray = []
 	for i in earners.size():
 		var s := earners[i]
-		var part := each + (pot - each * earners.size() if i == 0 else 0)
+		var part := parts[i]
 		if part <= 0:
 			continue
 		var got := ContractBoard.pay_from_escrow(s, part)
 		total += got
 		names.append(s.captain.captain_name if s.captain else s.get_display_name())
-		s.show_toast("+%d cr zone bounty" % got, Color(1.0, 0.85, 0.4))
+		s.show_toast("+%d cr zone bounty" % got, Ship.TOAST_REWARD)
 		if s.brain:
-			s.brain.note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Earned %s cr zone bounty in %s" % [UIUtil.amount(got), z.zone_name],
+			s.brain.note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Earned %s cr zone bounty in %s" % [Fmt.amount(got), z.zone_name],
 					"%s destroyed inside %s, which pays %d cr per kill; split between the %d who hit it in the last %d s" % [raider.get_display_name(), z.zone_name,
 					z.kill_bounty, earners.size(), roundi(BountyContract.CREDIT_WINDOW)])
 	z.budget -= total
 	z.kills += 1
 	z.paid_total += total
-	EventLog.post("%s destroyed in %s: +%s cr zone bounty (%s)" % [raider.get_display_name(), z.zone_name, UIUtil.amount(total), ", ".join(names)],
+	EventLog.post("%s destroyed in %s: +%s cr zone bounty (%s)" % [raider.get_display_name(), z.zone_name, Fmt.amount(total), ", ".join(names)],
 			EventLog.Kind.REWARD, null, raider.global_position)
 	if z.budget < z.kill_bounty and not z.spent_noted:
 		z.spent_noted = true
-		EventLog.post("%s budget is spent (%s cr left): add more to keep paying per kill" % [z.zone_name, UIUtil.amount(z.budget)], EventLog.Kind.INFO, z)
+		EventLog.post("%s budget is spent (%s cr left): add more to keep paying per kill" % [z.zone_name, Fmt.amount(z.budget)], EventLog.Kind.INFO, z)
 	_changed(z)
 	return total
 
@@ -334,6 +382,6 @@ func load_state(d: Dictionary) -> void:
 	for zd: Dictionary in d.get("zones", []):
 		var z := _make(String(zd.get("zone_name", _free_name())), bool(zd.get("anchored", true)))
 		z.load_state(zd)
-		_attach(z, zd.get("pos", Vector3.ZERO) as Vector3, not z.anchored)
+		_attach(z, zd.get("pos", Vector3.ZERO) as Vector3, not z.anchored and z.anchor_body.is_empty())
 		_next_uid = maxi(_next_uid, z.uid + 1)
 	zones_changed.emit()

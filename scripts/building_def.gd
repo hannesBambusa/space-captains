@@ -28,6 +28,9 @@ extends Resource
 ## until repaired, never destroyed. 0 = none (addons; turrets and the shield
 ## generator have their own, DefenseStructure).
 @export var structure_hull: float = 0.0
+## False: listed in the build bar (locked) but not buildable yet, for
+## structures a later phase brings in (the Raider Dock).
+@export var in_service: bool = true
 
 @export_group("Placement")
 ## Stands on its own (defense turrets): placed anywhere in the build zone

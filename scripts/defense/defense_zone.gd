@@ -5,7 +5,8 @@ extends Node3D
 ## raider killed inside. Mercenaries on patrol roam inside it and engage
 ## raiders that enter it.
 ## Anchored zones ([member anchored]) sit in the station's Structures frame
-## and move with it; the others stay fixed in space (over a belt, a lane).
+## and move with it; zones placed near a planet or moon ([member anchor_body])
+## ride that body; the others stay fixed in space (over a belt, a lane).
 ## Look: a faint translucent disc with a thin rim (shaders/defense_zone),
 ## cyan without a kill bounty, gold with one; it pulses red while raiders
 ## are inside ([member raiders_inside]) and brightens when selected.
@@ -32,6 +33,9 @@ var kills: int = 0
 var paid_total: int = 0
 ## Moves with the station (child of its Structures frame).
 var anchored: bool = true
+## Name of the planet or moon it rides ("" = none), and that body.
+var anchor_body: String = ""
+var body: PlanetBody
 var placed_at: float = 0.0
 ## Hostile ships inside right now (DefenseZones updates it).
 var raiders_inside: int = 0
@@ -74,7 +78,7 @@ func _process(_delta: float) -> void:
 
 ## Flat distance check: is [param p] (world) inside the zone?
 func contains(p: Vector3) -> bool:
-	return Combat.flat_distance(p, global_position) <= radius
+	return SpaceNav.flat_distance(p, global_position) <= radius
 
 
 ## Hostile ships inside the zone (and [param margin] metres past its edge), nearest the centre first.
@@ -91,14 +95,32 @@ func hostiles_inside(margin: float = 0.0) -> Array[Node3D]:
 ## A random point inside the zone at [param min_share]..[param max_share]
 ## of the radius, world space, on the zone's plane.
 func random_point(rng: RandomNumberGenerator, min_share: float = 0.15, max_share: float = 0.85) -> Vector3:
-	var a := rng.randf() * TAU
-	var r := radius * sqrt(rng.randf_range(min_share * min_share, max_share * max_share))
-	return global_position + Vector3(cos(a) * r, 0.0, sin(a) * r)
+	var p := global_position
+	for i in 8:
+		var a := rng.randf() * TAU
+		var r := radius * sqrt(rng.randf_range(min_share * min_share, max_share * max_share))
+		p = global_position + Vector3(cos(a) * r, 0.0, sin(a) * r)
+		if not is_instance_valid(body) or SpaceNav.flat_distance(p, body.global_position) > SpaceNav.body_reach(body.def) + 250.0:
+			return p
+	# Over the planet: a point just outside it, on the side toward the pick.
+	var out := p - body.global_position
+	out.y = 0.0
+	out = out.normalized() if out.length() > 1.0 else Vector3.RIGHT
+	return body.global_position + out * (SpaceNav.body_reach(body.def) + 300.0) + Vector3.UP * (global_position.y - body.global_position.y)
 
 
 ## Velocity of the zone's frame (anchored zones ride the station).
 func frame_velocity() -> Vector3:
-	return SpaceNav.world_velocity(self) if anchored else Vector3.ZERO
+	return SpaceNav.world_velocity(self) if anchored or is_instance_valid(body) else Vector3.ZERO
+
+
+## "Moves with the station", "Moves with Tavros" or "Fixed in space".
+func anchor_text() -> String:
+	if anchored:
+		return "Moves with the station"
+	if is_instance_valid(body):
+		return "Moves with %s" % body.def.name
+	return "Fixed in space"
 
 
 func has_paying_bounty() -> bool:
@@ -144,9 +166,9 @@ func get_display_name() -> String:
 # --- Save ---------------------------------------------------------------------
 
 func save_state() -> Dictionary:
-	var d := SaveUtil.props(self, ["uid", "zone_name", "radius", "kill_bounty", "budget", "kills", "paid_total", "anchored", "placed_at", "spent_noted"])
-	# Anchored: offset in the Structures frame; fixed: world position.
-	d["pos"] = position if anchored else global_position
+	var d := SaveUtil.props(self, ["uid", "zone_name", "radius", "kill_bounty", "budget", "kills", "paid_total", "anchored", "placed_at", "spent_noted", "anchor_body"])
+	# Anchored: offset in the Structures frame (or its planet's); fixed: world position.
+	d["pos"] = position if anchored or is_instance_valid(body) else global_position
 	return d
 
 

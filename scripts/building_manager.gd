@@ -115,6 +115,10 @@ var _bays: Dictionary = {}
 var _infos: Dictionary = {}
 
 
+static func of(tree: SceneTree) -> BuildingManager:
+	return tree.get_first_node_in_group(GROUP) as BuildingManager if tree else null
+
+
 func _ready() -> void:
 	add_to_group(GROUP)
 	rng.randomize()
@@ -189,9 +193,9 @@ func moon_sweeping(pos: Vector3, reach: float) -> PlanetBody:
 		for i in MOON_SWEEP_STEPS:
 			var a := TAU * float(i) / float(MOON_SWEEP_STEPS)
 			# The spot relative to the planet, with the station at angle a.
-			var p := st.orbit_basis * Vector3(cos(a), 0.0, sin(a)) * st.orbit_radius + pos
+			var p := st.orbit_point(a) + pos
 			if locked:
-				var m := moon.orbit_basis * Vector3(cos(a + phase), 0.0, sin(a + phase)) * moon.orbit_radius
+				var m := moon.orbit_point(a + phase)
 				if p.distance_to(m) < r:
 					return moon
 				continue
@@ -337,7 +341,7 @@ func _base_problem(def: BuildingDef, pos: Vector3, yaw: float) -> String:
 	if not limit.is_empty():
 		return limit
 	var r := def.footprint_radius
-	var d := Vector2(pos.x, pos.z).length()
+	var d := SpaceNav.flat_length(pos)
 	if d > zone_radius - r:
 		return "Outside the build zone (%.1f km from the station)" % (zone_radius / 1000.0)
 	if d < station_clearance + r:
@@ -412,7 +416,7 @@ func model_info(def: BuildingDef) -> ModelInfo:
 		var xf := ModelLoader.relative_transform(model, dock_node)
 		dock = xf.origin
 		out = -xf.basis.z
-		if Vector2(out.x, out.z).length() < 0.1:
+		if SpaceNav.flat_length(out) < 0.1:
 			out = dock
 	out.y = 0.0
 	out = out.normalized() if out.length() > 0.01 else Vector3.RIGHT
@@ -469,10 +473,16 @@ func count_of(def: BuildingDef) -> int:
 	return n
 
 
-## "" unless the player already owns the most allowed of this type.
+## "" unless the player already owns the most allowed of this type, the
+## type still needs research (Research), or it is not in service yet.
 func limit_reason(def: BuildingDef) -> String:
+	var locked := Research.building_lock_reason(def.id)
+	if not locked.is_empty():
+		return locked
+	if not def.in_service:
+		return "Not in service yet: the %s comes in a later update" % def.display_name
 	if def.max_count > 0 and count_of(def) >= def.max_count:
-		return "Only %d %s allowed" % [def.max_count, def.display_name if def.max_count == 1 else UIUtil.plural(def.display_name)]
+		return "Only %d %s allowed" % [def.max_count, def.display_name if def.max_count == 1 else Fmt.plural(def.display_name)]
 	return ""
 
 

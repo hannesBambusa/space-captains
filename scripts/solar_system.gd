@@ -2,11 +2,14 @@ class_name SolarSystem
 extends Node3D
 ## Builds a whole star system from a SystemDef and keeps it moving with the sim
 ## clock (autoload SimClock). Star at the origin. A thick disc: planets orbit
-## on inclined planes (moons more), belts are thick rock bands around y = 0,
-## gates sit on the plane and dens above or below it (DenDef.height).
+## on inclined planes (moons more), asteroid clusters are thick clumps on
+## slow inclined orbits, gates sit on the plane and dens above or below it
+## (DenDef.height).
 ##
 ## Children built at runtime: Star, one PlanetBody per planet (moons and the
-## home station orbit inside their planet's node), SystemBelts, JumpGates,
+## home station orbit inside their planet's node), asteroid clusters
+## (AsteroidCluster; the starting set from SystemDef.belts, then ClusterSpawner
+## replaces mined-out ones: [method add_cluster], [method remove_cluster]), JumpGates,
 ## orbit lines and name labels. Orbit lines and labels fade with camera zoom.
 ## Dens: only those there from the start (DenDef.starts_present) are built
 ## with the system; the ThreatDirector brings the others in later
@@ -17,6 +20,9 @@ const ORBIT_SHADER: Shader = preload("res://shaders/orbit_line.gdshader")
 signal built
 ## A den arrived after the start ([method arrive_den]).
 signal den_added(den: ScavengerDen)
+## An asteroid cluster appeared (also the starting ones) or was removed.
+signal cluster_added(belt: AsteroidCluster)
+signal cluster_removed(belt: AsteroidCluster)
 
 const GROUP := "solar_system"
 
@@ -29,7 +35,7 @@ const GROUP := "solar_system"
 @export var default_view_yaw_offset_deg: float = 28.0
 
 @export_group("Zoom fades")
-## Planet/belt/gate orbit lines fade in between these camera distances.
+## Planet/gate orbit lines fade in between these camera distances.
 @export var orbit_fade_in: Vector2 = Vector2(2600.0, 7000.0)
 ## Moon orbit lines fade in, then out again far away.
 @export var moon_orbit_fade_in: Vector2 = Vector2(2800.0, 6000.0)
@@ -39,13 +45,12 @@ const GROUP := "solar_system"
 
 var star: Star
 var planets: Array[PlanetBody] = []
-var belts: Array[SystemBelt] = []
+var belts: Array[AsteroidCluster] = []
 var gates: Array[JumpGate] = []
 var dens: Array[ScavengerDen] = []
 var home_station: Orbiter
-## Per belt (same order as [member belts]): a point on the belt's centre line
-## used as its camera focus target (the belt itself is centred on the star).
-var belt_anchors: Array[Node3D] = []
+## Spawns new clusters when one is mined out (child node, saved by GameSnapshot).
+var cluster_spawner: ClusterSpawner
 
 var _orbiters: Array[Orbiter] = []
 var _labels: Array[Label3D] = []
@@ -55,6 +60,10 @@ var _orbit_mat: ShaderMaterial
 var _moon_orbit_mat: ShaderMaterial
 var _star_color := Color.WHITE
 var _view_args: Array = []
+
+
+static func of(tree: SceneTree) -> SolarSystem:
+	return tree.get_first_node_in_group(GROUP) as SolarSystem if tree else null
 
 
 func _ready() -> void:
@@ -75,12 +84,12 @@ func _process(_delta: float) -> void:
 	_update_bodies(SimClock.time)
 
 
-## Places every orbiting body and belt for sim time [param t] (fast-forward).
+## Places every orbiting body and cluster for sim time [param t] (fast-forward).
 func update_bodies(t: float) -> void:
 	_update_bodies(t)
 
 
-## Finds a built body (planet, moon, station, gate, belt, star) by node name.
+## Finds a built body (planet, moon, station, gate, cluster, star) by node name.
 func find_body(body_name: String) -> Node3D:
 	if star and star.name == body_name:
 		return star
@@ -94,7 +103,7 @@ func get_extent() -> float:
 func _update_bodies(t: float) -> void:
 	for o in _orbiters:
 		o.update_sim(t)
-	for b in belts:
+	for b in belts.duplicate():
 		b.update_sim(t)
 
 
@@ -143,23 +152,11 @@ func _build() -> void:
 		_add_station(def)
 
 	for bdef in def.belts:
-		var belt := SystemBelt.new()
-		add_child(belt)
-		belt.build(bdef, Vector3.ZERO, _star_color)
-		belts.append(belt)
-		var label_angle := deg_to_rad(fposmod(float(bdef.seed) * 47.0, 360.0))
-		var anchor := Node3D.new()
-		anchor.name = "%sLabel" % belt.name
-		anchor.position = Vector3(cos(label_angle), 0.0, sin(label_angle)) * (bdef.orbit_radius + bdef.width * 0.5)
-		anchor.set_meta(&"focus_radius", bdef.width * 0.5)
-		anchor.set_meta(&"focus_distance", bdef.width * 2.4)
-		# Clicking the anchor (the belt's label) selects the belt.
-		anchor.set_meta(&"belt", belt)
-		anchor.add_to_group(RTSCamera.FOCUS_GROUP)
-		add_child(anchor)
-		belt_anchors.append(anchor)
-		var tint := Color(0.85, 0.75, 0.6) if bdef.ore_type != AsteroidBelt.OreType.CRYSTAL else Color(0.55, 0.9, 1.0)
-		_add_label(anchor, bdef.name.to_upper(), 0.0, 0.85, tint)
+		add_cluster(bdef.duplicate() as ClusterDef)
+	cluster_spawner = ClusterSpawner.new()
+	cluster_spawner.name = "ClusterSpawner"
+	add_child(cluster_spawner)
+	cluster_spawner.setup(self)
 
 	for gdef in def.gates:
 		var gate := JumpGate.new()
@@ -172,10 +169,6 @@ func _build() -> void:
 	for ddef in def.dens:
 		if ddef.starts_present():
 			_add_den(ddef)
-		else:
-			var b := belt_of(ddef)
-			if b:
-				b.pending_danger += ddef.danger_bonus
 
 	_apply_sky_seed(def.sky_seed)
 
@@ -188,18 +181,80 @@ func den_of(ddef: DenDef) -> ScavengerDen:
 	return null
 
 
-func belt_of(ddef: DenDef) -> SystemBelt:
-	var belt: SystemBelt = null
-	for b in belts:
-		if b.def.name == ddef.belt_name:
-			belt = b
+# --- Clusters -----------------------------------------------------------------
+
+## Builds an asteroid cluster from [param bdef] with its name label.
+func add_cluster(bdef: ClusterDef) -> AsteroidCluster:
+	var belt := AsteroidCluster.new()
+	belt.name = StringName(bdef.name.validate_node_name())
+	add_child(belt)
+	belt.build(bdef, Vector3.ZERO, _star_color)
+	belt.update_sim(SimClock.time)
+	belts.append(belt)
+	# Clicking the cluster (its label) selects it; double click follows it.
+	belt.set_meta(&"belt", belt)
+	belt.make_focusable(bdef.radius() * 0.6, bdef.size * 2.2)
+	var tint := Color(0.85, 0.75, 0.6) if bdef.ore_type != AsteroidBelt.OreType.CRYSTAL else Color(0.55, 0.9, 1.0)
+	_add_label(belt, bdef.name.to_upper(), bdef.radius() * 0.5, 0.85, tint)
+	belt.faded.connect(remove_cluster)
+	if not _view_args.is_empty():
+		_on_view_changed.callv(_view_args)
+	cluster_added.emit(belt)
 	return belt
 
 
-## Where [param ddef]'s base sits (system space = world, the system is at the origin).
+## Takes a cluster out of the system (mined out and faded, or replaced on load).
+func remove_cluster(belt: AsteroidCluster) -> void:
+	var i := belts.find(belt)
+	if i < 0:
+		return
+	belts.remove_at(i)
+	for j in range(_labels.size() - 1, -1, -1):
+		var l := _labels[j]
+		if not is_instance_valid(l) or l.get_parent() == belt:
+			_labels.remove_at(j)
+			_label_radii.remove_at(j)
+	cluster_removed.emit(belt)
+	# Contracts pointing at it (escorts linked to its mining) lose the target.
+	for c in ContractBoard.get_listed():
+		if c.target == belt:
+			c.target = null
+	remove_child(belt)
+	belt.queue_free()
+
+
+## The cluster named [param cluster_name] (old belt names map to their
+## starting cluster), or null.
+func find_cluster(cluster_name: String) -> AsteroidCluster:
+	for b in belts:
+		if b.def.name == cluster_name:
+			return b
+	var alias := cluster_name.replace(" Belt", " Cluster")
+	for b in belts:
+		if b.def.name == alias:
+			return b
+	return null
+
+
+## The nearest cluster whose rim lies within [param reach] of [param pos]
+## (flat), or null.
+func cluster_near(pos: Vector3, reach: float = INF) -> AsteroidCluster:
+	var best: AsteroidCluster = null
+	var best_d := reach
+	for b in belts:
+		if b.is_depleted:
+			continue
+		var d := b.distance_to(pos)
+		if d <= best_d:
+			best_d = d
+			best = b
+	return best
+
+
+## Where [param ddef]'s base sits (system space = world, the system is at the
+## origin): a fixed spot at [member DenDef.anchor_radius] plus its offset.
 func den_position(ddef: DenDef) -> Vector3:
-	var belt := belt_of(ddef)
-	var r := (belt.def.orbit_radius if belt else 10000.0) + ddef.radial_offset
+	var r := (ddef.anchor_radius if ddef.anchor_radius > 0.0 else 10000.0) + ddef.radial_offset
 	var a := deg_to_rad(ddef.angle_deg)
 	return Vector3(cos(a), 0.0, sin(a)) * r + Vector3.UP * ddef.height
 
@@ -211,16 +266,13 @@ func den_yaw(ddef: DenDef) -> float:
 	return atan2(inward.x, inward.z)
 
 
-## Builds a den that was not there at the start (its belt's danger rises by
-## its bonus). [param effect] plays the warp-in (not on load). Returns the
-## den (the existing one when it is already built).
+## Builds a den that was not there at the start (nearby clusters' danger
+## rises by its bonus). [param effect] plays the warp-in (not on load).
+## Returns the den (the existing one when it is already built).
 func arrive_den(ddef: DenDef, effect: bool = true) -> ScavengerDen:
 	var have := den_of(ddef)
 	if have:
 		return have
-	var b := belt_of(ddef)
-	if b and not ddef.starts_present():
-		b.pending_danger = maxi(b.pending_danger - ddef.danger_bonus, 0)
 	var den := _add_den(ddef)
 	if effect:
 		den.play_arrival()
@@ -230,11 +282,10 @@ func arrive_den(ddef: DenDef, effect: bool = true) -> ScavengerDen:
 	return den
 
 
-## Places a hostile base (any faction) next to its belt, mouth turned toward the star.
+## Places a hostile base (any faction) at its fixed spot, mouth turned toward the star.
 func _add_den(ddef: DenDef) -> ScavengerDen:
-	var belt := belt_of(ddef)
 	var den := ScavengerDen.new()
-	den.setup(ddef, belt)
+	den.setup(ddef)
 	den.position = den_position(ddef)
 	den.rotation.y = den_yaw(ddef)
 	add_child(den)
@@ -243,6 +294,40 @@ func _add_den(ddef: DenDef) -> ScavengerDen:
 	var tone := Color(1.0, 0.45, 0.35) if fac.id == Factions.DEFAULT_ID else fac.color.lerp(Color.WHITE, 0.15)
 	_add_label(den, ddef.name.to_upper(), 70.0 * fac.den_hit_radius / 42.0, 0.8, tone)
 	return den
+
+
+## A planet claim's garrison joins the hostile bases ([member dens]) with
+## its name label (PlanetClaims; it is already a child of its planet).
+func add_garrison(g: ClaimGarrison) -> void:
+	if dens.has(g):
+		return
+	dens.append(g)
+	var fac := g.faction_def
+	_add_label(g, g.get_display_name().to_upper(), 70.0, 0.75, fac.color.lerp(Color.WHITE, 0.15))
+	if not _view_args.is_empty():
+		_on_view_changed.callv(_view_args)
+	den_added.emit(g)
+
+
+## Takes a destroyed garrison out of [member dens] and drops its label.
+func remove_garrison(g: ClaimGarrison) -> void:
+	dens.erase(g)
+	for i in range(_labels.size() - 1, -1, -1):
+		var l := _labels[i]
+		if not is_instance_valid(l) or l.get_parent() == g:
+			_labels.remove_at(i)
+			_label_radii.remove_at(i)
+	den_added.emit(g)
+
+
+## Tints a planet's name label (a claim's faction colour); [param color]
+## with alpha 0 restores the default.
+func tint_body_label(body: PlanetBody, color: Color) -> void:
+	var l := body.get_node_or_null(^"Label") as Label3D
+	if l == null:
+		return
+	var c := color if color.a > 0.0 else Color(0.82, 0.88, 1.0)
+	l.modulate = Color(c.r, c.g, c.b, l.modulate.a)
 
 
 func _add_planet(pdef: PlanetDef, parent: Node3D) -> PlanetBody:
@@ -347,7 +432,7 @@ func _apply_sky_seed(seed_value: float) -> void:
 # --- Camera and zoom fades ----------------------------------------------------
 
 func _configure_camera() -> void:
-	var cam := get_tree().get_first_node_in_group("rts_camera") as RTSCamera
+	var cam := RTSCamera.of(get_tree())
 	if cam == null:
 		return
 	var extent := get_extent()

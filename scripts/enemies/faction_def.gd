@@ -95,6 +95,30 @@ const SCAVENGER_DEN_MODEL := "res://assets/models/buildings/scavenger_den.glb"
 @export var den_gun_rate: float = 2.0
 @export var den_gun_range: float = 650.0
 
+@export_group("Planet claims")
+## Orbital garrison over a claimed planet (ClaimGarrison, PlanetClaims):
+## hull, shields, regeneration.
+@export var garrison_hull: float = 3600.0
+@export var garrison_shields: float = 900.0
+@export var garrison_shield_regen: float = 10.0
+## Its four flak turrets, each on its own target: damage per shot, shots
+## per second per turret, range in metres.
+@export var garrison_turret_damage: float = 4.0
+@export var garrison_turret_rate: float = 1.5
+@export var garrison_turret_range: float = 800.0
+## Patrol ships out at once, and sim seconds between launches below that.
+@export var garrison_patrols: int = 3
+@export var garrison_respawn: float = 60.0
+## Patrols guard this far past the garrison's own distance from the planet, metres.
+@export var garrison_guard_reach: float = 1800.0
+## Sim seconds after a claim is broken before the faction comes back
+## (random in the range), and the escorts of its claim group.
+@export var reclaim_delay: Vector2 = Vector2(540.0, 840.0)
+@export var claim_escorts: int = 3
+## The claim group's constructor (the garrison core): hull and shields.
+@export var constructor_hull: float = 900.0
+@export var constructor_shields: float = 300.0
+
 @export_group("Rewards")
 ## Multiplies the suggested bounty (TargetPanel) and the ruins' scrap.
 @export var bounty_mult: float = 1.0
@@ -106,17 +130,43 @@ const SCAVENGER_DEN_MODEL := "res://assets/models/buildings/scavenger_den.glb"
 @export_group("Names")
 ## Callsign words ("Shrike" -> "Shrike-4"). Empty = the den's gang name.
 @export var name_pool: PackedStringArray = []
-## Target panel blurbs. %s in den_info = the claimed belt, %d = the spawn cap.
-@export_multiline var den_info: String = "Raider base dug into an asteroid, claiming %s. Launches scavengers up to %d at a time. Destroy it to stop them and lower the belt's danger."
+## Target panel blurbs. %s in den_info = the cluster or region it preys on, %d = the spawn cap.
+@export_multiline var den_info: String = "Raider base dug into an asteroid, preying on %s. Launches scavengers up to %d at a time. Destroy it to stop them and lower the danger of clusters nearby."
 ## Event log line when the faction's first base arrives (once per game).
 @export_multiline var intro: String = ""
 ## %s = the ship's base.
 @export_multiline var ship_info: String = "Junk raider from %s. Hunts loaded miners and steals cargo."
 
 
+## Garrison turrets times damage per second (MercFleet's need estimate).
+func garrison_gun_dps() -> float:
+	return 4.0 * garrison_turret_damage * garrison_turret_rate
+
+
 ## Guns times damage per second (MercFleet's need estimate).
 func den_gun_dps() -> float:
 	return float(den_guns) * den_gun_damage * den_gun_rate
+
+
+## Size of its bases against the scavenger den (den_hit_radius 42).
+func den_scale() -> float:
+	return den_hit_radius / 42.0
+
+
+## "Raiders" for the scavengers, else "Corsair raiders" and the like.
+func raiders_label() -> String:
+	return "Raiders" if id == Factions.DEFAULT_ID else "%s raiders" % unit_name
+
+
+## The hologram look in its colours (Building.CONSTRUCTION_SHADER) for a
+## base that is still arriving or being deployed.
+func holo_material(grid_size: float) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = Building.CONSTRUCTION_SHADER
+	mat.set_shader_parameter("grid_size", grid_size)
+	mat.set_shader_parameter("holo_color", color.lerp(Color.WHITE, 0.2))
+	mat.set_shader_parameter("seam_color", light_color)
+	return mat
 
 
 ## The model to load: the faction's when it exists, else the scavenger one.

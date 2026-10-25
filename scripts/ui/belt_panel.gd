@@ -1,7 +1,8 @@
 class_name BeltPanel
 extends PanelContainer
-## Bottom-right panel for the selected asteroid belt: ore, richness, danger,
-## distance from home, the contracts posted on it (with cancel), and the
+## Bottom-right panel for the selected asteroid cluster: ore, richness,
+## what is left in it, danger (with the hostile bases in reach), distance
+## from home, the contracts posted on it (with cancel), and the
 ## "Post mining contract" form: reward per load stepper, a load limit and
 ## the "Escorted" option (pay per escorted trip), which posts a linked
 ## EscortContract so mercenaries fly with every miner on it.
@@ -11,9 +12,7 @@ const ORE_NAMES: PackedStringArray = ["Rock", "Iron", "Titanium", "Crystal"]
 @export var panel_width: float = 380.0
 
 var hud: HUD
-var belt: SystemBelt
-var reward: int = 50
-var load_limit_index: int = 0
+var belt: AsteroidCluster
 
 var _title: Label
 var _ore: Label
@@ -22,17 +21,11 @@ var _richness_pct: Label
 var _danger: PipMeter
 var _danger_text: Label
 var _distance: Label
+var _left: PipMeter
+var _left_text: Label
 var _contracts_header: Label
 var _contracts: VBoxContainer
-var _reward_value: Label
-var _reward_minus: Button
-var _reward_plus: Button
-var _fair: Label
-var _limit_value: Label
-var _limit_minus: Button
-var _limit_plus: Button
-var _post: Button
-var _post_hint: Label
+var _form: PostContractForm
 var escorted: bool = false
 var escort_pay: int = 35
 var _escorted: CheckButton
@@ -49,7 +42,7 @@ func _ready() -> void:
 	add_child(v)
 	var top := HBoxContainer.new()
 	v.add_child(top)
-	top.add_child(UIUtil.label("ASTEROID BELT", &"HeaderLabel"))
+	top.add_child(UIUtil.label("ASTEROID CLUSTER", &"HeaderLabel"))
 	top.add_child(UIUtil.spacer())
 	var close := UIUtil.button("x", &"IconButton")
 	close.custom_minimum_size = Vector2(26.0, 22.0)
@@ -71,15 +64,18 @@ func _ready() -> void:
 	grid.add_child(_ore)
 	grid.add_child(UIUtil.label("Richness", &"DimLabel"))
 	var rh := HBoxContainer.new()
-	_richness = PipMeter.new()
-	_richness.style = PipMeter.Style.BAR
-	_richness.max_value = 1.0
-	_richness.custom_minimum_size = Vector2(90.0, 5.0)
-	_richness.color = Color(0.85, 0.88, 0.95)
+	_richness = UIUtil.bar(Color(0.85, 0.88, 0.95), Vector2(90.0, 5.0))
 	rh.add_child(_richness)
 	_richness_pct = UIUtil.label("", &"ValueLabel")
 	rh.add_child(_richness_pct)
 	grid.add_child(rh)
+	grid.add_child(UIUtil.label("Ore left", &"DimLabel"))
+	var lh := HBoxContainer.new()
+	_left = UIUtil.bar(Color(0.55, 1.0, 0.65), Vector2(90.0, 5.0))
+	lh.add_child(_left)
+	_left_text = UIUtil.label("", &"ValueLabel")
+	lh.add_child(_left_text)
+	grid.add_child(lh)
 	grid.add_child(UIUtil.label("Danger", &"DimLabel"))
 	var dh := HBoxContainer.new()
 	_danger = PipMeter.new()
@@ -104,91 +100,42 @@ func _ready() -> void:
 	v.add_child(_contracts)
 
 	v.add_child(HSeparator.new())
-	v.add_child(UIUtil.label("POST MINING CONTRACT", &"HeaderLabel"))
-	var row := HBoxContainer.new()
-	v.add_child(row)
-	row.add_child(UIUtil.label("Pay per load", &"DimLabel"))
-	row.add_child(UIUtil.spacer())
-	_reward_minus = _step_button("-", "Lower the pay (Shift: 50)")
-	_reward_minus.pressed.connect(_step_reward.bind(-1))
-	row.add_child(_reward_minus)
-	_reward_value = UIUtil.label("", &"ValueLabel")
-	_reward_value.custom_minimum_size.x = 74.0
-	_reward_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	row.add_child(_reward_value)
-	_reward_plus = _step_button("+", "Raise the pay (Shift: 50)")
-	_reward_plus.pressed.connect(_step_reward.bind(1))
-	row.add_child(_reward_plus)
-	_fair = UIUtil.label("", &"DimLabel")
-	_fair.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_fair.custom_minimum_size.x = panel_width - 24.0
-	v.add_child(_fair)
-	var lrow := HBoxContainer.new()
-	v.add_child(lrow)
-	lrow.add_child(UIUtil.label("Load limit", &"DimLabel"))
-	lrow.add_child(UIUtil.spacer())
-	_limit_minus = _step_button("-", "Fewer loads")
-	_limit_minus.pressed.connect(_step_limit.bind(-1))
-	lrow.add_child(_limit_minus)
-	_limit_value = UIUtil.label("", &"ValueLabel")
-	_limit_value.custom_minimum_size.x = 74.0
-	_limit_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lrow.add_child(_limit_value)
-	_limit_plus = _step_button("+", "More loads")
-	_limit_plus.pressed.connect(_step_limit.bind(1))
-	lrow.add_child(_limit_plus)
+	_form = PostContractForm.new("POST MINING CONTRACT", "Post mining contract", ContractBoard.mining_rules, panel_width)
+	_form.changed.connect(_refresh_form)
+	_form.post_pressed.connect(_on_post)
+	v.add_child(_form)
 	_escorted = CheckButton.new()
 	_escorted.text = "Escorted"
 	_escorted.focus_mode = Control.FOCUS_NONE
-	_escorted.tooltip_text = "Also post an escort contract: mercenaries fly with every miner on this contract, paid per trip. Miners take dangerous belts more readily."
+	_escorted.tooltip_text = "Also post an escort contract: mercenaries fly with every miner on this contract, paid per trip. Miners take dangerous clusters more readily."
 	_escorted.toggled.connect(func(on: bool) -> void:
 		escorted = on
 		_refresh_form())
-	v.add_child(_escorted)
-	_escort_row = HBoxContainer.new()
-	v.add_child(_escort_row)
-	_escort_row.add_child(UIUtil.label("Escort pay per trip", &"DimLabel"))
-	_escort_row.add_child(UIUtil.spacer())
-	var em := _step_button("-", "Lower the escort pay")
-	em.pressed.connect(_step_escort.bind(-1))
-	_escort_row.add_child(em)
-	_escort_value = UIUtil.label("", &"ValueLabel")
-	_escort_value.custom_minimum_size.x = 74.0
-	_escort_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_escort_row.add_child(_escort_value)
-	var ep := _step_button("+", "Raise the escort pay")
-	ep.pressed.connect(_step_escort.bind(1))
-	_escort_row.add_child(ep)
-	Economy.changed.connect(func(_c: int, _m: int) -> void:
-		if is_visible_in_tree():
-			_refresh_form())
-	_post = UIUtil.button("Post mining contract", &"AccentButton")
-	_post.pressed.connect(_on_post)
-	v.add_child(_post)
-	_post_hint = UIUtil.label("", &"DimLabel")
-	_post_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_post_hint.custom_minimum_size.x = panel_width - 24.0
-	v.add_child(_post_hint)
+	_form.add_row(_escorted)
+	var er := UIUtil.stepper_row(_form, "Escort pay per trip", _step_escort, "Lower the escort pay", "Raise the escort pay")
+	_escort_value = er[0]
+	_escort_row = _escort_value.get_parent() as HBoxContainer
+	_form.move_child(_escort_row, _form.post.get_index())
 
 
 func setup(owner_hud: HUD) -> void:
 	hud = owner_hud
 	if hud.selection:
-		hud.selection.selection_changed.connect(func(t: Node3D) -> void: show_belt(t as SystemBelt))
+		hud.selection.selection_changed.connect(func(t: Node3D) -> void: show_belt(t as AsteroidCluster))
 	ContractBoard.contract_posted.connect(func(_c: Contract) -> void: _rebuild_contracts())
 	ContractBoard.contract_changed.connect(func(_c: Contract) -> void: _rebuild_contracts())
 	ContractBoard.contract_removed.connect(func(_c: Contract) -> void: _rebuild_contracts())
 
 
-func show_belt(b: SystemBelt) -> void:
+func show_belt(b: AsteroidCluster) -> void:
 	var changed := b != belt
 	belt = b
 	visible = b != null
 	if b == null:
 		return
 	if changed:
-		reward = ContractBoard.mining_rules.default_reward(b)
-		load_limit_index = 0
+		_form.reward = ContractBoard.mining_rules.default_reward(b)
+		_form.load_limit_index = 0
 		escorted = false
 	var d := b.def
 	_title.text = d.name
@@ -198,24 +145,17 @@ func show_belt(b: SystemBelt) -> void:
 	_ore.text = ores
 	_richness.value = d.richness
 	_richness_pct.text = "%d%%" % roundi(d.richness * 100.0)
-	_danger.value = float(b.danger)
-	_danger_text.text = "%d of 5" % b.danger
-	if hud and hud.solar_system:
-		for den in hud.solar_system.dens:
-			if den.belt == b:
-				_danger_text.text += ", %s %s" % [den.get_display_name(), "nearby" if den.is_alive() else "destroyed"]
-	_update_distance()
+	_update_live()
 	_rebuild_contracts()
 	_refresh_form()
 
 
 func get_post_button() -> Button:
-	return _post
+	return _form.post
 
 
 func set_reward(value: int) -> void:
-	reward = ContractBoard.mining_rules.clamp_reward(value)
-	_refresh_form()
+	_form.set_reward(value)
 
 
 func _process(delta: float) -> void:
@@ -224,10 +164,26 @@ func _process(delta: float) -> void:
 	_refresh_timer -= delta
 	if _refresh_timer <= 0.0:
 		_refresh_timer = 0.5
-		_update_distance()
+		_update_live()
 		for c in _contracts.get_children():
 			if c is ContractRow:
 				(c as ContractRow).refresh()
+
+
+## Parts that change while it is shown: what is left, danger (clusters
+## drift past hostile bases), distance from home.
+func _update_live() -> void:
+	if belt == null or not is_instance_valid(belt):
+		return
+	_left.value = belt.fill_fraction()
+	_left_text.text = "mined out" if belt.is_depleted else "%d of %d loads" % [belt.loads_left, belt.reserve]
+	_danger.value = float(belt.danger)
+	_danger_text.text = "%d of 5" % belt.danger
+	for den in belt.nearby_dens():
+		_danger_text.text += ", %s %s" % [den.get_display_name(), "nearby" if den.is_alive() else "destroyed"]
+	_update_distance()
+	if belt.is_depleted and not _form.post.disabled:
+		_refresh_form()
 
 
 func _update_distance() -> void:
@@ -248,7 +204,7 @@ func _rebuild_contracts() -> void:
 	var list := ContractBoard.get_for_target(belt)
 	_contracts_header.text = "CONTRACTS  %d" % list.size()
 	if list.is_empty():
-		_contracts.add_child(UIUtil.label("None posted. Miners only work belts with a contract.", &"DimLabel"))
+		_contracts.add_child(UIUtil.label("None posted. Miners only work clusters with a contract.", &"DimLabel"))
 		return
 	for c in list:
 		var row := ContractRow.new(c, hud, false)
@@ -259,55 +215,26 @@ func _refresh_form() -> void:
 	if belt == null:
 		return
 	var rules := ContractBoard.mining_rules
-	_reward_value.text = "%d cr" % reward
-	_reward_minus.disabled = reward <= rules.reward_min
-	_reward_plus.disabled = reward >= rules.reward_max
+	var reward := _form.reward
+	_form.refresh()
 	var fair := rules.default_reward(belt)
 	var mats := rules.materials_for(belt.ore_type)
-	var verdict := "fair"
-	if reward >= fair * 1.6:
-		verdict = "generous"
-	elif reward > fair:
-		verdict = "above fair"
-	elif reward < fair * 0.7:
-		verdict = "low"
-	elif reward < fair:
-		verdict = "below fair"
 	var ore := Economy.ore_of_belt(belt.ore_type)
 	var worth := ""
 	var f := Factory.find(get_tree())
 	if f:
 		worth = " The Factory pays about %d cr for it now." % roundi(float(mats) * f.market.willing_price(ore))
-	_fair.text = "Fair pay here is about %d cr (%s). One load = %d %s.%s" % [fair, verdict, mats, Economy.ORE_NAMES[ore].to_lower(), worth]
-	var limit := rules.load_limit_options[load_limit_index]
-	_limit_value.text = "No limit" if limit <= 0 else "%d loads" % limit
-	_limit_minus.disabled = load_limit_index <= 0
-	_limit_plus.disabled = load_limit_index >= rules.load_limit_options.size() - 1
-	var max_cost := "" if limit <= 0 else " Up to %s cr in total." % Economy.format_amount(limit * reward)
-	_post_hint.text = "Paid on delivery, %d cr per load.%s" % [reward, max_cost]
+	_form.fair.text = "Fair pay here is about %d cr (%s). One load = %d %s.%s" % [fair, PostContractForm.fair_verdict(reward, fair), mats, Economy.ore_name(ore), worth]
 	_escorted.set_pressed_no_signal(escorted)
 	_escort_row.visible = escorted
 	_escort_value.text = "%d cr" % escort_pay
-	_post.text = "Post escorted mining contract" if escorted else "Post mining contract"
+	_form.post.text = "Post escorted mining contract" if escorted else "Post mining contract"
 	if escorted:
-		_post_hint.text += " Escorts: %d cr each per trip." % escort_pay
+		_form.hint.text += " Escorts: %d cr each per trip." % escort_pay
 	var why := ContractBoard.post_problem(reward)
-	_post.disabled = not why.is_empty()
-	_post.tooltip_text = why
-	if not why.is_empty():
-		_post_hint.text = why + "."
-
-
-func _step_reward(dir: int) -> void:
-	var rules := ContractBoard.mining_rules
-	var step := rules.reward_step * (5 if Input.is_key_pressed(KEY_SHIFT) else 1)
-	set_reward(reward + dir * step)
-
-
-func _step_limit(dir: int) -> void:
-	var n := ContractBoard.mining_rules.load_limit_options.size()
-	load_limit_index = clampi(load_limit_index + dir, 0, n - 1)
-	_refresh_form()
+	if why.is_empty() and belt.is_depleted:
+		why = "Mined out, nothing left to post on"
+	_form.set_problem(why)
 
 
 func _step_escort(dir: int) -> void:
@@ -316,15 +243,8 @@ func _step_escort(dir: int) -> void:
 
 
 func _on_post() -> void:
-	if belt == null:
+	if belt == null or belt.is_depleted:
 		return
-	var mc := ContractBoard.post_mining(belt, reward, ContractBoard.mining_rules.load_limit_options[load_limit_index])
+	var mc := ContractBoard.post_mining(belt, _form.reward, _form.load_limit())
 	if mc and escorted:
 		ContractBoard.post_escort_for_mining(mc, escort_pay, 2)
-
-
-func _step_button(text: String, tip: String) -> Button:
-	var b := UIUtil.button(text, &"IconButton")
-	b.custom_minimum_size = Vector2(28.0, 24.0)
-	b.tooltip_text = tip
-	return b

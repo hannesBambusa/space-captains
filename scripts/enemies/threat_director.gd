@@ -16,6 +16,11 @@ extends Node
 ## countdown on the map and overview). Then SolarSystem.arrive_den builds
 ## the base with its warp-in; a faction's first base posts its
 ## FactionDef.intro once.
+## Planet claims (phase C3): a den with a DenDef.claim_planet first claims
+## that world (PlanetClaims.claim: a garrison warps in over it)
+## DenDef.claim_lead seconds before its own arrival would be due, so a new
+## faction shows itself early; its intro posts then. The base itself comes
+## at its usual time, at least half the claim lead after the claim.
 
 signal changed
 
@@ -32,6 +37,8 @@ var pending_at: float = 0.0
 var last_arrival: float = -1.0e9
 ## Factions whose intro line was posted (FactionDef ids).
 var introduced: Array[StringName] = []
+## Dens whose planet claim was made: DenDef.name -> SimClock.time of the claim.
+var claimed_for: Dictionary = {}
 var site: DenArrivalSite
 
 var _last_time: float = 0.0
@@ -64,10 +71,49 @@ func sim_step(_dt: float) -> void:
 	if next == null:
 		return
 	var lead := sd.arrival_warning_time
+	if wants_claim(next):
+		if _due(next, lead + next.claim_lead):
+			_claim_first(sys, next)
+		return
 	if SimClock.time + lead - last_arrival < sd.arrival_min_gap:
 		return
-	if threat_time + lead >= max_time(next) or (threat_time + lead >= next.min_arrival_time and growth_met(next)):
+	if claimed_for.has(next.name) and SimClock.time < float(claimed_for[next.name]) + next.claim_lead * 0.5:
+		return
+	if _due(next, lead):
 		_warn(sys, next)
+
+
+## Would [param d] be due [param ahead] sim seconds from now?
+func _due(d: DenDef, ahead: float) -> bool:
+	return threat_time + ahead >= max_time(d) or (threat_time + ahead >= d.min_arrival_time and growth_met(d))
+
+
+## [param d] still has to make its planet claim.
+func wants_claim(d: DenDef) -> bool:
+	return not d.claim_planet.is_empty() and not claimed_for.has(d.name)
+
+
+## The faction of [param d] claims its planet (see the class notes). A
+## planet held already, or one that is missing, is skipped.
+func _claim_first(sys: SolarSystem, d: DenDef) -> void:
+	claimed_for[d.name] = SimClock.time
+	var world := CombatWorld.of(get_tree())
+	var body := PlanetRaidContract.find_planet(get_tree(), d.claim_planet)
+	if world == null or world.claims == null or body == null:
+		return
+	var f := d.get_faction()
+	var g := world.claims.claim(body, f, d.gang, true)
+	if g == null:
+		return
+	EventLog.post("%s %s claimed %s: a garrison is in orbit, landers will not raid there" % [d.gang, f.display_name, body.def.name], EventLog.Kind.THREAT, g, Vector3.INF, "", f.id)
+	if not introduced.has(f.id):
+		introduced.append(f.id)
+		if not f.intro.is_empty():
+			EventLog.post(f.intro, EventLog.Kind.INFO, g, Vector3.INF, "", f.id)
+		_toast("New faction: %s claimed %s" % [f.display_name, body.def.name])
+	else:
+		_toast("Faction claim: %s claimed %s" % [d.gang, body.def.name])
+	changed.emit()
 
 
 # --- Queries ------------------------------------------------------------------
@@ -99,7 +145,7 @@ func growth_met(d: DenDef) -> bool:
 
 ## Living captains hired at the player's buildings.
 func hired_captains() -> int:
-	var mgr := get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	var mgr := BuildingManager.of(get_tree())
 	var n := 0
 	if mgr:
 		for b in mgr.buildings:
@@ -111,7 +157,7 @@ func hired_captains() -> int:
 
 
 func active_structures() -> int:
-	var mgr := get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	var mgr := BuildingManager.of(get_tree())
 	var n := 0
 	if mgr:
 		for b in mgr.buildings:
@@ -180,13 +226,13 @@ func _make_site(sys: SolarSystem) -> void:
 
 func _all_cleared(sys: SolarSystem) -> bool:
 	for den in sys.dens:
-		if is_instance_valid(den) and den.is_alive():
+		if is_instance_valid(den) and den.is_alive() and den.is_raid_base():
 			return false
 	return true
 
 
 func _system() -> SolarSystem:
-	return get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	return SolarSystem.of(get_tree())
 
 
 func _toast(text: String) -> void:
@@ -202,7 +248,7 @@ func save_state() -> Dictionary:
 	for id in introduced:
 		intro.append(String(id))
 	return {"threat_time": threat_time, "arrived": arrived.duplicate(), "pending": pending.name if pending else "", "pending_at": pending_at,
-			"last_arrival": last_arrival, "introduced": intro}
+			"last_arrival": last_arrival, "introduced": intro, "claimed_for": claimed_for.duplicate()}
 
 
 ## Before the dens are loaded: builds the arrived dens (no warp-in; their
@@ -213,6 +259,7 @@ func load_state(d: Dictionary) -> void:
 	arrived = (d.get("arrived", {}) as Dictionary).duplicate()
 	pending_at = float(d.get("pending_at", 0.0))
 	last_arrival = float(d.get("last_arrival", -1.0e9))
+	claimed_for = (d.get("claimed_for", {}) as Dictionary).duplicate()
 	introduced.clear()
 	for id in d.get("introduced", []):
 		introduced.append(StringName(id))

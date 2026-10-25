@@ -14,3 +14,4 @@ blurb = "Faster and more agile in a fight."
 speed_mult = 1.52
 accel_mult = 1.7
 turn_mult = 1.55
+build_ore = PackedInt32Array(0, 0, 0, 6)

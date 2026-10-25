@@ -2,6 +2,7 @@ class_name TopBar
 extends PanelContainer
 ## Compact top bar: credits, iron / titanium / crystal (in ore colours, each
 ## with a small Factory demand meter: 1 to 3 pips, tooltip with its price),
+## then the planet goods as one compact group (see [method _make_goods_box]),
 ## sim time and speed/pause state. Deliveries flash a short "-credits / +ore"
 ## delta next to the values; income (station fees, the corporate grant,
 ## Factory ore sales) flashes a green "+credits" beside it. Deltas landing
@@ -10,9 +11,14 @@ extends PanelContainer
 ## after each ore. The credits tooltip shows what is reserved for bounties
 ## (ContractBoard escrow). With a Shield Generator built, a SHIELD bar
 ## shows the station bubble's charge (and the countdown while it is down).
+## With a Science Lab built, a RESEARCH box shows the projects at work and
+## the lead one's progress (tooltip: every funded project; click: select the
+## lab). The credits tooltip also shows what is reserved for research.
 
 ## Emitted by the HOME button (the HUD flies the camera to the station).
 signal home_pressed
+## Emitted by a click on the research box (the HUD selects the Science Lab).
+signal research_pressed
 
 ## Seconds a delta stays visible before it fades.
 @export var flash_hold: float = 1.6
@@ -25,6 +31,12 @@ var _ore_deltas: Array[Label] = []
 var _ore_demand: Array[PipMeter] = []
 ## Per ore: the pending cargo hint ("+40").
 var _ore_pending: Array[Label] = []
+## Planet goods group: per good (fuel .. heavy ore) a cell and its count.
+var _goods_box: HBoxContainer
+var _goods_icon: TextureRect
+var _goods_none: Label
+var _goods_cells: Array[HBoxContainer] = []
+var _goods_labels: Array[Label] = []
 var _demand_timer := 0.0
 var _time: Label
 var _system: Label
@@ -37,6 +49,9 @@ var _shield_box: HBoxContainer
 var _shield_bar: PipMeter
 var _shield_value: Label
 var _shield_timer := 0.0
+var _research_box: HBoxContainer
+var _research_bar: PipMeter
+var _research_value: Label
 var _tweens: Dictionary = {}
 ## Running sums while a delta is still showing: label -> int.
 var _sums: Dictionary = {}
@@ -75,9 +90,9 @@ func _ready() -> void:
 	_credits = _add_resource(res, &"credits", HudStyle.CREDITS, "CREDITS")
 	_credits_delta = _add_delta(res, PipMeter.BAD)
 	_income_delta = _add_delta(res, PipMeter.GOOD)
-	for i in Economy.ORE_NAMES.size():
+	for i in Economy.BASE_COUNT:
 		_add_divider(res)
-		var v := _add_resource(res, [&"iron", &"titanium", &"crystal"][i], Economy.ORE_COLORS[i], Economy.ORE_NAMES[i].to_upper())
+		var v := _add_resource(res, Economy.ORE_ICONS[i], Economy.ORE_COLORS[i], Economy.ORE_NAMES[i].to_upper())
 		v.add_theme_color_override("font_color", Economy.ORE_COLORS[i].lerp(Color.WHITE, 0.55))
 		var pend := UIUtil.label("", &"SmallLabel")
 		pend.add_theme_font_override("font", HudStyle.font("Medium", false, true))
@@ -96,6 +111,7 @@ func _ready() -> void:
 		_ore_labels.append(v)
 		_ore_demand.append(pips)
 		_ore_deltas.append(_add_delta(res, PipMeter.GOOD))
+	_make_goods_box(res)
 	_shield_box = HBoxContainer.new()
 	_shield_box.add_theme_constant_override("separation", 6)
 	_shield_box.visible = false
@@ -104,16 +120,31 @@ func _ready() -> void:
 	_add_divider(_shield_box)
 	var si := HudStyle.icon_rect(&"shield", 18.0, DefenseSection.SHIELD_COLOR)
 	_shield_box.add_child(si)
-	_shield_bar = PipMeter.new()
-	_shield_bar.style = PipMeter.Style.BAR
-	_shield_bar.max_value = 1.0
-	_shield_bar.color = DefenseSection.SHIELD_COLOR
-	_shield_bar.custom_minimum_size = Vector2(64.0, 5.0)
+	_shield_bar = UIUtil.bar(DefenseSection.SHIELD_COLOR, Vector2(64.0, 5.0))
 	_shield_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_shield_box.add_child(_shield_bar)
 	_shield_value = UIUtil.label("", &"ValueLabel")
 	_shield_value.custom_minimum_size.x = 64.0
 	_shield_box.add_child(_shield_value)
+	_research_box = HBoxContainer.new()
+	_research_box.add_theme_constant_override("separation", 6)
+	_research_box.visible = false
+	_research_box.mouse_filter = Control.MOUSE_FILTER_STOP
+	_research_box.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_research_box.gui_input.connect(func(e: InputEvent) -> void:
+		var mb := e as InputEventMouseButton
+		if mb and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+			research_pressed.emit())
+	res.add_child(_research_box)
+	_add_divider(_research_box)
+	_research_box.add_child(HudStyle.icon_rect(&"research", 18.0, ScienceLabPanel.FIELD_COLORS[0]))
+	_research_bar = UIUtil.bar(ScienceLabPanel.FIELD_COLORS[0], Vector2(48.0, 5.0))
+	_research_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_research_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_research_box.add_child(_research_bar)
+	_research_value = UIUtil.label("", &"ValueLabel")
+	_research_value.custom_minimum_size.x = 58.0
+	_research_box.add_child(_research_value)
 	h.add_child(UIUtil.spacer())
 	# Right: sim clock and speed.
 	var clock_box := HBoxContainer.new()
@@ -169,10 +200,71 @@ func _process(delta: float) -> void:
 	if _shield_timer <= 0.0:
 		_shield_timer = 0.2
 		_update_shield()
+		_update_research()
 	var t := int(SimClock.time)
 	var text := "%02d:%02d:%02d" % [floori(t / 3600.0), floori(t / 60.0) % 60, t % 60]
 	if _time.text != text:
 		_time.text = text
+
+
+## Planet goods (phase C2): one compact group after the asteroid ore, a
+## small icon and count per good you hold or have on the way, hidden until
+## a Raider Dock stands or a good is in stock. The planet icon carries the
+## whole list in its tooltip.
+func _make_goods_box(res: HBoxContainer) -> void:
+	_goods_box = HBoxContainer.new()
+	_goods_box.add_theme_constant_override("separation", 3)
+	_goods_box.visible = false
+	_goods_box.mouse_filter = Control.MOUSE_FILTER_PASS
+	res.add_child(_goods_box)
+	_add_divider(_goods_box)
+	_goods_icon = HudStyle.icon_rect(&"planet", 16.0, HudStyle.TEXT_DIM)
+	_goods_icon.mouse_filter = Control.MOUSE_FILTER_STOP
+	_goods_box.add_child(_goods_icon)
+	_goods_none = UIUtil.label("none", &"SmallLabel")
+	_goods_none.add_theme_color_override("font_color", HudStyle.TEXT_FAINT)
+	_goods_box.add_child(_goods_none)
+	for i in range(Economy.BASE_COUNT, Economy.COUNT):
+		var cell := HBoxContainer.new()
+		cell.add_theme_constant_override("separation", 1)
+		cell.mouse_filter = Control.MOUSE_FILTER_STOP
+		_goods_box.add_child(cell)
+		var ic := HudStyle.icon_rect(Economy.ORE_ICONS[i], 14.0, Economy.ORE_COLORS[i])
+		ic.mouse_filter = Control.MOUSE_FILTER_PASS
+		cell.add_child(ic)
+		var v := UIUtil.label("", &"ValueLabel")
+		v.add_theme_color_override("font_color", Economy.ORE_COLORS[i].lerp(Color.WHITE, 0.5))
+		v.mouse_filter = Control.MOUSE_FILTER_PASS
+		cell.add_child(v)
+		_goods_cells.append(cell)
+		_goods_labels.append(v)
+
+
+## Counts, tooltips and which goods show (held or on the way).
+func _update_goods() -> void:
+	var pending := CargoDepot.pending_all(get_tree())
+	var f := Factory.find(get_tree())
+	var mgr := BuildingManager.of(get_tree())
+	var dock_def := mgr.def_by_id(&"raider_dock") if mgr else null
+	var dock := dock_def != null and mgr.count_of(dock_def) > 0
+	var any := false
+	var lines: PackedStringArray = ["Planet goods from planet raids. Sell them to the Factory or use them: rare metals for Mk III modules, fuel for Mk III drives, silicates for Mk III shields and crystal, heavy ore for iron and titanium, water kept for a future colony."]
+	for k in _goods_cells.size():
+		var i := Economy.BASE_COUNT + k
+		var n := Economy.ore[i]
+		var p := pending[i] if i < pending.size() else 0
+		var show := n > 0 or p > 0
+		_goods_cells[k].visible = show
+		any = any or show
+		_goods_labels[k].text = UIUtil.amount(n) + ("+%s" % UIUtil.amount(p) if p > 0 else "")
+		var price := " Factory pays %.1f cr (demand %s)." % [f.market.willing_price(i), f.market.demand_name(i).to_lower()] if f else ""
+		var tip := "%s %s.%s%s" % [Economy.ORE_NAMES[i], UIUtil.amount(n), price, " %s on the way by cargo shuttle." % UIUtil.amount(p) if p > 0 else ""]
+		_goods_cells[k].tooltip_text = tip
+		lines.append(tip)
+	_goods_box.visible = any or dock
+	_goods_none.visible = not any
+	_goods_icon.tooltip_text = "\n".join(lines)
+	_goods_none.tooltip_text = _goods_icon.tooltip_text
 
 
 ## Icon (tinted) and value label; the value label carries the tooltip.
@@ -225,8 +317,9 @@ func _flash_sum(label: Label, amount: int) -> void:
 func _on_delivery(_contract: Contract, ship: Node, credits: int, materials: int, ore: int) -> void:
 	if credits != 0:
 		_flash_sum(_credits_delta, -credits)
-	# Ore left at an outpost depot shows when its shuttle lands (_on_cargo).
-	if materials != 0 and CargoDepot.of_ship(ship) == null:
+	# Ore left at an outpost depot shows when its shuttle lands (_on_cargo);
+	# planet goods show in their own group.
+	if materials != 0 and CargoDepot.of_ship(ship) == null and not (_contract is PlanetRaidContract):
 		_flash_sum(_ore_deltas[Economy.ore_of_belt(ore)], materials)
 
 
@@ -241,12 +334,16 @@ func _on_cargo(cargo: PackedInt32Array, _source: String) -> void:
 ## the pending cargo hints and the reserved credits.
 func _update_demand() -> void:
 	_update_pending()
+	_update_goods()
 	var reserved := ContractBoard.escrow_total()
 	var zones := ContractBoard.zone_escrow_total()
 	_credits.tooltip_text = "Credits %s. Reserved for bounties: %s cr (held by the contract board, paid out on the kill; the rest comes back)." % [
 			UIUtil.amount(Economy.credits), UIUtil.amount(reserved - zones)] if reserved > 0 else "Credits %s. Nothing reserved for bounties." % UIUtil.amount(Economy.credits)
 	if zones > 0:
 		_credits.tooltip_text += " Defence zone budgets: %s cr (paid per raider killed inside, the rest comes back when a zone is removed)." % UIUtil.amount(zones)
+	var research := Research.escrow_total()
+	if research > 0:
+		_credits.tooltip_text += " Reserved for research: %s cr (used up when a project is done, back if you cancel)." % UIUtil.amount(research)
 	var f := Factory.find(get_tree())
 	for i in _ore_demand.size():
 		var pips := _ore_demand[i]
@@ -272,7 +369,7 @@ func _update_pending() -> void:
 		if n > 0:
 			l.text = "+%s" % UIUtil.amount(n)
 			l.tooltip_text = "%s %s on the way by cargo shuttle (waiting at an outpost or aboard). It counts as yours when it lands at the station." % [
-					UIUtil.amount(n), Economy.ORE_NAMES[i].to_lower()]
+					UIUtil.amount(n), Economy.ore_name(i)]
 
 
 func _update_shield() -> void:
@@ -293,6 +390,38 @@ func _update_shield() -> void:
 	_shield_value.text = text
 	_shield_value.add_theme_color_override("font_color", PipMeter.BAD if not b.is_up() else Color(0.85, 0.93, 1.0))
 	_shield_box.tooltip_text = "Station shield: %s, %d / %d HP, radius %d m" % [b.get_state_name().to_lower(), roundi(b.hp), roundi(b.max_hp), roundi(b.radius)]
+
+
+## Research box: lab built (or projects funded), projects at work, the lead's progress.
+func _update_research() -> void:
+	var lab := ScienceLab.find(get_tree())
+	var active := Research.active_projects()
+	_research_box.visible = lab != null or not active.is_empty()
+	if not _research_box.visible:
+		return
+	var working := 0
+	for a in active:
+		if a["researcher"] != null:
+			working += 1
+	if active.is_empty():
+		_research_bar.value = 0.0
+		_research_value.text = "idle"
+		_research_value.add_theme_color_override("font_color", HudStyle.TEXT_DIM)
+	else:
+		var lead: Dictionary = active[0]
+		_research_bar.value = float(lead["progress"])
+		_research_value.text = "%d  %d%%" % [active.size(), roundi(float(lead["progress"]) * 100.0)]
+		_research_value.add_theme_color_override("font_color", Color(0.85, 0.93, 1.0) if working > 0 else HudStyle.WARN)
+	var lines: PackedStringArray = ["Research: %d project%s funded, %d at work, %d of %d researchers. Click: open the Science Lab." % [
+			active.size(), "" if active.size() == 1 else "s", working, Research.researchers.size(), Research.MAX_RESEARCHERS]]
+	for a in active:
+		var t := a["tech"] as TechDef
+		var r := a["researcher"] as Researcher
+		lines.append("%s  %d%%  %s" % [t.display_name, roundi(float(a["progress"]) * 100.0),
+				("%s, unpaid" % r.researcher_name if r.unpaid else "%s, %s left" % [r.researcher_name, UIUtil.clock(Research.eta_of(t))]) if r else "waiting for a researcher"])
+	if lab == null:
+		lines.append("No Science Lab: the work is on hold.")
+	_research_box.tooltip_text = "\n".join(lines)
 
 
 func _add_divider(parent: HBoxContainer) -> void:

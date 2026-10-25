@@ -65,7 +65,7 @@ func update(tree: SceneTree, from: Vector3, goal: Vector3, speed: float, dt: flo
 	_timer -= dt
 	if _timer > 0.0 and has_waypoint():
 		var w := waypoint()
-		if Vector2(w.x - from.x, w.z - from.z).length() > maxf(140.0, speed * 1.2):
+		if SpaceNav.flat_distance(w, from) > maxf(140.0, speed * 1.2):
 			return
 	elif _timer > 0.0:
 		return
@@ -127,12 +127,12 @@ func first_block(obs: Array[Dictionary], a: Vector3, b: Vector3, speed: float, g
 		if r <= 0.0:
 			continue
 		c0.y = 0.0
-		var gd := Vector2(goal.x - c0.x, goal.z - c0.z).length()
+		var gd := SpaceNav.flat_distance(goal, c0)
 		if gd < r:
 			r = hard
 			if gd < hard:
 				continue
-		var ad := Vector2(a.x - c0.x, a.z - c0.z).length()
+		var ad := SpaceNav.flat_distance(a, c0)
 		if ad < r:
 			# Already inside the planning circle: hold this distance (never
 			# closer than the hard radius) while going round.
@@ -154,7 +154,7 @@ func first_block(obs: Array[Dictionary], a: Vector3, b: Vector3, speed: float, g
 			var tk := clampf(k, 0.0, leg_t)
 			var ck := SpaceNav.predict_position(node, tk)
 			var sk := a + dir * spd * tk
-			var dk := Vector2(sk.x - ck.x, sk.z - ck.z).length()
+			var dk := SpaceNav.flat_distance(sk, ck)
 			if dk < near:
 				near = dk
 				c = Vector3(ck.x, 0.0, ck.z)

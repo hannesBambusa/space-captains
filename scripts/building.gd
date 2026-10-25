@@ -189,6 +189,16 @@ func get_service() -> Node:
 	return _service
 
 
+## First service node in [param group] whose building is active (the
+## Factory, Outfitter, Salvage Yard, Science Lab finders), or null.
+static func first_active_service(tree: SceneTree, group: String) -> Node:
+	for n in tree.get_nodes_in_group(group):
+		var b: Variant = n.get(&"building")
+		if is_instance_valid(b) and (b as Building).is_active():
+			return n
+	return null
+
+
 ## The instanced model (or its placeholder).
 func get_model() -> Node3D:
 	return _model
@@ -345,7 +355,7 @@ func receive_pod(captain: Captain) -> void:
 	if not waiting.has(captain):
 		waiting.append(captain)
 	captain.stranded = true
-	EventLog.post("%s is back at %s and needs a new ship (%s cr)" % [captain.captain_name, display_name, UIUtil.amount(def.ship_cost)], EventLog.Kind.INFO, self)
+	EventLog.post("%s is back at %s and needs a new ship (%s cr)" % [captain.captain_name, display_name, Fmt.amount(def.ship_cost)], EventLog.Kind.INFO, self)
 	hires_changed.emit(self)
 
 
@@ -366,7 +376,7 @@ func replacement_block_reason(captain: Captain, player_pays: bool) -> String:
 	if player_pays:
 		return Economy.shortfall_text(def.ship_cost)
 	if captain.wallet < def.ship_cost:
-		return "Wallet %s of %s cr" % [UIUtil.amount(captain.wallet), UIUtil.amount(def.ship_cost)]
+		return "Wallet %s of %s cr" % [Fmt.amount(captain.wallet), Fmt.amount(def.ship_cost)]
 	return ""
 
 
@@ -383,7 +393,7 @@ func buy_replacement(captain: Captain, player_pays: bool) -> Ship:
 		Economy.add_income(roundi(def.ship_cost * SHIP_SALE_SHARE), "Ship sales")
 	captain.add_history("New %s from %s" % ["ship paid by the station" if player_pays else "ship bought", display_name])
 	var ship := adopt(captain)
-	EventLog.post("%s is flying again (%s)" % [captain.captain_name, "station paid" if player_pays else "bought a ship for %s cr" % UIUtil.amount(def.ship_cost)],
+	EventLog.post("%s is flying again (%s)" % [captain.captain_name, "station paid" if player_pays else "bought a ship for %s cr" % Fmt.amount(def.ship_cost)],
 			EventLog.Kind.INFO, ship)
 	return ship
 
@@ -494,7 +504,7 @@ func _dock_outward() -> Vector3:
 	var out := Vector3.ZERO
 	if n and is_inside_tree():
 		out = global_transform.basis.inverse() * -n.global_basis.z
-	if Vector2(out.x, out.z).length() < 0.1 and n:
+	if SpaceNav.flat_length(out) < 0.1 and n:
 		out = get_point("dock_point", Vector3.RIGHT)
 	out.y = 0.0
 	return out.normalized() if out.length() > 0.01 else Vector3.RIGHT
@@ -580,14 +590,8 @@ func _make_bar() -> void:
 ## Placement, construction, berths (captains by save id) and the service
 ## and cargo depot state. Ships are saved on their own (ShipCodec).
 func save_state() -> Dictionary:
-	var caps := []
-	for c in captains:
-		caps.append(SaveIds.of(c))
-	var wait := []
-	for c in waiting:
-		wait.append(SaveIds.of(c))
 	var d := {"id": SaveIds.of(self), "def": def.id, "label": display_name, "bay": bay, "offset": position, "yaw": rotation.y,
-			"active": is_active(), "started_at": started_at, "captains": caps, "waiting": wait, "wait_timer": _wait_timer}
+			"active": is_active(), "started_at": started_at, "captains": SaveUtil.ids(captains), "waiting": SaveUtil.ids(waiting), "wait_timer": _wait_timer}
 	if _service and _service.has_method(&"save_state"):
 		d["service"] = _service.call(&"save_state")
 	if _depot:
@@ -608,15 +612,9 @@ func load_state(d: Dictionary, refs: SaveRefs) -> void:
 		started_at = float(d.get("started_at", SimClock.time))
 		_update_construction()
 	captains.clear()
-	for id: int in d.get("captains", []):
-		var c := refs.captain(id)
-		if c:
-			captains.append(c)
+	captains.append_array(refs.captains(d.get("captains", [])))
 	waiting.clear()
-	for id: int in d.get("waiting", []):
-		var c := refs.captain(id)
-		if c:
-			waiting.append(c)
+	waiting.append_array(refs.captains(d.get("waiting", [])))
 	_wait_timer = float(d.get("wait_timer", 0.0))
 	hires_changed.emit(self)
 

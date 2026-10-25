@@ -168,10 +168,10 @@ func _ready() -> void:
 	bars.add_theme_constant_override("h_separation", 10)
 	bars.add_theme_constant_override("v_separation", 3)
 	v.add_child(bars)
-	var hb := _bar_row(bars, "Hull", HULL_COLOR)
+	var hb := UIUtil.bar_row(bars, "Hull", HULL_COLOR, 80.0, Vector2(170.0, 6.0))
 	_hull = hb[0]
 	_hull_text = hb[1]
-	var sb := _bar_row(bars, "Shields", SHIELD_COLOR)
+	var sb := UIUtil.bar_row(bars, "Shields", SHIELD_COLOR, 80.0, Vector2(170.0, 6.0))
 	_shield = sb[0]
 	_shield_text = sb[1]
 
@@ -311,9 +311,9 @@ func _ready() -> void:
 	_escort_list = VBoxContainer.new()
 	_escort_list.add_theme_constant_override("separation", 1)
 	_escort_box.add_child(_escort_list)
-	var pr := _stepper_row(_escort_box, "Pay per trip", _step_pay)
+	var pr: Label = UIUtil.stepper_row(_escort_box, "Pay per trip", _step_pay)[0]
 	_pay_value = pr
-	var mr := _stepper_row(_escort_box, "Max escorts", _step_max)
+	var mr: Label = UIUtil.stepper_row(_escort_box, "Max escorts", _step_max)[0]
 	_max_value = mr
 	Economy.changed.connect(func(_c: int, _m: int) -> void:
 		if is_visible_in_tree():
@@ -358,7 +358,7 @@ func show_ship(s: Ship) -> void:
 		_attr_names[4].text = cap.get_specialty_name()
 	_modules_box.visible = not (s is EscapePod)
 	_refresh_modules()
-	_loads_title.text = ("Salvage loads" if s is SalvagerShip else "Loads delivered") if s is MinerShip else "Kills / escorts"
+	_loads_title.text = ("Salvage loads" if s is SalvagerShip else ("Raid loads" if s is LanderShip else "Loads delivered")) if s is MinerShip else "Kills / escorts"
 	_escort_box.visible = s is MinerShip
 	_log_view.show_captain(cap)
 	_rebuild_escorts()
@@ -506,41 +506,6 @@ func _on_request() -> void:
 
 # --- Builders -------------------------------------------------------------------
 
-func _bar_row(grid: GridContainer, title: String, color: Color) -> Array:
-	var l := UIUtil.label(title, &"DimLabel")
-	l.custom_minimum_size.x = 80.0
-	grid.add_child(l)
-	var bar := PipMeter.new()
-	bar.style = PipMeter.Style.BAR
-	bar.max_value = 1.0
-	bar.color = color
-	bar.custom_minimum_size = Vector2(170.0, 6.0)
-	grid.add_child(bar)
-	var t := UIUtil.label("", &"DimLabel")
-	t.custom_minimum_size.x = 80.0
-	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	grid.add_child(t)
-	return [bar, t]
-
-
-func _stepper_row(parent: Container, title: String, step: Callable) -> Label:
-	var row := HBoxContainer.new()
-	parent.add_child(row)
-	row.add_child(UIUtil.label(title, &"DimLabel"))
-	row.add_child(UIUtil.spacer())
-	var minus := UIUtil.button("-", &"IconButton")
-	minus.custom_minimum_size = Vector2(28.0, 24.0)
-	minus.pressed.connect(step.bind(-1))
-	row.add_child(minus)
-	var value := UIUtil.label("", &"ValueLabel")
-	value.custom_minimum_size.x = 74.0
-	value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	row.add_child(value)
-	var plus := UIUtil.button("+", &"IconButton")
-	plus.custom_minimum_size = Vector2(28.0, 24.0)
-	plus.pressed.connect(step.bind(1))
-	row.add_child(plus)
-	return value
 
 
 ## "Ore Hold Mk II, paid 400 cr, waiting for titanium"; hidden without an order.
@@ -661,7 +626,7 @@ func _refresh_modules() -> void:
 		var n := _module_names[i]
 		var t := _module_tiers[i]
 		n.text = m.display_name if m else "empty"
-		n.tooltip_text = (m.blurb if m and not m.blurb.is_empty() else "Stock fitting of this hull.") if m else ""
+		n.tooltip_text = (ModuleTips.tip(m) if m.tier > 0 else (m.blurb if not m.blurb.is_empty() else "Stock fitting of this hull.")) if m else ""
 		n.add_theme_color_override("font_color", Color(0.9, 0.94, 1.0) if m and m.tier > 0 else Color(0.6, 0.66, 0.74))
 		var tier := m.tier if m else 0
 		t.text = ShipModule.TIER_NAMES[tier]

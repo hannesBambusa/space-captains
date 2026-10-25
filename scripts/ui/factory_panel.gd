@@ -10,7 +10,8 @@ extends PanelContainer
 ## Tabs (the CaptainPanel idiom): "Production" (current job with progress
 ## and ETA, the open buy orders in production order with captain, deposit
 ## and state, the equipment demand table, the warehouse grid) and "Market"
-## (ore market, auto-sell, tooling, recent). The hidden tab keeps the
+## (ore market, auto-sell, tooling, recent). Warehouse cells and demand rows
+## show what each module does in numbers and the research it still needs. The hidden tab keeps the
 ## height of the taller one, so the panel does not jump when switching.
 
 const DEMAND_COLORS: Array[Color] = [Color(0.6, 0.66, 0.74), Color(1.0, 0.78, 0.25), Color(0.35, 0.9, 0.5)]
@@ -45,6 +46,7 @@ var _tab_height: float = 0.0
 var _auto: CheckButton
 ## Per ore: {stock_bar, stock, demand_meter, demand, price, ask, rate, keep}.
 var _ore_rows: Array[Dictionary] = []
+var _goods_header: Label
 var _orders: Label
 var _ware_header: Label
 ## [slot][tier - 1] -> Label.
@@ -117,6 +119,10 @@ func _ready() -> void:
 			factory.market.set_auto_sell(on))
 	mh.add_child(_auto)
 	for i in FactoryMarket.TYPES:
+		if i == Economy.BASE_COUNT:
+			_goods_header = UIUtil.label("PLANET GOODS", &"SubHeaderLabel")
+			_goods_header.tooltip_text = "Brought back from planet raids (Raider Dock). Shown once raids are researched or you hold some."
+			v.add_child(_goods_header)
 		_ore_rows.append(_make_ore_row(v, i))
 
 	v.add_child(HSeparator.new())
@@ -213,6 +219,7 @@ func _build_production(v: VBoxContainer) -> void:
 			var cell := UIUtil.label("", &"ValueLabel")
 			cell.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 			cell.custom_minimum_size.x = 56.0
+			cell.mouse_filter = Control.MOUSE_FILTER_PASS
 			grid.add_child(cell)
 			row.append(cell)
 		_ware_cells.append(row)
@@ -257,7 +264,7 @@ func _make_ore_row(parent: VBoxContainer, ore: int) -> Dictionary:
 	box.add_child(b)
 	b.add_child(UIUtil.spacer(16.0))
 	b.add_child(UIUtil.label("Ask", &"DimLabel"))
-	var minus := _step_button("-", "Lower the asking price: sells faster. Turns follow market off.")
+	var minus := UIUtil.step_button("-", "Lower the asking price: sells faster. Turns follow market off.", Vector2(22.0, 22.0))
 	minus.pressed.connect(func() -> void:
 		if factory:
 			factory.market.step_ask(ore, -1))
@@ -267,12 +274,12 @@ func _make_ore_row(parent: VBoxContainer, ore: int) -> Dictionary:
 	ask.mouse_filter = Control.MOUSE_FILTER_PASS
 	ask.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	b.add_child(ask)
-	var plus := _step_button("+", "Raise the asking price: more per unit, slower sales. Turns follow market off.")
+	var plus := UIUtil.step_button("+", "Raise the asking price: more per unit, slower sales. Turns follow market off.", Vector2(22.0, 22.0))
 	plus.pressed.connect(func() -> void:
 		if factory:
 			factory.market.step_ask(ore, 1))
 	b.add_child(plus)
-	var match_b := _step_button("=", "Follow market: the ask tracks just under what the Factory pays")
+	var match_b := UIUtil.step_button("=", "Follow market: the ask tracks just under what the Factory pays", Vector2(22.0, 22.0))
 	match_b.custom_minimum_size.x = 24.0
 	match_b.pressed.connect(func() -> void:
 		if factory:
@@ -284,7 +291,7 @@ func _make_ore_row(parent: VBoxContainer, ore: int) -> Dictionary:
 	b.add_child(rate)
 	b.add_child(UIUtil.spacer())
 	b.add_child(UIUtil.label("Keep", &"DimLabel"))
-	var kminus := _step_button("-", "Keep less %s back" % Economy.ORE_NAMES[ore].to_lower())
+	var kminus := UIUtil.step_button("-", "Keep less %s back" % Economy.ore_name(ore), Vector2(22.0, 22.0))
 	kminus.pressed.connect(func() -> void:
 		if factory:
 			var m := factory.market
@@ -294,20 +301,22 @@ func _make_ore_row(parent: VBoxContainer, ore: int) -> Dictionary:
 	keep.custom_minimum_size.x = 38.0
 	keep.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	b.add_child(keep)
-	var kplus := _step_button("+", "Keep more %s back for building" % Economy.ORE_NAMES[ore].to_lower())
+	var kplus := UIUtil.step_button("+", "Keep more %s back for building" % Economy.ore_name(ore), Vector2(22.0, 22.0))
 	kplus.pressed.connect(func() -> void:
 		if factory:
 			var m := factory.market
 			m.set_reserve(ore, m.reserve[ore] + m.reserve_step[ore]))
 	b.add_child(kplus)
-	return {"row": a, "stock_bar": bar, "stock": stock, "meter": meter, "demand": demand, "price": price, "ask": ask, "rate": rate, "keep": keep}
+	var refine: Button = null
+	if FactoryMarket.REFINE.has(ore):
+		refine = UIUtil.button("Refine", &"IconButton")
+		refine.custom_minimum_size = Vector2(56.0, 22.0)
+		refine.pressed.connect(func() -> void:
+			if factory:
+				factory.market.refine(ore, 10 if Input.is_key_pressed(KEY_SHIFT) else 1))
+		a.add_child(refine)
+	return {"box": box, "row": a, "stock_bar": bar, "stock": stock, "meter": meter, "demand": demand, "price": price, "ask": ask, "rate": rate, "keep": keep, "refine": refine}
 
-
-func _step_button(text: String, tip: String) -> Button:
-	var b := UIUtil.button(text, &"IconButton")
-	b.custom_minimum_size = Vector2(22.0, 22.0)
-	b.tooltip_text = tip
-	return b
 
 
 func setup(owner_hud: HUD) -> void:
@@ -376,8 +385,18 @@ func _refresh_live() -> void:
 	if _tab != 1:
 		return
 	var m := f.market
+	var goods_on := Research.is_building_unlocked(&"raider_dock")
+	for i in range(Economy.BASE_COUNT, _ore_rows.size()):
+		goods_on = goods_on or Economy.ore[i] > 0 or m.stock[i] >= 1.0
+	if _goods_header:
+		_goods_header.visible = goods_on
 	for i in _ore_rows.size():
 		var r := _ore_rows[i]
+		(r["box"] as Control).visible = i < Economy.BASE_COUNT or goods_on
+		var rb := r["refine"] as Button
+		if rb:
+			rb.disabled = m.refine_batches(i) <= 0
+			rb.tooltip_text = "Refine %s (Shift: ten at once). You have %d %s." % [m.refine_text(i), Economy.ore[i], Economy.ore_name(i)]
 		var bar := r["stock_bar"] as PipMeter
 		bar.max_value = m.target_stock[i] * 2.0
 		bar.value = m.stock[i]
@@ -432,6 +451,7 @@ func _refresh() -> void:
 		for t in 3:
 			var n := counts[s * 3 + t]
 			var can := f.tooling_tier >= t + 1
+			row[t].tooltip_text = ModuleTips.cell_tip(s, t + 1, f)
 			row[t].text = str(n) if n > 0 else ("0" if can else "-")
 			row[t].add_theme_color_override("font_color", CaptainPanel.TIER_COLORS[t + 1] if n > 0 else Color(0.5, 0.55, 0.62))
 	_ware_header.text = "WAREHOUSE  %d / %d   (%d made)" % [f.warehouse_total(), f.warehouse_cap, f.total_built]
@@ -443,7 +463,7 @@ func _refresh() -> void:
 		var rm := catalog.find(id)
 		if rm:
 			rare.append("%s %s" % [rm.display_name, "early" if f.rare_parts[id] == "stocked" else "-%d%%" % roundi(Factory.RARE_DISCOUNT * 100.0)])
-	_tool_label.text = "Tooled for %s. Mk I needs iron, Mk II titanium, Mk III crystal.%s" % [
+	_tool_label.text = "Tooled for %s. Mk I needs iron, Mk II titanium, Mk III crystal and rare metals; Mk III drives burn fuel.%s" % [
 			ShipModule.TIER_NAMES[f.tooling_tier], "  Rare parts: " + ", ".join(rare) if not rare.is_empty() else ""]
 	var cost := f.next_tooling_cost()
 	_tool_button.visible = not cost.is_empty()
@@ -528,7 +548,7 @@ func _rebuild_demand() -> void:
 		name_l.clip_text = true
 		name_l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		name_l.mouse_filter = Control.MOUSE_FILTER_PASS
-		name_l.tooltip_text = "%s%s" % [m.display_name, ": none in stock, a hired captain could use it" if bool(r["wanted"]) else ""]
+		name_l.tooltip_text = ModuleTips.tip(m, factory) + ("\nNone in stock, a hired captain could use it" if bool(r["wanted"]) else "")
 		_demand_list.add_child(name_l)
 		var tier := UIUtil.label(ShipModule.TIER_NAMES[m.tier], &"DimLabel")
 		tier.add_theme_color_override("font_color", CaptainPanel.TIER_COLORS[m.tier])

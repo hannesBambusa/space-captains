@@ -1,20 +1,23 @@
 class_name MiningContract
-extends Contract
-## Mine a belt: the player pays [member reward] credits for every load a miner
-## delivers to its outpost; the ore turns into materials (MiningRules).
-## [member max_loads] > 0 caps the contract; it completes when that many loads
-## are delivered. Loads already on a trip count against the cap.
+extends LoadContract
+## Mine an asteroid cluster ([member belt]): the player pays [member reward]
+## credits for every load a miner delivers to its outpost; the ore turns
+## into materials (MiningRules). Capped by [member max_loads] (see
+## [LoadContract]). A cluster holds a finite reserve: no new trips
+## once it has nothing left for them; when it is mined out the contract
+## completes as soon as the last trip on it ends (nothing is held in escrow,
+## so nothing is refunded).
 
-var belt: SystemBelt
+var belt: AsteroidCluster
 var ore_type: AsteroidBelt.OreType = AsteroidBelt.OreType.IRON
-var max_loads: int = 0
-var loads_delivered: int = 0
-## Loads promised to ships currently on a trip.
-var loads_in_flight: int = 0
 var materials_delivered: int = 0
+## The cluster ran out: no new takers, done once the last trip ends.
+var depleted: bool = false
+## Cluster name, kept for the feed and lists after the cluster is gone.
+var site_name: String = ""
 
 
-func _init(on_belt: SystemBelt = null, credits_per_load: int = 0, load_limit: int = 0) -> void:
+func _init(on_belt: AsteroidCluster = null, credits_per_load: int = 0, load_limit: int = 0) -> void:
 	type = Type.MINING
 	belt = on_belt
 	target = on_belt
@@ -22,51 +25,51 @@ func _init(on_belt: SystemBelt = null, credits_per_load: int = 0, load_limit: in
 	max_loads = maxi(load_limit, 0)
 	if on_belt and on_belt.def:
 		ore_type = on_belt.def.ore_type
+		site_name = on_belt.def.name
+		on_belt.depleted.connect(func(_b: AsteroidCluster) -> void: mark_depleted())
+		# The cluster leaves the system once it has faded: drop the reference.
+		on_belt.tree_exiting.connect(_on_belt_gone)
+		if on_belt.is_depleted:
+			depleted = true
 
 
 func is_available() -> bool:
-	if not super.is_available():
+	if depleted or not super.is_available():
 		return false
-	return max_loads <= 0 or loads_delivered + loads_in_flight < max_loads
+	return not (is_instance_valid(belt) and not belt.has_ore_for_new_trip())
 
 
-func add_taker(ship: Node) -> bool:
-	if not super.add_taker(ship):
-		return false
-	loads_in_flight += 1
-	return true
+func _is_exhausted() -> bool:
+	return depleted
 
 
-## Ends a trip. [param delivered] = the load reached the outpost.
-func finish_trip(ship: Node, delivered: bool) -> void:
-	if not takers.has(ship):
-		return
-	loads_in_flight = maxi(loads_in_flight - 1, 0)
-	if delivered:
-		loads_delivered += 1
-	takers.erase(ship)
-	if not is_finished() and max_loads > 0 and loads_delivered >= max_loads:
-		_set_status(Status.COMPLETED)
-	else:
-		_update_status()
+func _on_belt_gone() -> void:
+	if target == belt:
+		target = null
+	belt = null
+
+
+## The cluster is mined out: no new trips; completes once the last ends.
+func mark_depleted() -> void:
+	depleted = true
+	_complete_when_idle()
 
 
 func get_target_name() -> String:
-	return belt.def.name if is_instance_valid(belt) and belt.def else super.get_target_name()
-
-
-func get_reward_text() -> String:
-	return "%d cr/load" % reward
+	if is_instance_valid(belt) and belt.def:
+		return belt.def.name
+	return site_name if not site_name.is_empty() else super.get_target_name()
 
 
 func get_progress_text() -> String:
-	if max_loads > 0:
-		return "%d / %d loads" % [loads_delivered, max_loads]
-	return "%d loads" % loads_delivered
+	var text := "%d / %d loads" % [loads_delivered, max_loads] if max_loads > 0 else "%d loads" % loads_delivered
+	if depleted:
+		return text + ", mined out"
+	return text
 
 
-## The belt spans a whole ring: the site is the stretch of it nearest to
-## [param from] (the asker's outpost; the home station for markers).
+## The edge of the cluster facing [param from] (the asker's outpost; the
+## home station for markers).
 func get_site_position(from: Vector3 = Vector3.ZERO) -> Vector3:
 	if not is_instance_valid(belt):
 		return Vector3.ZERO

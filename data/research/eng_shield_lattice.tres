@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"eng_shield_lattice"
+display_name = "Shield lattice"
+field = 0
+tier = 2
+cost_credits = 700
+cost_iron = 60
+cost_titanium = 40
+research_time = 180.0
+prerequisites = Array[StringName]([&"eng_shield_emitters"])
+unlock_modules = Array[StringName]([&"shield_projector_2", &"deflector_2"])
+tags = PackedStringArray("defence")
+description = "Overlapping emitter fields that recover faster: Mk II shields."

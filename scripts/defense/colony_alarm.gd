@@ -99,7 +99,7 @@ func _call(e: Dictionary) -> void:
 		var mb := s.brain as MercenaryBrain if s else null
 		if mb == null or s.dead:
 			continue
-		var d := Combat.flat_distance(s.global_position, site.global_position)
+		var d := SpaceNav.flat_distance(s.global_position, site.global_position)
 		if d > RESPONSE_RANGE:
 			continue
 		if mb.answer_alarm(site, String(e["name"]), attacker, float(e["until"]), d):

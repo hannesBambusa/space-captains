@@ -8,7 +8,7 @@ extends Node
 ## warehouse; without an Outfitter nothing reaches the captains.
 ##
 ## Ore per tier ([constant TIER_ORE]): Mk I iron, Mk II titanium plus iron,
-## Mk III crystal plus titanium; build time [constant TIER_TIME]. Mk II and
+## Mk III crystal plus titanium and rare metals (planet raids); build time [constant TIER_TIME]. Mk II and
 ## Mk III also need tooling upgrades (player ore, [constant TOOLING_COST]).
 ## So mining titanium and crystal is what lets the Factory make the gear
 ## that gets captains through more dangerous belts.
@@ -19,6 +19,11 @@ extends Node
 ## and by recent misses. Rare parts from salvage go into the warehouse and
 ## let the Factory make that module before its tooling, or discount the
 ## next one when already tooled.
+##
+## Research (Research autoload): the Factory only makes modules that are
+## researched (the start set is one Mk I per slot for each role). A rare
+## part of a module not researched yet can still be sold, but no more are
+## made.
 ##
 ## Buy orders are paid up front: the price leaves the captain's wallet when
 ## the order is placed and the Factory holds it ("paid"). Picking the part up
@@ -34,8 +39,10 @@ signal changed
 signal produced(module: ShipModule)
 
 const GROUP := "factories"
-## Ore (Economy.Ore order) per module, by tier.
-const TIER_ORE := [[0, 0, 0], [15, 0, 0], [10, 20, 0], [0, 15, 20]]
+## Ore (Economy.Ore order) per module, by tier. Mk III also needs rare
+## metals from planet raids; a module adds its own ShipModule.build_ore on
+## top (better drives burn fuel, Mk III shields need silicates).
+const TIER_ORE := [[0, 0, 0], [15, 0, 0], [10, 20, 0], [0, 15, 20, 0, 0, 4]]
 ## Sim seconds to make one module, by tier.
 const TIER_TIME: PackedFloat32Array = [0.0, 40.0, 75.0, 120.0]
 ## Player ore for tooling tier 2 / 3.
@@ -53,7 +60,7 @@ const MAX_LOG := 12
 ## Warehouse at game start: one of each.
 @export var start_parts: PackedStringArray = PackedStringArray([
 	"mining_laser_1", "ore_hold_1", "prospector_array_1", "reinforced_plating_1",
-	"shield_projector_1", "survival_cell_1", "ion_drive_1",
+	"autocannon_1", "armor_plating_1", "ion_drive_1",
 ])
 ## Furnace glow pulse: energy scale idle / producing, and pulse period (s).
 @export var glow_idle: float = 0.35
@@ -86,19 +93,19 @@ var _glow: Array[Dictionary] = []
 
 
 static func find(tree: SceneTree) -> Factory:
-	for n in tree.get_nodes_in_group(GROUP):
-		var f := n as Factory
-		if f and is_instance_valid(f.building) and f.building.is_active():
-			return f
-	return null
+	return Building.first_active_service(tree, GROUP) as Factory
 
 
 static func ore_cost(m: ShipModule) -> PackedInt32Array:
-	return ore_cost_tier(m.tier)
+	var c := ore_cost_tier(m.tier)
+	for i in mini(m.build_ore.size(), c.size()):
+		c[i] += m.build_ore[i]
+	return c
 
 
+## The tier's base ore, Economy.COUNT long.
 static func ore_cost_tier(tier: int) -> PackedInt32Array:
-	return PackedInt32Array(TIER_ORE[clampi(tier, 0, 3)])
+	return Economy.padded(PackedInt32Array(TIER_ORE[clampi(tier, 0, 3)]))
 
 
 static func build_time(m: ShipModule) -> float:
@@ -221,7 +228,7 @@ func place_backorder(m: ShipModule, captain: Captain, price: int) -> bool:
 	captain.wallet -= price
 	backorders.append({"module": m, "captain": captain, "time": SimClock.time, "paid": price, "blocked": 0.0, "notified": false})
 	_update_need()
-	_log("Order: %s for %s, paid %s cr" % [m.display_name, captain.captain_name, UIUtil.amount(price)])
+	_log("Order: %s for %s, paid %s cr" % [m.display_name, captain.captain_name, Fmt.amount(price)])
 	changed.emit()
 	return true
 
@@ -299,7 +306,8 @@ func order_state_text(o: Dictionary) -> String:
 		"next":
 			return "next"
 		"tooling":
-			return "needs %s tooling" % ShipModule.TIER_NAMES[m.tier]
+			var locked := Research.module_lock_reason(m.id)
+			return locked.to_lower() if not locked.is_empty() else "needs %s tooling" % ShipModule.TIER_NAMES[m.tier]
 		"ore":
 			return "waiting for %s" % _short_ore(ore_cost(m))
 	return "queued"
@@ -345,7 +353,7 @@ func _expire_backorders(dt: float) -> void:
 		if float(o.get("blocked", 0.0)) > backorder_timeout:
 			backorders.erase(o)
 			gone = true
-			_refund(o, "The Factory could not make it for %s (%s)" % [UIUtil.clock(backorder_timeout), order_state_text(o)])
+			_refund(o, "The Factory could not make it for %s (%s)" % [Fmt.clock(backorder_timeout), order_state_text(o)])
 	if gone:
 		_update_need()
 		changed.emit()
@@ -359,9 +367,9 @@ func _refund(o: Dictionary, why: String) -> void:
 	if c == null or not c.alive:
 		return
 	c.wallet += paid
-	_log("Refunded %s cr: %s for %s" % [UIUtil.amount(paid), m.display_name, c.captain_name])
-	c.flight_log.note(CaptainLog.Kind.PURCHASE, CaptainLog.Outcome.FAILED, "Order for %s refunded, %s cr back" % [m.display_name, UIUtil.amount(paid)],
-			why, "Wallet %s cr" % UIUtil.amount(c.wallet), "refund:" + String(m.id))
+	_log("Refunded %s cr: %s for %s" % [Fmt.amount(paid), m.display_name, c.captain_name])
+	c.flight_log.note(CaptainLog.Kind.PURCHASE, CaptainLog.Outcome.FAILED, "Order for %s refunded, %s cr back" % [m.display_name, Fmt.amount(paid)],
+			why, "Wallet %s cr" % Fmt.amount(c.wallet), "refund:" + String(m.id))
 
 
 ## Tells captains whose order just became ready (EventLog line, ship toast)
@@ -382,10 +390,10 @@ func _notify_ready() -> void:
 
 ## Open orders per ore type, for the market's demand.
 func _update_need() -> void:
-	var need := PackedInt32Array([0, 0, 0])
+	var need := Economy.zero_ore()
 	for o in backorders:
 		var cost := ore_cost(o["module"] as ShipModule)
-		for i in 3:
+		for i in cost.size():
 			if cost[i] > 0:
 				need[i] += 1
 	market.backorder_need = need
@@ -393,13 +401,17 @@ func _update_need() -> void:
 
 # --- Production -----------------------------------------------------------------
 
-## True when the Factory can make [param m] (tooling or a rare part).
+## True when the Factory can make [param m]: researched, and tooled for it
+## (or a rare part lets it).
 func can_make(m: ShipModule) -> bool:
-	return m != null and m.tier >= 1 and (m.tier <= tooling_tier or rare_parts.get(m.id, "") == "stocked")
+	return m != null and m.tier >= 1 and Research.is_module_unlocked(m.id) and (m.tier <= tooling_tier or rare_parts.get(m.id, "") == "stocked")
 
 
 ## Why [param m] is not being made, or "".
 func make_block_reason(m: ShipModule) -> String:
+	var locked := Research.module_lock_reason(m.id) if m else ""
+	if not locked.is_empty():
+		return locked
 	if not can_make(m):
 		return "Needs %s tooling" % ShipModule.TIER_NAMES[m.tier]
 	var short := _short_ore(ore_cost(m))
@@ -427,7 +439,7 @@ func demand_rows(limit: int = 10) -> Array[Dictionary]:
 		var orders := orders_for(m)
 		var miss := float(misses.get(m.id, 0.0))
 		var rank := _role_rank(m, roles)
-		var wanted := stock_of(m) <= 0 and rank >= 0 and Reputation.max_tier_for(rank) >= m.tier
+		var wanted := stock_of(m) <= 0 and rank >= 0 and Reputation.max_tier_for(rank) >= m.tier and Research.is_module_unlocked(m.id)
 		if orders <= 0 and miss < 0.05 and not wanted:
 			continue
 		var score := float(orders) * 3.0 + miss + (0.5 if wanted else 0.0)
@@ -502,7 +514,7 @@ func _pick_job() -> ShipModule:
 ## Role -> best rank among living captains of that role.
 func _hired_roles() -> Dictionary:
 	var out := {}
-	var manager := get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager if is_inside_tree() else null
+	var manager := BuildingManager.of(get_tree()) if is_inside_tree() else null
 	if manager == null:
 		return out
 	for b in manager.buildings:
@@ -556,7 +568,7 @@ func upgrade_tooling() -> bool:
 ## make [param m] before its tooling ("stocked") or the next one sells at a
 ## discount ("discount"). Returns the kind.
 func add_rare_part(m: ShipModule) -> String:
-	var kind := "discount" if can_make(m) else "stocked"
+	var kind := "discount" if m.tier <= tooling_tier else "stocked"
 	rare_parts[m.id] = kind
 	warehouse[m.id] = stock_of(m) + 1
 	_log("Rare part: %s" % m.display_name)
@@ -616,7 +628,7 @@ func _short_ore(cost: PackedInt32Array) -> String:
 	var parts: PackedStringArray = []
 	for i in cost.size():
 		if float(cost[i]) > market.stock[i]:
-			parts.append(Economy.ORE_NAMES[i].to_lower())
+			parts.append(Economy.ore_name(i))
 	return " and ".join(parts)
 
 

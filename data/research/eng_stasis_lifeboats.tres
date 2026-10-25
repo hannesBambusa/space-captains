@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"eng_stasis_lifeboats"
+display_name = "Stasis lifeboats"
+field = 0
+tier = 3
+cost_credits = 1100
+cost_titanium = 60
+cost_crystal = 40
+research_time = 240.0
+prerequisites = Array[StringName]([&"eng_rescue_beacons"])
+unlock_modules = Array[StringName]([&"survival_cell_3", &"ejection_rig_3"])
+tags = PackedStringArray("defence")
+description = "Pods that keep a pilot alive for days: Mk III survival cells and ejection rigs."

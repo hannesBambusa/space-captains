@@ -60,14 +60,14 @@ func arm() -> void:
 		pc.cancel()
 	cancel()
 	armed = true
-	_camera = get_tree().get_first_node_in_group("rts_camera") as RTSCamera
+	_camera = RTSCamera.of(get_tree())
 	_ghost = DefenseZone.new()
 	_ghost.name = "ZoneGhost"
 	_ghost.zone_name = "New zone"
 	_ghost.radius = radius
 	SpaceNav.space_root(get_tree()).add_child(_ghost)
 	_ghost.visible = false
-	var sys := get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var sys := SolarSystem.of(get_tree())
 	if _camera and sys and sys.home_station:
 		_camera.frame_area(sys.home_station, Vector3.ZERO, VIEW_RADIUS, VIEW_PITCH, true, false, Vector2(0.6, 2.2))
 	valid = false
@@ -151,7 +151,7 @@ func _process(_delta: float) -> void:
 func _update() -> void:
 	if not armed or _camera == null:
 		return
-	var mgr := get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	var mgr := BuildingManager.of(get_tree())
 	var height := mgr.frame.global_position.y if mgr and mgr.frame else 0.0
 	var screen := cursor_override if cursor_override.x >= 0.0 else _cursor
 	var hit := _camera.screen_to_ground(screen, height)
@@ -172,7 +172,8 @@ func _update() -> void:
 		_ghost.refresh_look()
 	if why.is_empty() and zones:
 		why = ""
-		_set_valid(true, "Moves with the station" if zones.anchors_at(hit) else "Fixed in space (more than %d km from the station)" % roundi(DefenseZones.ANCHOR_REACH / 1000.0))
+		var at := zones.anchor_text_at(hit)
+		_set_valid(true, at if at != "Fixed in space" else "Fixed in space (more than %d km from the station, away from planets)" % roundi(DefenseZones.ANCHOR_REACH / 1000.0))
 		return
 	_set_valid(false, why)
 

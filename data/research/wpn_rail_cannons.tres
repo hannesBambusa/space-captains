@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"wpn_rail_cannons"
+display_name = "Rail-assisted cannons"
+field = 1
+tier = 2
+cost_credits = 650
+cost_iron = 80
+cost_titanium = 40
+research_time = 180.0
+unlock_modules = Array[StringName]([&"autocannon_2"])
+tags = PackedStringArray("weapons")
+description = "Magnetic rails on the autocannon barrel: the Mk II autocannon hits harder and reaches further."

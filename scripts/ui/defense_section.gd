@@ -109,8 +109,8 @@ func _refresh() -> void:
 	_hull_bar.value = d.fraction()
 	_hull_bar.color = PipMeter.GOOD if d.fraction() > 0.5 else (Color(1.0, 0.75, 0.3) if d.fraction() > 0.25 else PipMeter.BAD)
 	var rate := d.max_hull * s.repair_rate
-	if s.repairing:
-		_repair.text = "Repairing %d hull/s, %s cr per 100 hull, paid by you (%d cr so far)." % [roundi(rate), _cost_text(), s.repair_total_paid]
+	if s.repair.repairing:
+		_repair.text = "Repairing %d hull/s, %s cr per 100 hull, paid by you (%d cr so far)." % [roundi(rate), _cost_text(), s.repair.repair_total_paid]
 	elif d.hull < d.max_hull:
 		var why := "after %d s without a hit" % roundi(s.repair_delay) if d.seconds_since_hit() < s.repair_delay else "when you have credits"
 		_repair.text = "Needs %d cr of repairs; the station repairs it %s." % [s.cost_to_repair(), why]
@@ -130,7 +130,7 @@ func _refresh_turret(t: DefenseTurret) -> void:
 	if not t.is_active():
 		_target.text = "Target: offline until built"
 	elif Combat.is_live_target(t.target):
-		var dist := Combat.flat_distance(t.global_position, t.target.global_position)
+		var dist := SpaceNav.flat_distance(t.global_position, t.target.global_position)
 		_target.text = "Target: %s, %d m  (%s)" % [String(t.target.call(&"get_display_name")), roundi(dist), DefenseTurret.MODE_NAMES[t.mode].to_lower()]
 	else:
 		_target.text = "Target: none in range (%d m)" % roundi(t.weapon_range)
@@ -168,11 +168,7 @@ func _cost_text() -> String:
 
 
 func _bar(c: Color) -> PipMeter:
-	var bar := PipMeter.new()
-	bar.style = PipMeter.Style.BAR
-	bar.max_value = 1.0
-	bar.color = c
-	bar.custom_minimum_size = Vector2(110.0, 6.0)
+	var bar := UIUtil.bar(c, Vector2(110.0, 6.0))
 	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	return bar
 

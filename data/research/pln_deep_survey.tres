@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"pln_deep_survey"
+display_name = "Deep survey"
+field = 2
+tier = 3
+cost_credits = 1200
+cost_titanium = 70
+cost_crystal = 50
+research_time = 260.0
+prerequisites = Array[StringName]([&"pln_orbital_survey"])
+unlock_modules = Array[StringName]([&"prospector_array_3", &"wreck_scanner_3"])
+tags = PackedStringArray("economy")
+description = "Deep scans that see through rock and hull: Mk III prospector arrays and wreck scanners."

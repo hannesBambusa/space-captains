@@ -138,7 +138,7 @@ static func target_need(target: Node3D) -> float:
 	if target is ScavengerDen:
 		var den := target as ScavengerDen
 		var ehp := den.durability.hull + den.durability.shields
-		var need := ehp / DEN_EHP_PER_MERC + DEN_GUN_NEED * den.faction_def.den_gun_dps() / REF_DEN_GUN_DPS
+		var need := ehp / DEN_EHP_PER_MERC + DEN_GUN_NEED * den.gun_dps() / REF_DEN_GUN_DPS
 		for s in den.spawns:
 			if is_instance_valid(s) and not s.dead and s.stats:
 				# Its ships come home to defend it: each by its fighting power (dodgers more).
@@ -302,7 +302,7 @@ func invite(tree: SceneTree) -> void:
 	# Nearest first.
 	var rp := rally_point()
 	candidates.sort_custom(func(a: MercenaryBrain, b: MercenaryBrain) -> bool:
-		return Combat.flat_distance(a.ship.global_position, rp) < Combat.flat_distance(b.ship.global_position, rp))
+		return SpaceNav.flat_distance(a.ship.global_position, rp) < SpaceNav.flat_distance(b.ship.global_position, rp))
 	for mb in candidates:
 		if not is_recruiting():
 			return
@@ -415,11 +415,11 @@ func _pick_focus() -> Node3D:
 	for m in members:
 		var a := m.durability.get_last_attacker() as Node3D
 		if a is Ship and Combat.is_live_target(a) and m.durability.seconds_since_hit() < 5.0:
-			var d := Combat.flat_distance(lp, a.global_position)
+			var d := SpaceNav.flat_distance(lp, a.global_position)
 			if d < best_d:
 				best_d = d
 				best = a
-	if Combat.is_live_target(focus) and focus != target and focus is Ship and Combat.flat_distance(lp, focus.global_position) < FOCUS_RANGE:
+	if Combat.is_live_target(focus) and focus != target and focus is Ship and SpaceNav.flat_distance(lp, focus.global_position) < FOCUS_RANGE:
 		return focus
 	return best if best else target
 
@@ -556,7 +556,7 @@ func _set_state(s: State) -> void:
 ## Where the fleet forms up: off the Home Station toward the target.
 func rally_point() -> Vector3:
 	var tree := leader.get_tree() if is_instance_valid(leader) and leader.is_inside_tree() else null
-	var sys := tree.get_first_node_in_group(SolarSystem.GROUP) as SolarSystem if tree else null
+	var sys := SolarSystem.of(tree)
 	if sys == null or sys.home_station == null or not Combat.is_live(contract.target):
 		return leader.global_position if is_instance_valid(leader) else Vector3.ZERO
 	var home := sys.home_station.global_position

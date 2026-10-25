@@ -26,7 +26,7 @@ signal rank_changed(captain: Captain, rank: int)
 signal traits_changed(captain: Captain)
 
 enum Personality { BOLD, CAUTIOUS, GREEDY, LAZY }
-enum Specialty { MINING, GUNNERY, SALVAGE }
+enum Specialty { MINING, GUNNERY, SALVAGE, LANDING }
 
 const FIRST_NAMES: PackedStringArray = [
 	"Rook", "Vega", "Juno", "Kade", "Sable", "Orin", "Tamsin", "Ezra", "Nyx", "Calder",
@@ -42,12 +42,12 @@ const LAST_NAMES: PackedStringArray = [
 ]
 const PERSONALITY_NAMES: PackedStringArray = ["Bold", "Cautious", "Greedy", "Lazy"]
 const PERSONALITY_HINTS: PackedStringArray = [
-	"Takes risky contracts in dangerous belts.",
-	"Avoids dangerous belts unless the pay is well above fair.",
+	"Takes risky contracts in dangerous clusters.",
+	"Avoids dangerous clusters unless the pay is well above fair.",
 	"Chases the best pay and minds distance less.",
 	"Wants short trips and takes long breaks.",
 ]
-const SPECIALTY_NAMES: PackedStringArray = ["Mining", "Gunnery", "Salvage"]
+const SPECIALTY_NAMES: PackedStringArray = ["Mining", "Gunnery", "Salvage", "Landing"]
 const ATTRIBUTE_NAMES: PackedStringArray = ["Nerve", "Greed", "Diligence", "Piloting", "Skill", "Loyalty", "Teamwork"]
 const ATTRIBUTE_HINTS: PackedStringArray = [
 	"Nerve: how much danger they accept before refusing, fleeing or retreating.",
@@ -104,6 +104,8 @@ var hired_at: float = 0.0
 var career_since: float = 0.0
 var crystal_loads: int = 0
 var salvage_loads: int = 0
+## Planet raid loads delivered (landers).
+var raid_loads: int = 0
 ## Jobs done alone / with escorts (Lone Wolf).
 var solo_jobs: int = 0
 var team_jobs: int = 0
@@ -205,7 +207,7 @@ func add_trait(id: StringName, why: String = "") -> bool:
 		remove_trait(traits[drop]["id"] as StringName, "Made room for %s (3 traits at most)" % CaptainTraits.trait_name(id))
 	traits.append({"id": id, "since": SimClock.time, "until": until})
 	flight_log.note(CaptainLog.Kind.TRAIT, CaptainLog.Outcome.DID, "Gained the %s trait" % CaptainTraits.trait_name(id),
-			why if not why.is_empty() else CaptainTraits.tip(id), CaptainTraits.tip(id) + ("" if fade <= 0.0 else " Fades in %s." % UIUtil.clock(fade)))
+			why if not why.is_empty() else CaptainTraits.tip(id), CaptainTraits.tip(id) + ("" if fade <= 0.0 else " Fades in %s." % Fmt.clock(fade)))
 	EventLog.post("%s gained the %s trait" % [captain_name, CaptainTraits.trait_name(id)], EventLog.Kind.INFO, ship if is_instance_valid(ship) else null)
 	traits_changed.emit(self)
 	return true
@@ -240,7 +242,7 @@ func update_traits() -> void:
 		i -= 1
 	if not has_trait(CaptainTraits.UNION_REP) and loyalty >= CaptainTraits.UNION_LOYALTY \
 			and now - hired_at >= CaptainTraits.UNION_SERVICE and rank >= Reputation.Rank.LICENSED:
-		add_trait(CaptainTraits.UNION_REP, "Loyalty %d, %s of service at %s rank" % [loyalty, UIUtil.clock(now - hired_at), get_rank_name()])
+		add_trait(CaptainTraits.UNION_REP, "Loyalty %d, %s of service at %s rank" % [loyalty, Fmt.clock(now - hired_at), get_rank_name()])
 
 
 ## Counts one finished job, alone or with escorts (Lone Wolf).
@@ -416,6 +418,8 @@ static func specialty_for(role_name: String) -> Specialty:
 			return Specialty.GUNNERY
 		"Salvager":
 			return Specialty.SALVAGE
+		"Lander":
+			return Specialty.LANDING
 	return Specialty.MINING
 
 
@@ -426,7 +430,7 @@ const SAVE_FIELDS: PackedStringArray = [
 	"captain_name", "personality", "role", "specialty",
 	"nerve", "greed", "diligence", "piloting", "skill", "loyalty", "teamwork",
 	"loads_delivered", "credits_earned", "wallet", "credits_spent", "kills", "escorts_completed", "alive",
-	"reputation", "rank", "traits", "history", "hired_at", "career_since", "crystal_loads", "salvage_loads",
+	"reputation", "rank", "traits", "history", "hired_at", "career_since", "crystal_loads", "salvage_loads", "raid_loads",
 	"solo_jobs", "team_jobs", "fights_survived", "ejections", "modules_bought", "stranded",
 ]
 

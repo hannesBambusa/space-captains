@@ -74,6 +74,9 @@ const ZONE_PATROL_TIME_SCALE := 1.5
 ## Answering an alarm: attackers this close to the site, and the guard orbit, metres.
 const GUARD_RADIUS := 1500.0
 const GUARD_ORBIT := 320.0
+## A faction's claim constructor this close to a patrolling merc, to the edge
+## of its zone, or to the site of its alarm gets attacked directly.
+const CONSTRUCTOR_REACH := 2500.0
 ## Warp drop-out short of a bounty target, metres (outside den guns).
 const HUNT_WARP_DROP := 2200.0
 ## Escorts and wingmen hop with their lead within this distance, metres.
@@ -115,7 +118,7 @@ func get_status_text() -> String:
 				return "Patrolling %s" % z.zone_name
 			return "Patrolling" if mode == Mode.PATROL else "Defending home"
 		State.ENGAGING:
-			var tn := _name_of(combat_target)
+			var tn := Combat.name_of(combat_target)
 			if _guard() and not tn.is_empty():
 				return "Defending %s, engaging %s" % [_guard_name, tn]
 			if mode == Mode.ESCORT and _ward():
@@ -169,7 +172,7 @@ func can_warp() -> bool:
 		State.ESCORTING:
 			return calm
 		State.RETURNING:
-			return calm and Combat.nearest_hostile(ship.get_tree(), ship.global_position, PANIC_WARP_CLEAR, ship.faction) == null
+			return calm and ship.nearest_hostile(PANIC_WARP_CLEAR) == null
 	return false
 
 
@@ -257,7 +260,7 @@ func update(dt: float) -> void:
 			elif not RepairBay.can_afford(ship):
 				last_decision = "Out of credits for repairs (hull %d%%)" % roundi(ship.hull_fraction() * 100.0)
 				note(CaptainLog.Kind.REPAIR, CaptainLog.Outcome.FAILED, "Stopped repairs at %d%% hull: out of credits" % roundi(ship.hull_fraction() * 100.0),
-						"Wallet %s cr, %s cr more would finish the job; flies on damaged" % [UIUtil.amount(captain.wallet if captain else 0), UIUtil.amount(RepairBay.cost_to_repair(ship))], "", "repairs_broke")
+						"Wallet %s cr, %s cr more would finish the job; flies on damaged" % [Fmt.amount(captain.wallet if captain else 0), Fmt.amount(RepairBay.cost_to_repair(ship))], "", "repairs_broke")
 				_set_state(State.RESTING)
 				_timer = rest_duration() * 0.5
 		State.UNDOCKING:
@@ -275,7 +278,7 @@ func update(dt: float) -> void:
 				_end_trip()
 				retreating = false
 				mode = Mode.NONE
-				if ship.hull_fraction() < REPAIRED and RepairBay.can_afford(ship):
+				if RepairBay.should_repair(ship, REPAIRED):
 					_set_state(State.REPAIRING)
 					_timer = 1.0
 				else:
@@ -299,11 +302,11 @@ func _decide_merc() -> void:
 		_note_scramble(false)
 		_launch(Mode.DEFEND, null)
 		return
-	if ship.hull_fraction() < REPAIRED and RepairBay.can_afford(ship):
+	if RepairBay.should_repair(ship, REPAIRED):
 		last_decision = "Repairing"
 		note(CaptainLog.Kind.REPAIR, CaptainLog.Outcome.DID, "Stayed in the berth for repairs",
 				"Hull %d%%, repairs run to %d%%; the bill is %s cr, the wallet has %s cr" % [roundi(ship.hull_fraction() * 100.0), roundi(REPAIRED * 100.0),
-				UIUtil.amount(RepairBay.cost_to_repair(ship)), UIUtil.amount(captain.wallet if captain else 0)], "", "repairs_first")
+				Fmt.amount(RepairBay.cost_to_repair(ship)), Fmt.amount(captain.wallet if captain else 0)], "", "repairs_first")
 		_set_state(State.REPAIRING)
 		_timer = 1.0
 		return
@@ -311,13 +314,7 @@ func _decide_merc() -> void:
 	if e and e.accept and _take(e.contract, e):
 		return
 	if e and not e.accept:
-		var target := e.contract.get_target_name()
-		var changed := e.reason != last_refusal or target != last_refusal_target
-		last_refusal = e.reason
-		last_refusal_target = target
-		note_refusal(e, changed)
-		if changed:
-			decided.emit(self, false, "%s: %s" % [target, e.reason])
+		_record_refusal(e)
 	var chance := profile.patrol_chance + 0.25 * (Captain.factor(captain.diligence) if captain else 0.0)
 	if captain and captain.has_trait(CaptainTraits.GRUDGE):
 		chance += 0.15
@@ -356,16 +353,12 @@ func _take(contract: Contract, e: RoleEvaluator.Evaluation = null) -> bool:
 	if not contract.add_taker(ship):
 		return false
 	var m := Mode.BOUNTY if contract is BountyContract else Mode.ESCORT
-	var t := Trip.new()
-	t.contract = contract
-	t.started_at = SimClock.time
+	var t := _begin_trip(contract)
 	if contract is EscortContract:
 		var ec := contract as EscortContract
 		var ward := ec.pick_ward()
 		if ward:
 			ec.assign(ship, ward)
-	last_refusal = ""
-	last_refusal_target = ""
 	last_decision = "Took %s, %s" % [contract.get_target_name(), contract.get_reward_text()]
 	if bounty and terms.has("call_fleet"):
 		last_decision = "Called a fleet for %s, %s" % [contract.get_target_name(), contract.get_reward_text()]
@@ -407,11 +400,7 @@ func join_fleet(f: MercFleet, e: RoleEvaluator.Evaluation = null) -> void:
 	var c := f.contract
 	if not f.is_recruiting() or not c.add_taker(ship):
 		return
-	var t := Trip.new()
-	t.contract = c
-	t.started_at = SimClock.time
-	last_refusal = ""
-	last_refusal_target = ""
+	var t := _begin_trip(c)
 	last_decision = "Joined %s's fleet for %s" % [f.leader_name, c.get_target_name()]
 	note_accept(e, "Joined %s's fleet for %s, %s" % [f.leader_name, DecisionNotes.job_name(c), c.get_reward_text()], CaptainLog.Kind.FLEET)
 	decided.emit(self, true, last_decision)
@@ -622,7 +611,7 @@ func _wants_repairs() -> bool:
 		return false
 	if Combat.is_live_target(combat_target):
 		return false
-	return Combat.nearest_hostile(ship.get_tree(), ship.global_position, RETALIATE_RANGE, ship.faction) == null
+	return ship.nearest_hostile(RETALIATE_RANGE) == null
 
 
 ## Hull fraction below which this captain goes home (profile minus Nerve).
@@ -704,7 +693,12 @@ func _pick_target() -> Node3D:
 				if not near.is_empty():
 					return near[0]
 		Mode.PATROL, Mode.DEFEND:
-			# The site under attack first, then raiders in the patrol zone.
+			# A claim constructor in reach first (it is unarmed and deploying a
+			# garrison), then the site under attack, then raiders in the patrol zone.
+			var builders := claim_constructors()
+			if not builders.is_empty():
+				_note_constructor(builders[0])
+				return builders[0]
 			var guard := _guard_threats()
 			if not guard.is_empty():
 				return guard[0]
@@ -713,15 +707,7 @@ func _pick_target() -> Node3D:
 				var inside := z.hostiles_inside(600.0)
 				if not inside.is_empty():
 					return inside[0]
-			var threats := defence_threats()
-			var best: Node3D = null
-			var best_d := INF
-			for h in threats:
-				var d := Combat.flat_distance(pos, h.global_position)
-				if d < best_d:
-					best_d = d
-					best = h
-			return best
+			return Combat.nearest_of(defence_threats(), pos)
 	# Keep the current target while it stays close.
 	if Combat.is_live_target(combat_target) and pos.distance_to(combat_target.global_position) < RETALIATE_RANGE:
 		return combat_target
@@ -731,7 +717,7 @@ func _pick_target() -> Node3D:
 ## Hostile ships (not dens) inside the home defence radius.
 func home_threats() -> Array[Node3D]:
 	var tree := ship.get_tree()
-	var sys := tree.get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var sys := SolarSystem.of(tree)
 	if sys == null or sys.home_station == null:
 		var none: Array[Node3D] = []
 		return none
@@ -752,7 +738,48 @@ func defence_threats() -> Array[Node3D]:
 	for h in _guard_threats():
 		if not out.has(h):
 			out.append(h)
+	for c in claim_constructors():
+		if not out.has(c):
+			out.append(c)
 	return out
+
+
+## Live enemy claim constructors a patrolling or alarmed merc goes for: within
+## [constant CONSTRUCTOR_REACH] of the merc, within that of its zone's edge, or
+## near the alarm site. Nearest first.
+func claim_constructors() -> Array[Node3D]:
+	var out: Array[Node3D] = []
+	var dists: Array[float] = []
+	var tree := ship.get_tree()
+	var zone := patrol_zone()
+	var site := _guard()
+	for n in tree.get_nodes_in_group(Combat.GROUP):
+		var c := n as ClaimConstructor
+		if c == null or not Combat.is_live_target(c) or not Combat.hostile(c.get_faction(), ship.faction):
+			continue
+		var d := SpaceNav.flat_distance(ship.global_position, c.global_position)
+		var near := d <= CONSTRUCTOR_REACH
+		if not near and zone and SpaceNav.flat_distance(zone.global_position, c.global_position) <= zone.radius + CONSTRUCTOR_REACH:
+			near = true
+		if not near and site and SpaceNav.flat_distance(site.global_position, c.global_position) <= GUARD_RADIUS * 2.0:
+			near = true
+		if near:
+			var i := dists.bsearch(d)
+			dists.insert(i, d)
+			out.insert(i, c)
+	return out
+
+
+## Logs once per constructor why a patrolling merc went for it.
+func _note_constructor(c: Node3D) -> void:
+	if captain == null:
+		return
+	var cc := c as ClaimConstructor
+	var zone := patrol_zone()
+	var where := "in or near %s" % zone.zone_name if zone else ("near the alarm at %s" % _guard_name if _guard() else "within %.1f km of the patrol" % (CONSTRUCTOR_REACH / 1000.0))
+	note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Went for the %s" % cc.get_display_name(),
+			"An unarmed claim constructor was %s, deploying a garrison over %s; shooting it down ends the claim, so mercs on patrol and on alarm attack it directly instead of waiting for a bounty fleet" % [
+			where, cc.planet.def.name if is_instance_valid(cc.planet) else "a planet"], "", "constructor:%s" % cc.name)
 
 
 ## The zone this merc patrols, or null (home).
@@ -812,7 +839,7 @@ func pick_patrol_zone() -> Dictionary:
 			w += float(z.kill_bounty) / 40.0 * (1.0 + 0.5 * greed) * pm
 		if z.raiders_inside > 0:
 			w += (2.0 if p == Captain.Personality.BOLD else 1.0) + 0.5 * nerve
-		if Combat.flat_distance(home, z.global_position) > 6000.0:
+		if SpaceNav.flat_distance(home, z.global_position) > 6000.0:
 			match p:
 				Captain.Personality.CAUTIOUS:
 					w *= 0.5
@@ -852,7 +879,7 @@ func _guard_threats() -> Array[Node3D]:
 	out = _hostile_ships_near(ship.get_tree(), site.global_position, GUARD_RADIUS)
 	var alarm := ColonyAlarm.of(ship.get_tree())
 	var a := alarm.attacker_of(site) if alarm else null
-	if a and not out.has(a) and Combat.flat_distance(a.global_position, site.global_position) < GUARD_RADIUS * 2.0:
+	if a and not out.has(a) and SpaceNav.flat_distance(a.global_position, site.global_position) < GUARD_RADIUS * 2.0:
 		out.insert(0, a)
 	return out
 
@@ -889,7 +916,7 @@ func answer_alarm(site: Node3D, site_name: String, attacker: Node3D, until: floa
 			return false
 	last_decision = "Answering the alarm at %s" % site_name
 	if captain:
-		var by := _name_of(attacker)
+		var by := Combat.name_of(attacker)
 		note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Answered the alarm at %s" % site_name,
 				"%s under attack%s, %.1f km away (mercs answer within %d km); hull %d%%%s" % [site_name.left(1).to_upper() + site_name.substr(1),
 				" by %s" % by if not by.is_empty() else "", distance / 1000.0, roundi(ColonyAlarm.RESPONSE_RANGE / 1000.0), roundi(ship.hull_fraction() * 100.0),
@@ -922,25 +949,25 @@ func _patrol_step(_dt: float) -> void:
 		# Circle the site under attack.
 		var c := site.global_position
 		var goal := c + Vector3(cos(_patrol_angle), 0.0, sin(_patrol_angle)) * GUARD_ORBIT
-		if Combat.flat_distance(ship.global_position, goal) < 90.0:
+		if SpaceNav.flat_distance(ship.global_position, goal) < 90.0:
 			_patrol_angle += rng.randf_range(0.6, 1.0)
 		ship.set_world_goal(goal, SpaceNav.world_velocity(site), Vector3.ZERO, 50.0, ship.max_speed * 0.8)
 		return
 	var z := patrol_zone()
 	if z:
 		# Roam random points inside the zone.
-		if _patrol_point == Vector3.INF or Vector2(_patrol_point.x, _patrol_point.z).length() > z.radius \
-				or Combat.flat_distance(ship.global_position, z.to_global(_patrol_point)) < 160.0:
+		if _patrol_point == Vector3.INF or SpaceNav.flat_length(_patrol_point) > z.radius \
+				or SpaceNav.flat_distance(ship.global_position, z.to_global(_patrol_point)) < 160.0:
 			_patrol_point = z.to_local(z.random_point(rng))
 		ship.set_world_goal(z.to_global(_patrol_point), z.frame_velocity(), Vector3.ZERO, 80.0, ship.max_speed * 0.6)
 		return
-	var sys := ship.get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
+	var sys := SolarSystem.of(ship.get_tree())
 	if sys == null or sys.home_station == null:
 		return
 	var st := sys.home_station
 	var r := lerpf(PATROL_RADIUS.x, PATROL_RADIUS.y, 0.5 + 0.5 * sin(_patrol_angle * 1.7))
 	var goal := st.global_position + Vector3(cos(_patrol_angle), 0.0, sin(_patrol_angle)) * r
-	if Combat.flat_distance(ship.global_position, goal) < 140.0:
+	if SpaceNav.flat_distance(ship.global_position, goal) < 140.0:
 		_patrol_angle += rng.randf_range(0.5, 1.1)
 	ship.set_world_goal(goal, SpaceNav.world_velocity(st), Vector3.ZERO, 60.0, ship.max_speed * 0.6)
 
@@ -987,7 +1014,7 @@ func _waiting_spot(ec: EscortContract, w: Ship) -> Dictionary:
 				break
 	if b == null:
 		var tree := ship.get_tree()
-		var mgr := tree.get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+		var mgr := BuildingManager.of(tree)
 		if mgr:
 			for bb in mgr.buildings:
 				if bb.def.hire_ship_script == null and bb.def.can_hire():
@@ -1006,12 +1033,6 @@ func _fire_in_passing(dt: float) -> void:
 	_passing_timer -= dt
 	if _passing_timer <= 0.0:
 		_passing_timer = AI_INTERVAL
-		combat_target = Combat.nearest_hostile(ship.get_tree(), ship.global_position, ship.stats.weapon_range, ship.faction)
+		combat_target = ship.nearest_hostile(ship.stats.weapon_range)
 	if Combat.is_live_target(combat_target):
 		ship.weapon.try_fire(combat_target)
-
-
-func _name_of(n: Variant) -> String:
-	if is_instance_valid(n) and (n as Object).has_method(&"get_display_name"):
-		return String((n as Object).call(&"get_display_name"))
-	return ""
