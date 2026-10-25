@@ -6,12 +6,15 @@ extends RefCounted
 ## only needs [method handles] and [method evaluate].
 
 ## Travel term scale: sim seconds of the trip (warp hops included, see
-## [method travel_of]) per unit of distance cost.
-const TRAVEL_SCALE_S := 30.0
+## [method travel_of]) per unit of distance cost. Raised from 30 with the
+## fuller travel estimate (zone exit, approach), so the cost per km held.
+const TRAVEL_SCALE_S := 45.0
 
 ## Refusal reasons shown in the UI.
 const TOO_DANGEROUS := "Too dangerous for that pay"
-const TOO_FAR := "Too far"
+## A refusal mostly down to the travel cost. Distance never refuses a job
+## on its own: better pay always makes a far trip worth it.
+const NOT_WORTH_TRIP := "Not worth the trip at this pay"
 const NOT_WORTH_IT := "Not worth it"
 const CANT_PAY := "Station can't pay"
 ## Union Rep refusing below-fair pay.
@@ -40,12 +43,6 @@ var scored: Array[Evaluation] = []
 ## Sim seconds to fly [param km] one way: x = warp hop, y = normal flight.
 static func travel_of(brain: CaptainBrain, km: float) -> Vector2:
 	return SpaceNav.travel_estimate(km * 1000.0, brain.ship.max_speed if brain.ship else SpaceNav.REF_SPEED)
-
-
-## True past the profile's trip limit (max_trip_km of plain flight at
-## SpaceNav.REF_SPEED, compared as travel time, so warp hops shorten it).
-static func too_long(prof: PersonalityProfile, t: Vector2) -> bool:
-	return prof.max_trip_km > 0.0 and t.x + t.y > prof.max_trip_km * 1000.0 / SpaceNav.REF_SPEED
 
 
 ## Pay term: pay_weight * Greed * [param reward] / [param scale].
@@ -89,17 +86,17 @@ static func trait_bonus(cap: Captain, base: float, solo: bool, sulking: bool) ->
 
 ## The hard rules and the threshold of a per-load job (mining, salvage,
 ## raid) on a scored [param e] (terms pay, distance, danger): station can't
-## pay, too far, the premium rule ([param offered] against [param fair] from
+## pay, the premium rule ([param offered] against [param fair] from
 ## the profile's premium danger), then the threshold with its reason. Sets
-## [member Evaluation.reason] or [member Evaluation.accept].
-static func judge(e: Evaluation, prof: PersonalityProfile, trip: Vector2, danger: int, offered: float, fair: float, sulking: bool) -> void:
+## [member Evaluation.reason] or [member Evaluation.accept]. No distance
+## limit: travel only counts in the score (a low score mostly from it reads
+## [constant NOT_WORTH_TRIP]).
+static func judge(e: Evaluation, prof: PersonalityProfile, danger: int, offered: float, fair: float, sulking: bool) -> void:
 	var pay: float = e.terms["pay"]
 	var dist: float = e.terms["distance"]
 	var dang: float = e.terms["danger"]
 	if e.contract.is_paused():
 		e.reason = CANT_PAY
-	elif too_long(prof, trip):
-		e.reason = TOO_FAR
 	elif prof.premium_danger > 0 and danger >= prof.premium_danger and offered < fair * prof.premium_factor:
 		e.reason = TOO_DANGEROUS
 	elif e.utility < prof.accept_threshold:
@@ -108,7 +105,7 @@ static func judge(e: Evaluation, prof: PersonalityProfile, trip: Vector2, danger
 		elif dang >= dist and dang > pay * 0.25:
 			e.reason = TOO_DANGEROUS
 		elif dist > pay * 0.25:
-			e.reason = TOO_FAR
+			e.reason = NOT_WORTH_TRIP
 		else:
 			e.reason = NOT_WORTH_IT
 	else:

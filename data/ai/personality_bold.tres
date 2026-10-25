@@ -12,7 +12,6 @@ accept_threshold = 0.3
 noise = 0.15
 premium_danger = 0
 premium_factor = 1.6
-max_trip_km = 0.0
 evaluate_interval = Vector2(3.0, 5.0)
 rest_time = Vector2(5.0, 8.0)
 break_chance = 0.0

@@ -713,6 +713,14 @@ func lane_sign() -> float:
 	return _lane
 
 
+## Side (+1 over, -1 under) this ship approaches [param belt] from: the
+## side its inclined orbit has lifted or sunk it to (the short way in), or
+## this ship's lane for a cluster near the plane.
+func cluster_side(belt: AsteroidCluster) -> float:
+	var cy := belt.global_position.y
+	return signf(cy) if absf(cy) > LANE_BASE_SIDE else lane_sign()
+
+
 ## Sets the mover's height for this step (world frame only, see the class
 ## notes). Cheap: one disc test per cluster.
 func _update_altitude(dt: float) -> void:
@@ -731,9 +739,17 @@ func _update_altitude(dt: float) -> void:
 	var goal := parent.to_global(mover.goal_pos) if parent else mover.goal_pos
 	var tree := get_tree()
 	# The goal's own height (the station complex on its planet's inclined
-	# orbit, a den above the plane), or the plane for goals in a cluster
-	# (miners take their rock's height only beside it).
-	var base := goal.y if SpaceNav.rock_band_at(tree, goal) == null else 0.0
+	# orbit, a den above the plane). Goals in a cluster (miners take their
+	# rock's height only beside it): from outside, its lane height on the
+	# side its orbit has lifted it to (the arc and a warp hop end there);
+	# inside, the plane (the lane rule below holds the height).
+	var goal_band := SpaceNav.rock_band_at(tree, goal)
+	var base := goal.y
+	if goal_band:
+		base = 0.0
+		if SpaceNav.flat_distance(pos, goal_band.global_position) > SpaceNav.band_radius(goal_band):
+			var cy := goal_band.global_position.y
+			base = cluster_side(goal_band) * goal_band.lane_altitude()
 	if fighting:
 		# The attack run sets its own height (relative to the target).
 		base = _fight_y

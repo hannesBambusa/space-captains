@@ -14,8 +14,8 @@ extends RoleEvaluator
 ##              are worth the trip, scraps are not
 ##   crowd    = CROWD_WEIGHT per salvager already on the field
 ##   utility  = pay - distance - danger + size - crowd + Loyalty bonus + noise
-## Hard rules as for miners: the station must afford a posted bonus, max trip
-## length, and the premium rule for dangerous places (fair pay:
+## Hard rules as for miners: the station must afford a posted bonus, and
+## the premium rule for dangerous places (fair pay:
 ## SalvageContract.FAIR_REWARD, compared with yard pay plus bonus). Traits:
 ## Lone Wolf +0.1, Union Rep sulks at below-fair pay.
 
@@ -64,5 +64,5 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 	e.terms = {"pay": pay, "distance": dist, "danger": dang, "size": size, "crowd": crowd, "km": km, "fair": fair, "reward": roundi(total), "bonus": sc.reward,
 			"scrap": sc.field.amount,
 			"danger_level": danger, "base_danger": danger, "loyal": loyal, "noise": noise, "warp_s": trip.x, "flight_s": trip.y, "pay_div": PAY_SCALE, "time_div": TRAVEL_SCALE_S}
-	judge(e, prof, trip, danger, total, fair, sulking)
+	judge(e, prof, danger, total, fair, sulking)
 	return e

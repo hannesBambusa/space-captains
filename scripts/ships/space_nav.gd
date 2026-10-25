@@ -48,8 +48,11 @@ const WARP_DROP := 650.0
 ## bubble), or to any structure, metres.
 const NO_WARP_STATION := 1200.0
 const NO_WARP_BUILDING := 260.0
-## Reference cruise speed for trip limits in km (PersonalityProfile.max_trip_km), m/s.
+## Reference cruise speed for travel estimates without a ship, m/s.
 const REF_SPEED := 150.0
+## Warp trips: turns, braking and the climb or dive to the job's height on
+## top of the straight flight, sim seconds (travel_estimate).
+const TRIP_MANEUVER_S := 12.0
 
 ## Cached obstacle list: Array of {node: Node3D, radius: float (hard),
 ## plan: float (planning radius)}.
@@ -244,17 +247,41 @@ static func predict_position(node: Node3D, ahead: float) -> Vector3:
 
 ## Lane height (unsigned) for a straight warp from [param a] to [param b]:
 ## the highest lane altitude of the clusters the segment crosses, 0 when
-## none (a warp never crosses rocks at their height).
-static func segment_lane_altitude(tree: SceneTree, a: Vector3, b: Vector3) -> float:
+## none (a warp never crosses rocks at their height). [param skip]: the
+## hop's destination cluster (the hop drops out at its edge, see
+## [method band_entry]).
+static func segment_lane_altitude(tree: SceneTree, a: Vector3, b: Vector3, skip: AsteroidCluster = null) -> float:
 	var need := 0.0
 	for belt in belts(tree):
-		if belt.def == null:
+		if belt.def == null or belt == skip:
 			continue
 		var c := Vector2(belt.global_position.x, belt.global_position.z)
 		var hw := belt.rock_half_width() + belt.def.max_scale + AsteroidCluster.LANE_MARGIN
 		if _segment_meets_disc(Vector2(a.x, a.z), Vector2(b.x, b.z), c, hw):
 			need = maxf(need, belt.lane_altitude())
 	return need
+
+
+## Lane footprint radius of [param belt] (rocks, the largest rock, the lane
+## margin), metres: the disc a warp never crosses at rock height.
+static func band_radius(belt: AsteroidCluster) -> float:
+	return belt.rock_half_width() + belt.def.max_scale + AsteroidCluster.LANE_MARGIN
+
+
+## Flat distance along [param dir] from [param from] to where the line
+## enters [param belt]'s lane footprint ([method band_radius]); INF when it
+## misses it or [param from] is already inside.
+static func band_entry(belt: AsteroidCluster, from: Vector3, dir: Vector3) -> float:
+	var r := band_radius(belt)
+	var c := Vector3(belt.global_position.x, 0.0, belt.global_position.z)
+	var rel := c - Vector3(from.x, 0.0, from.z)
+	if rel.length_squared() < r * r:
+		return INF
+	var along := rel.dot(dir)
+	var lat2 := rel.length_squared() - along * along
+	if along <= 0.0 or lat2 >= r * r:
+		return INF
+	return along - sqrt(r * r - lat2)
 
 
 ## Places no warp starts or ends: [{center: Vector3, radius: float}] (the
@@ -277,15 +304,18 @@ static func no_warp_zones(tree: SceneTree) -> Array[Dictionary]:
 
 
 ## Sim seconds of a trip of [param distance] metres at [param speed]:
-## x = the warp part (spool, ramp, the hop), y = normal flight (leaving
-## home, the drop-out approach). Short trips are all flight.
+## x = the warp part (spool, ramp, the hop), y = normal flight (out of the
+## station's no-warp zone, the drop-out approach, plus
+## [constant TRIP_MANEUVER_S] for turns, braking and the climb or dive to
+## the job's height). Trips too short for a hop past the zone are all flight.
+## Matched to probe runs of miners (5 to 40 km legs, within about 25%).
 static func travel_estimate(distance: float, speed: float) -> Vector2:
 	var cruise := maxf(speed, 30.0) * 0.85
-	if distance <= WARP_MIN_LEG + WARP_DROP:
+	var flown := NO_WARP_STATION + WARP_DROP
+	var hop := distance - flown
+	if hop < WARP_MIN_LEG * 0.8:
 		return Vector2(0.0, distance / cruise)
-	var flown := WARP_DROP + NO_WARP_BUILDING + 200.0
-	var hop := maxf(distance - flown, 0.0)
-	return Vector2(WARP_SPOOL + WARP_RAMP * 0.5 + 1.5 + hop / WARP_SPEED, flown / cruise)
+	return Vector2(WARP_SPOOL + WARP_RAMP * 0.5 + hop / WARP_SPEED, flown / cruise + TRIP_MANEUVER_S)
 
 
 ## "12 s warp + 9 s flight" (or "40 s flight").

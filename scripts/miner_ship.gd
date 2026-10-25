@@ -75,9 +75,9 @@ func job_begin(trip: CaptainBrain.Trip) -> bool:
 	for attempt in 5:
 		var q := base + tangent * _rng.randf_range(-search_spread, search_spread) \
 				+ inward * _rng.randf_range(0.0, 0.35) * belt.rock_half_width()
-		# Search on this ship's lane side of the thick clump: a rock in that
-		# half means a short drop from the lane.
-		q.y = belt.global_position.y + lane_sign() * belt.def.vertical_spread * 0.45
+		# Search on the side of the thick clump this ship comes in from
+		# (cluster_side): a rock in that half means a short drop from the lane.
+		q.y = belt.global_position.y + cluster_side(belt) * belt.def.vertical_spread * 0.45
 		var found := belt.find_nearest_ore(q, mc.ore_type)
 		if found < 0:
 			found = belt.find_nearest_ore(q, -1)

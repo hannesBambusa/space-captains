@@ -6,9 +6,10 @@ extends RoleEvaluator
 ##              (warp hop plus flight, RoleEvaluator.travel_of) / TRAVEL_SCALE_S
 ##   danger   = danger_weight * (danger - 1)^2 / 4
 ##   utility  = pay - distance - danger + noise(+-profile.noise)
-## Hard rules before the threshold: the station must afford one load, the trip
-## must be within max_trip_km (as travel time), and from premium_danger up the reward must be
-## premium_factor times the fair reward (MiningRules.default_reward).
+## Hard rules before the threshold: the station must afford one load, and
+## from premium_danger up the reward must be premium_factor times the fair
+## reward (MiningRules.default_reward). No distance limit: a far cluster only
+## scores lower (refused as "not worth the trip" when that sinks it).
 ## Attributes: Greed scales the pay term, Nerve the danger term, Loyalty adds
 ## a small bonus. An escorted mining contract (linked EscortContract) counts
 ## as [constant ESCORT_DANGER_RELIEF] danger levels safer. Well-equipped
@@ -75,5 +76,5 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 	e.terms = {"pay": pay, "distance": dist, "danger": dang, "km": km, "fair": fair, "escorted": escorted and not lone, "traits": traits, "gear": gear,
 			"reward": mc.reward, "danger_level": danger, "base_danger": base_danger, "loyal": loyal, "noise": noise,
 			"warp_s": trip.x, "flight_s": trip.y, "pay_div": PAY_SCALE, "time_div": TRAVEL_SCALE_S}
-	judge(e, prof, trip, danger, mc.reward, fair, sulking)
+	judge(e, prof, danger, mc.reward, fair, sulking)
 	return e

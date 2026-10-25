@@ -152,6 +152,8 @@ var warp_timer: float = 0.0
 ## Where the current hop drops out (flat, world).
 var warp_end := Vector3.ZERO
 var _warp_cooldown: float = 0.0
+## Cluster the current hop drops out at (its lane footprint), or null.
+var _warp_dest: AsteroidCluster
 ## Hop start height and the flat distance flown in the hop so far.
 var _warp_y0: float = 0.0
 var _warp_flown: float = 0.0
@@ -267,7 +269,10 @@ func step(dt: float) -> void:
 			y_lo = minf(y_lo, y_peak)
 			y_hi = maxf(y_hi, y_peak)
 		route.y_span = Vector2(y_lo, y_hi)
-		route.update(tree, flat, g, WARP_SPEED_PLAN if warp_state != Warp.IDLE else maxf(plan_speed, 30.0), dt)
+		# A leg long enough to warp is planned at warp speed even before the
+		# spool, so the plan (and the hop's target) does not flip with it.
+		var hop_leg := warp_allowed and warp_lead == null and d > SpaceNav.WARP_MIN_LEG + warp_drop
+		route.update(tree, flat, g, WARP_SPEED_PLAN if warp_state != Warp.IDLE or hop_leg else maxf(plan_speed, 30.0), dt)
 		if route.has_waypoint():
 			var w := route.waypoint()
 			rel = Vector3(w.x - pos.x, 0.0, w.z - pos.z)
@@ -505,7 +510,7 @@ func _warp_step(dt: float, target: Vector3, _via: bool) -> bool:
 				return false
 			warp_end = end
 			warp_dir = (end - flat).normalized()
-			warp_altitude = SpaceNav.segment_lane_altitude(ship.get_tree(), flat, end)
+			warp_altitude = SpaceNav.segment_lane_altitude(ship.get_tree(), flat, end, _warp_dest)
 			warp_timer = SpaceNav.WARP_SPOOL
 			_set_warp(Warp.SPOOL)
 			return false
@@ -519,7 +524,7 @@ func _warp_step(dt: float, target: Vector3, _via: bool) -> bool:
 				return false
 			warp_end = end
 			warp_dir = (end - flat).normalized()
-			warp_altitude = SpaceNav.segment_lane_altitude(ship.get_tree(), flat, end)
+			warp_altitude = SpaceNav.segment_lane_altitude(ship.get_tree(), flat, end, _warp_dest)
 			warp_timer -= dt
 			# Level: at the lane height (or holding height) and no longer climbing.
 			var level := (absf(pos.y - cruise_y) < 4.0 and absf(climb_rate) < 4.0) or not cruise_active
@@ -536,13 +541,17 @@ func _warp_step(dt: float, target: Vector3, _via: bool) -> bool:
 			# Re-aim at the (moving) point; drop out short of it.
 			var to := Vector3(target.x - flat.x, 0.0, target.z - flat.z)
 			var left := to.length() - warp_drop
+			if left > 1.0 and _warp_dest != null and is_instance_valid(_warp_dest):
+				# Into a cluster: drop out at its lane footprint (the hop's 3D
+				# line ends at the lane height above it).
+				left = minf(left, SpaceNav.band_entry(_warp_dest, flat, to.normalized()))
 			if left <= 1.0:
 				_end_warp()
 				return false
 			warp_dir = to.normalized()
 			# A belt band ahead the hop is not high enough for: climb if
 			# already there, else drop out before it.
-			var need := SpaceNav.segment_lane_altitude(ship.get_tree(), flat, flat + warp_dir * left)
+			var need := SpaceNav.segment_lane_altitude(ship.get_tree(), flat, flat + warp_dir * left, _warp_dest)
 			if need > warp_altitude + 0.5:
 				if absf(pos.y) >= need - 2.0:
 					warp_altitude = need
@@ -638,14 +647,23 @@ func _follow_warp(dt: float, lead: ShipMover) -> bool:
 
 
 ## Drop-out point for a hop from [param from] to [param target], or INF when
-## no hop fits (too short, or starting in a no-warp zone).
+## no hop fits (too short, or starting in a no-warp zone). A target inside
+## a cluster (a miner's rock) ends the hop at the cluster's lane footprint
+## ([member _warp_dest]).
 func _warp_end_for(from: Vector3, target: Vector3) -> Vector3:
 	var to := Vector3(target.x - from.x, 0.0, target.z - from.z)
 	var length := to.length()
+	_warp_dest = null
 	if length < SpaceNav.WARP_MIN_LEG:
 		return Vector3.INF
 	var dir := to / length
 	var reach := length - warp_drop
+	var dest := SpaceNav.rock_band_at(ship.get_tree(), target)
+	if dest:
+		var cut := SpaceNav.band_entry(dest, from, dir)
+		if cut < INF:
+			reach = minf(reach, cut)
+			_warp_dest = dest
 	for o in SpaceNav.obstacles(ship.get_tree()):
 		var node := o["node"] as Node3D
 		if is_instance_valid(node) and SpaceNav.flat_distance(from, node.global_position) \
@@ -668,7 +686,9 @@ func _warp_end_for(from: Vector3, target: Vector3) -> Vector3:
 	return from + dir * reach
 
 
-## True when the next stride of the hop would enter a body's planning circle.
+## True when the next stride of the hop would enter a body's planning
+## circle (dropping out there, outside it, the next hop may start at once
+## after the detour, see [method _warp_end_for]).
 func _warp_blocked(flat: Vector3, stride: float) -> bool:
 	var ahead := flat + warp_dir * (stride * 2.0 + 50.0)
 	for o in SpaceNav.obstacles(ship.get_tree()):
@@ -676,7 +696,7 @@ func _warp_blocked(flat: Vector3, stride: float) -> bool:
 		if not is_instance_valid(node):
 			continue
 		var c := node.global_position
-		var hard := SpaceNav.slice_radius(float(o["radius"]) + 40.0, ship.position.y - c.y)
+		var hard := SpaceNav.slice_radius(float(o["plan"]) + 20.0, ship.position.y - c.y)
 		if hard <= 0.0:
 			continue
 		c.y = 0.0

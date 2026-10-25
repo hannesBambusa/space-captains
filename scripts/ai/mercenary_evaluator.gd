@@ -5,7 +5,7 @@ extends RoleEvaluator
 ##   distance = distance_weight * one-way travel time from the home outpost
 ##              (warp hop plus flight) / MERC_TRAVEL_SCALE_S. Distance alone
 ##              never refuses a job inside the system: a low score is "not
-##              worth it" (or too dangerous), never "too far"
+##              worth it" (or too dangerous), never a distance limit
 ##   danger   = danger_weight * Nerve * (danger - 1)^2 / 4 (escorts: half,
 ##              they fight beside the miner, not into the den)
 ##   utility  = pay - distance - danger + Loyalty bonus + noise
@@ -41,7 +41,7 @@ extends RoleEvaluator
 
 const BOUNTY_PAY_SCALE := 120.0
 const ESCORT_PAY_SCALE := 40.0
-const MERC_TRAVEL_SCALE_S := 36.0
+const MERC_TRAVEL_SCALE_S := 54.0
 const ESCORT_DANGER_SHARE := 0.5
 const MIN_HULL := 0.7
 ## Danger multiplier added per missing hull share when flying damaged.

@@ -79,5 +79,5 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 		e.reason = claim
 		e.terms["claim_why"] = "Its garrison and patrols guard the planet; a bounty on the garrison breaks the claim"
 	else:
-		judge(e, prof, trip, danger, rc.reward, fair, sulking)
+		judge(e, prof, danger, rc.reward, fair, sulking)
 	return e

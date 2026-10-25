@@ -37,11 +37,9 @@ static func why(brain: CaptainBrain, e: RoleEvaluator.Evaluation) -> String:
 	match e.reason:
 		RoleEvaluator.CANT_PAY:
 			return "The station has %s cr, one payout is %s cr" % [Fmt.amount(Economy.credits), Fmt.amount(e.contract.reward)]
-		RoleEvaluator.TOO_FAR:
-			var km := float(t.get("km", 0.0))
-			if RoleEvaluator.too_long(prof, _trip(t)):
-				return "%.1f km is %s, past a %s's limit of %d s" % [km, SpaceNav.travel_text(_trip(t)), pname, roundi(prof.max_trip_km * 1000.0 / SpaceNav.REF_SPEED)]
-			return "%.1f km (%s) costs %.2f, too much for pay worth %.2f" % [km, SpaceNav.travel_text(_trip(t)), float(t.get("distance", 0.0)), float(t.get("pay", 0.0))]
+		RoleEvaluator.NOT_WORTH_TRIP:
+			return "%.1f km (%s) costs %.2f for a %s, too much for pay worth %.2f: better pay would do it" % [float(t.get("km", 0.0)),
+					SpaceNav.travel_text(_trip(t)), float(t.get("distance", 0.0)), pname, float(t.get("pay", 0.0))]
 		RoleEvaluator.TOO_DANGEROUS:
 			if _premium_refusal(brain, e):
 				var fair := int(t["fair"])

@@ -21,10 +21,6 @@ extends Resource
 ## [member premium_factor]. 0 = no such rule.
 @export_range(0, 5, 1) var premium_danger: int = 0
 @export var premium_factor: float = 1.6
-## Refuses trips that take longer than this many km of plain flight at
-## SpaceNav.REF_SPEED (compared as travel time, warp hops count as the
-## short time they take). 0 = no limit.
-@export var max_trip_km: float = 0.0
 
 @export_group("Pacing")
 ## Sim seconds between evaluations while docked (min, max).

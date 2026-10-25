@@ -246,8 +246,12 @@ func update(dt: float) -> void:
 				trip.loaded = true
 				_set_state(State.RETURNING)
 		State.RETURNING:
-			if trip and trip.loaded and _check_threats(dt):
-				return
+			if trip and trip.loaded:
+				if _check_threats(dt):
+					return
+			else:
+				# Keep the threat fresh (can_warp reads it) without fleeing empty.
+				current_threat(dt)
 			_steer_home()
 		State.FLEEING:
 			_update_flee(dt)
