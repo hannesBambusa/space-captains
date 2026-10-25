@@ -57,6 +57,9 @@ static func why(brain: CaptainBrain, e: RoleEvaluator.Evaluation) -> String:
 		MercenaryEvaluator.TOO_STRONG:
 			return "Needs %.1f ships like theirs (solo up to %.1f): Teamwork %d too low to call a fleet, daring %.2f too low to go alone" % [
 					float(t.get("need", 0.0)), MercFleet.SOLO_NEED, cap.effective_teamwork() if cap else 5, float(t.get("daring", 0.0))]
+		MercenaryEvaluator.FLEET_SHORT, MercenaryEvaluator.FLEET_TOO_WEAK:
+			return "%s (target needs %.1f ships like theirs; free mercs' power %.1f of %.1f)" % [String(t.get("fleet_text", e.reason)),
+					float(t.get("need", 0.0)), float(t.get("fleet_power", 0.0)), float(t.get("fleet_goal", 0.0))]
 		MercenaryEvaluator.DECLINED:
 			if t.has("join_chance"):
 				return "Join chance %d%% (Teamwork %d, %s), share %s cr, %.1f km to the rally point: said no" % [
@@ -132,6 +135,11 @@ static func detail(brain: CaptainBrain, e: RoleEvaluator.Evaluation) -> String:
 		lines.append("Score %.2f, a %s accepts from %.2f" % [e.utility, cap.get_personality_name() if cap else "captain", prof.accept_threshold])
 	if t.has("need"):
 		lines.append("Strength: target needs %.1f ships like theirs, solo up to %.1f" % [float(t["need"]), MercFleet.SOLO_NEED])
+	if t.has("fleet_text"):
+		lines.append("Fleet: %s; %d free, %d%% of the need must be covered by their combined power" % [String(t["fleet_text"]), int(t.get("fleet_available", 0)),
+				roundi(MercFleet.FLEET_POWER_SHARE * 100.0)])
+	if t.has("cover"):
+		lines.append("Fleet cover: danger x%.2f (need against the fleet's power with this ship)" % float(t["cover"]))
 	if t.has("daring"):
 		lines.append("Daring %.2f (lone wolf from %.2f), solo chance %d%%" % [float(t["daring"]), MercenaryEvaluator.LONE_WOLF_DARING, roundi(float(t.get("solo_chance", 0.0)) * 100.0)])
 	if t.has("join_chance"):

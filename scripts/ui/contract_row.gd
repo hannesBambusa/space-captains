@@ -2,8 +2,10 @@ class_name ContractRow
 extends OverviewRow
 ## One posted contract in a list: type and target (or just the reward when
 ## the list is already about one target), reward, takers (or the bounty's
-## fleet, "Fleet of 3 forming", or its lone wolf) and progress, and a
-## cancel button. Click = camera flies to the contract beacon and the target
+## fleet, "Fleet of 3 forming", or its lone wolf) and progress, "paused,
+## station can't pay" while the credits do not cover one payment, and a
+## cancel button (its tooltip says what a bounty's escrow does: all back
+## while nobody has taken it, half back and half to the takers once taken). Click = camera flies to the contract beacon and the target
 ## is selected.
 
 var contract: Contract
@@ -43,11 +45,18 @@ func refresh() -> void:
 		parts.append(team)
 	else:
 		parts.append("%d on it" % n if n > 0 else contract.get_status_name().to_lower())
+	if n > 0 and contract.is_paused():
+		parts.append("paused, station can't pay")
 	var prog := contract.get_progress_text()
 	if not prog.is_empty() and not subtitle_has_reward():
 		parts.append(prog)
 	set_subtitle("  ·  ".join(parts))
 	tooltip_text = "%s\n%s\nPosted at %s\nPaid out: %s cr" % [contract.get_title(), contract.get_reward_text(), _clock(contract.created_time), Economy.format_amount(contract.credits_paid)]
+	if contract is BountyContract:
+		tooltip_text += "\nReserved: %s cr" % Economy.format_amount((contract as BountyContract).escrow)
+	if contract.is_paused():
+		tooltip_text += "\nPaused: the station can't pay one %s cr payment, captains won't take it until credits come in" % Economy.format_amount(contract.reward)
+	_cancel.tooltip_text = ContractBoard.cancel_text(contract)
 
 
 func subtitle_has_reward() -> bool:

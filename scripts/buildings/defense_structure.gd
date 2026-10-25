@@ -130,6 +130,7 @@ func take_hit(amount: float, attacker: Node3D, _at: Vector3) -> void:
 	durability.apply(amount, attacker)
 	if repairing:
 		_end_repair()
+	ColonyAlarm.raise(get_tree(), self, get_display_name(), attacker)
 	_on_damaged(amount, attacker)
 	changed.emit()
 	if durability.is_dead():

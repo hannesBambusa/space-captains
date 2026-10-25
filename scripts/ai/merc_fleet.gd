@@ -4,20 +4,32 @@ extends RefCounted
 ##
 ## How strong a target is, in "default mercenaries needed" ([method need_for]):
 ## a den counts its hull and shields, its guns and the ships it has out
-## (scaled by their faction's guns and hulls);
+## (by their fighting power: they come home to defend it);
 ## a scavenger ship counts itself and the hostiles flying with it. Above
 ## [constant SOLO_NEED] (scaled by the merc's own ship) a bounty is too much
 ## for one ship. Then the merc (MercenaryEvaluator) either goes alone anyway
 ## (a lone wolf: high Nerve, low Teamwork, see Captain.daring), calls a fleet
 ## ([method call_fleet]), or refuses.
 ##
+## Fleet size ([method assess]): enough ships, strongest free mercs first, for
+## their combined power ([method power_of], summed) to reach
+## [constant FLEET_POWER_SHARE] of the target's need, at least 2 and at most
+## [constant MAX_SIZE] (and the contract's taker limit). A caller refuses
+## when the free mercs cannot reach it ("Needs about 5 mercenaries, 3
+## available") or when even a full fleet of mercs like the hired ones could
+## not ("Too dangerous for the current fleet"); the target panel shows the
+## same estimate.
+##
 ## Life of a fleet:
 ## - FORMING: the caller waits at a rally point off the Home Station, toward
 ##   the target, and invites idle and patrolling mercs every
 ##   [constant INVITE_INTERVAL] (each says yes or no once, by Teamwork,
-##   personality, their share, Grudge and distance). Others that look at the
-##   contract may join too. It leaves when everyone wanted is at the rally
-##   point, or after [constant FORM_WAIT] with at least two; alone, it falls
+##   personality, their share, Grudge, distance, and how far the fleet's
+##   power covers the need). Others that look at the contract may join too.
+##   It takes more members than planned while it is still too weak. It
+##   leaves when everyone wanted is at the rally point (or the members there
+##   are strong enough), or after [constant FORM_WAIT] when strong enough;
+##   still too weak after [constant FORM_WAIT_MAX] (or alone) it falls
 ##   apart. The leader is picked at departure by rank, then Nerve.
 ## - EN_ROUTE: the leader flies at the slowest member's pace (on its own
 ##   cruise arc, Ship.cruise_band), wingmen hold 3D offset slots behind it
@@ -39,18 +51,21 @@ enum State { FORMING, EN_ROUTE, ENGAGING, RETREATING, DONE }
 const STATE_NAMES: PackedStringArray = ["forming", "en route", "engaging", "breaking off", "done"]
 ## Above this need (default mercs), a bounty is too strong to take alone.
 const SOLO_NEED := 1.3
-const MAX_SIZE := 4
+const MAX_SIZE := 6
+## A fleet sets out once its combined power covers this share of the need.
+const FLEET_POWER_SHARE := 0.8
 ## Den hull plus shields one default mercenary is worth.
-const DEN_EHP_PER_MERC := 1600.0
+const DEN_EHP_PER_MERC := 2000.0
 const DEN_GUN_NEED := 0.5
 ## Gun need of a den with [constant REF_DEN_GUN_DPS] of point defence (a
 ## Scavenger Hideout's); other factions scale by their guns.
 const REF_DEN_GUN_DPS := 12.0
-## Each scavenger a den has out, or flying with a ship target; a den's
-## ships of other factions scale by their hull plus shields against
-## [constant REF_ESCORT_EHP] (a scavenger's).
+## Each hostile flying with a ship target. A den's own ships count by their
+## fighting power ([method power_of], times 1 + their dodge chance): they
+## come home to defend it (ScavengerDen.call_defenders), at
+## [constant DEN_SHIP_NEED] each (they arrive one by one and some flee).
 const ESCORT_NEED := 0.5
-const REF_ESCORT_EHP := 350.0
+const DEN_SHIP_NEED := 0.6
 const ESCORT_RADIUS := 900.0
 ## Reference default mercenary: hull plus shields, and damage per second.
 const REF_EHP := 560.0
@@ -58,9 +73,13 @@ const REF_DPS := 57.6
 ## Rally point distance from the Home Station toward the target, metres.
 const RALLY_DISTANCE := 700.0
 const RALLY_RADIUS := 300.0
-## Sim seconds a forming fleet waits for its members.
+## Sim seconds a forming fleet waits for its members; past
+## [constant FORM_WAIT_MAX] a fleet still too weak falls apart.
 const FORM_WAIT := 55.0
+const FORM_WAIT_MAX := 120.0
 const INVITE_INTERVAL := 6.0
+## A merc that said no is asked again after this many sim seconds.
+const DECLINE_MEMORY := 40.0
 ## The fleet engages inside this distance of the target, metres.
 const ENGAGE_RANGE := 1800.0
 ## Formation slots: side and back offsets per row, metres.
@@ -93,7 +112,8 @@ var called_at: float = 0.0
 var leader_name: String = ""
 ## What every member shoots while engaging.
 var focus: Node3D
-## Instance ids of mercs that said no (asked once).
+## Instance id of a merc that said no -> SimClock.time it did. Asked again
+## after [constant DECLINE_MEMORY] s while the fleet still needs ships.
 var declined: Dictionary = {}
 
 var _next_invite: float = 0.0
@@ -120,8 +140,9 @@ static func target_need(target: Node3D) -> float:
 		var ehp := den.durability.hull + den.durability.shields
 		var need := ehp / DEN_EHP_PER_MERC + DEN_GUN_NEED * den.faction_def.den_gun_dps() / REF_DEN_GUN_DPS
 		for s in den.spawns:
-			if is_instance_valid(s) and not s.dead and s.durability:
-				need += ESCORT_NEED * (s.durability.max_hull + s.durability.max_shields) / REF_ESCORT_EHP
+			if is_instance_valid(s) and not s.dead and s.stats:
+				# Its ships come home to defend it: each by its fighting power (dodgers more).
+				need += DEN_SHIP_NEED * power_of(s) * (1.0 + s.stats.dodge)
 		return need
 	var need := 0.6
 	var d := target.get(&"durability") as Durability
@@ -138,19 +159,95 @@ static func need_for(contract: Contract, ship: Ship) -> float:
 	return target_need(contract.target) / power_of(ship)
 
 
-## Fleet size wanted for [param need], capped by the contract's taker limit.
+## Fleet size wanted for [param need] default mercs, capped by the
+## contract's taker limit (no ships known: one per default merc).
 static func size_for(need: float, contract: Contract) -> int:
-	var cap := MAX_SIZE if contract.max_takers <= 0 else mini(contract.max_takers, MAX_SIZE)
-	return clampi(floori(need - 0.2), 2, maxi(cap, 2))
+	return clampi(ceili(need * FLEET_POWER_SHARE - 0.05), 2, cap_for(contract))
+
+
+## Most ships a fleet on [param contract] takes.
+static func cap_for(contract: Contract) -> int:
+	return MAX_SIZE if contract.max_takers <= 0 else clampi(contract.max_takers, 2, MAX_SIZE)
+
+
+## How a fleet on [param contract] would stand now, seen by [param asker]
+## (counted as free): {need (default mercs), goal (power to reach), wanted
+## (ships), available (free mercs: idle or patrolling and repaired, the
+## asker, members already in), power (the best [code]wanted[/code] of them),
+## estimate (ships like the hired ones needed), enough, too_strong (even
+## [method cap_for] ships like those could not), text}.
+static func assess(contract: BountyContract, asker: Ship = null) -> Dictionary:
+	var need := target_need(contract.target)
+	var goal := need * FLEET_POWER_SHARE
+	var cap := cap_for(contract)
+	var tree: SceneTree = null
+	if asker and asker.is_inside_tree():
+		tree = asker.get_tree()
+	elif Combat.is_live(contract.target) and contract.target.is_inside_tree():
+		tree = contract.target.get_tree()
+	var free: Array[float] = []
+	var hired_sum := 0.0
+	var hired := 0
+	if tree:
+		for n in tree.get_nodes_in_group(Ship.GROUP):
+			var s := n as Ship
+			var mb := s.brain as MercenaryBrain if s else null
+			if mb == null or s.dead:
+				continue
+			var p := power_of(s)
+			hired_sum += p
+			hired += 1
+			var member := contract.fleet != null and contract.fleet.members.has(s)
+			if s == asker or member or mb.can_answer_fleet():
+				free.append(p)
+	free.sort()
+	free.reverse()
+	var avg := hired_sum / float(hired) if hired > 0 else 1.0
+	var estimate := maxi(ceili(goal / maxf(avg, 0.3) - 0.05), 2)
+	var wanted := 0
+	var power := 0.0
+	for i in mini(free.size(), cap):
+		power += free[i]
+		if power >= goal and i >= 1:
+			wanted = i + 1
+			break
+	var enough := wanted > 0
+	if not enough:
+		wanted = clampi(estimate, 2, cap)
+	var too_strong := not enough and estimate > cap
+	var text := ""
+	if too_strong:
+		text = "Too dangerous for the current fleet: needs about %d mercenaries like yours, at most %d fly together" % [estimate, cap]
+	elif not enough:
+		text = "Needs about %d mercenaries, %d available" % [maxi(estimate, wanted), free.size()]
+	else:
+		text = "A fleet of %d can take it (power %.1f of %.1f needed)" % [wanted, power, goal]
+	return {"need": need, "goal": goal, "wanted": wanted, "available": free.size(), "power": power, "estimate": estimate,
+			"enough": enough, "too_strong": too_strong, "text": text}
+
+
+## Combined power of the members (default mercs).
+func power() -> float:
+	var p := 0.0
+	for m in members:
+		if is_instance_valid(m) and not m.dead:
+			p += power_of(m)
+	return p
+
+
+## True when the members are strong enough to set out.
+func strong_enough(share: float = 1.0) -> bool:
+	return power() >= target_need(contract.target) * FLEET_POWER_SHARE * share
 
 
 # --- Forming -------------------------------------------------------------------
 
-## [param caller] (already a taker of [param bounty]) calls a fleet.
-static func call_fleet(bounty: BountyContract, caller: Ship, need: float) -> MercFleet:
+## [param caller] (already a taker of [param bounty]) calls a fleet of
+## [param size] ships (0 = by [method assess]).
+static func call_fleet(bounty: BountyContract, caller: Ship, size: int = 0) -> MercFleet:
 	var f := MercFleet.new()
 	f.contract = bounty
-	f.wanted = size_for(need, bounty)
+	f.wanted = clampi(size if size > 0 else int(assess(bounty, caller)["wanted"]), 2, cap_for(bounty))
 	f.called_at = SimClock.time
 	f._next_invite = SimClock.time
 	bounty.fleet = f
@@ -163,9 +260,12 @@ static func call_fleet(bounty: BountyContract, caller: Ship, need: float) -> Mer
 	return f
 
 
-## True while it still takes members.
+## True while it still takes members: short of the planned size, or still
+## too weak (up to the cap).
 func is_recruiting() -> bool:
-	return state == State.FORMING and members.size() < wanted
+	if state != State.FORMING:
+		return false
+	return members.size() < wanted or (members.size() < cap_for(contract) and not strong_enough())
 
 
 ## Adds [param ship] (already a taker of the contract). False when full.
@@ -196,7 +296,7 @@ func invite(tree: SceneTree) -> void:
 	for n in tree.get_nodes_in_group(Ship.GROUP):
 		var s := n as Ship
 		var mb := s.brain as MercenaryBrain if s else null
-		if mb == null or s.dead or members.has(s) or declined.has(s.get_instance_id()) or not mb.can_answer_fleet():
+		if mb == null or s.dead or members.has(s) or has_declined(s) or not mb.can_answer_fleet():
 			continue
 		candidates.append(mb)
 	# Nearest first.
@@ -210,8 +310,14 @@ func invite(tree: SceneTree) -> void:
 		if e.accept:
 			mb.join_fleet(self, e)
 		else:
-			declined[mb.ship.get_instance_id()] = true
+			declined[mb.ship.get_instance_id()] = SimClock.time
 			mb.decline_fleet(self, e.reason, e)
+
+
+## [param ship] said no to this fleet less than [constant DECLINE_MEMORY] s ago.
+func has_declined(ship: Ship) -> bool:
+	var at: Variant = declined.get(ship.get_instance_id())
+	return at != null and SimClock.time - float(at) < DECLINE_MEMORY
 
 
 ## Credits one more member could expect (equal share).
@@ -239,17 +345,24 @@ func update() -> void:
 			if now >= _next_invite:
 				_next_invite = now + INVITE_INTERVAL
 				invite(leader.get_tree() if is_instance_valid(leader) else null)
-			var all_in := members.size() >= wanted
+			var strong := strong_enough()
+			var all_in := members.size() >= 2 and (members.size() >= wanted or strong)
 			if all_in:
 				for m in members:
 					if m.is_docked() or m.global_position.distance_to(rally_point()) > RALLY_RADIUS:
 						all_in = false
 						break
-			if all_in or now - called_at > FORM_WAIT:
-				if members.size() >= 2:
+			var waited := now - called_at
+			if members.size() >= 2 and (all_in or (waited > FORM_WAIT and strong)):
+				_depart()
+			elif waited > FORM_WAIT_MAX:
+				if members.size() >= 2 and strong_enough(0.85):
 					_depart()
-				else:
+				elif members.size() < 2:
 					disband("No one answered %s's call for %s" % [leader_name, contract.get_target_name()])
+				else:
+					disband("Not enough mercenaries answered %s's call for %s: fleet power %.1f, it needs about %.1f" % [leader_name,
+							contract.get_target_name(), power(), target_need(contract.target) * FLEET_POWER_SHARE])
 		State.EN_ROUTE:
 			if is_instance_valid(leader) and leader.global_position.distance_to(contract.target.global_position) < ENGAGE_RANGE:
 				_set_state(State.ENGAGING)

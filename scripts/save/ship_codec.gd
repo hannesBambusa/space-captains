@@ -31,7 +31,7 @@ const KIND_SCAVENGER := "scavenger"
 const SLOTS: Array[int] = [ShipModule.Slot.TOOL, ShipModule.Slot.CARGO, ShipModule.Slot.DEFENSE, ShipModule.Slot.ENGINE, ShipModule.Slot.SENSOR]
 
 const BRAIN_FIELDS: PackedStringArray = ["last_refusal", "last_refusal_target", "last_decision", "_timer", "_resting_on_break", "_calm_time", "_threat_timer"]
-const MERC_FIELDS: PackedStringArray = ["retreating", "solo_brave", "_patrol_until", "_patrol_angle", "_patrol_point", "_wait_time", "_ward_was_out", "_passing_timer"]
+const MERC_FIELDS: PackedStringArray = ["retreating", "solo_brave", "_patrol_until", "_patrol_angle", "_patrol_point", "_wait_time", "_ward_was_out", "_passing_timer", "_patrol_zone_id"]
 const SHIP_FIELDS: PackedStringArray = ["trip_lowest_hull", "trip_was_hit", "repair_credit", "repair_session_paid", "repair_from", "_visit_timer", "_visit_pending", "_trait_timer"]
 
 
@@ -123,6 +123,10 @@ static func _save_scavenger(s: ScavengerShip, d: Dictionary) -> void:
 		d["scavenger"]["lead"] = SaveIds.of(s.ai.lead())
 	if s.ai:
 		d["ai"] = SaveUtil.props(s.ai, ["state", "stolen_from", "credits_looted", "_loot_clock"])
+		# Raid objective: a building or shuttle by save id, -1 = the station hull.
+		var obj := s.ai.raid_objective
+		if is_instance_valid(obj):
+			d["scavenger"]["objective"] = -1 if obj is StructureHull else SaveIds.of(obj)
 
 
 # --- Restore, step 1 ----------------------------------------------------------
@@ -274,6 +278,11 @@ static func _create_scavenger(tree: SceneTree, d: Dictionary, refs: SaveRefs) ->
 	if s.ai and not ai.is_empty():
 		SaveUtil.apply_props(s.ai, ai)
 		match s.ai.state:
+			ScavengerBrain.State.DEFENDING:
+				# Defends its own base again (the alarm is saved with the base).
+				s.ai.defend_den = den
+				if den == null:
+					s.ai.state = ScavengerBrain.State.RAIDING if s.is_raider else ScavengerBrain.State.ROAMING
 			ScavengerBrain.State.HUNTING, ScavengerBrain.State.ATTACKING:
 				s.ai.state = ScavengerBrain.State.RAIDING if s.is_raider else ScavengerBrain.State.ROAMING
 	var world := CombatWorld.of(tree)
@@ -292,9 +301,17 @@ static func finish(s: Ship, d: Dictionary, refs: SaveRefs) -> void:
 	if String(d.get("kind", "")) == KIND_HIRED and s.brain:
 		_restore_brain(s, d.get("brain", {}), bool(d.get("docked", true)), refs)
 	if s is ScavengerShip and (s as ScavengerShip).ai:
-		var lead_id := int((d.get("scavenger", {}) as Dictionary).get("lead", 0))
+		var sd: Dictionary = d.get("scavenger", {})
+		var lead_id := int(sd.get("lead", 0))
 		if lead_id != 0:
 			(s as ScavengerShip).ai.set_lead(refs.ship(lead_id) as ScavengerShip)
+		var obj_id := int(sd.get("objective", 0))
+		if obj_id == -1:
+			var mgr := s.get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+			if mgr and mgr.station_hull:
+				(s as ScavengerShip).ai.set_raid_objective(mgr.station_hull)
+		elif obj_id != 0:
+			(s as ScavengerShip).ai.set_raid_objective(refs.node3d(obj_id))
 	s.status_changed.emit(s)
 
 

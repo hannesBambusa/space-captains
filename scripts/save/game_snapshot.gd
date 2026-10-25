@@ -11,8 +11,10 @@ extends RefCounted
 ## Yard funds, debts, scrap, ore and auto-buy; cargo depot stock; defense
 ## structure hull and the shield bubble), every ship (see [ShipCodec]),
 ## contracts ([ContractCodec]), mercenary fleets, dens (hull, spawns,
-## stash, ruins), scrap fields, the raid director, the threat director
-## (base arrivals, threat clock, a pending warning), belt danger, the camera
+## stash, ruins), scrap fields, the raid director (with an announced raid),
+## the threat director (base arrivals, threat clock, a pending warning),
+## defence zones (radius, kill bounty, budget, stats), structure and station
+## hulls, raid objectives, belt danger, the camera
 ## and the random number generators that pick captains, rare parts and
 ## career skills. Orbits follow from the clock; belts regenerate from their
 ## seeds (nothing on them is mined away). Not saved: shots in flight and
@@ -21,6 +23,8 @@ extends RefCounted
 ## 2: the outer system (moved belts, planets and gates), factions (raider
 ## faction id and pack lead per ship, faction tag per event line).
 ## 3: threat escalation (arrived bases, threat clock, pending arrival).
+## Phase B (defence zones, structure hulls, announced raids) added keys
+## only; older v3 saves load with no zones and full hulls, so no bump.
 const VERSION := 3
 
 
@@ -57,6 +61,7 @@ static func capture(tree: SceneTree) -> Dictionary:
 	d["fleets"] = _save_fleets(tree)
 	d["raids"] = world.raids.save_state() if world and world.raids else {}
 	d["threats"] = world.threats.save_state() if world and world.threats else {}
+	d["zones"] = world.zones.save_state() if world and world.zones else {}
 	d["camera"] = _save_camera(tree)
 	d["ids_next"] = SaveIds.next
 	return d
@@ -154,6 +159,8 @@ static func apply_scene(tree: SceneTree, d: Dictionary) -> void:
 		refs.add(int(cd["id"]), Captain.from_save(cd))
 	if mgr:
 		mgr.load_state(d.get("buildings", {}), refs)
+	if world and world.zones:
+		world.zones.load_state(d.get("zones", {}))
 	var belts := {}
 	var den_data := {}
 	if world and world.threats:
@@ -195,7 +202,7 @@ static func apply_scene(tree: SceneTree, d: Dictionary) -> void:
 	for fd: Dictionary in d.get("fleets", []):
 		ShipCodec.restore_fleet(fd, refs)
 	if world and world.raids:
-		world.raids.load_state(d.get("raids", {}))
+		world.raids.load_state(d.get("raids", {}), refs)
 	_restore_camera.call_deferred(tree, d.get("camera", {}))
 
 

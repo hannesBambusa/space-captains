@@ -1,9 +1,12 @@
 class_name BountyContract
 extends Contract
-## Destroy a target: a raider ship or a hostile base (any faction). Nothing is reserved
-## when posting; when the target dies the reward is paid from the player's
-## credits, split equally among the player ships that damaged it in the last
-## [constant CREDIT_WINDOW] seconds (the killer alone when it was alone).
+## Destroy a target: a raider ship or a hostile base (any faction). Posting
+## reserves the reward: it leaves the player's credits at once into
+## [member escrow] (held by the ContractBoard), so it can always be paid.
+## When the target dies the reward is paid from the escrow, split equally
+## among the player ships that damaged it in the last
+## [constant CREDIT_WINDOW] seconds (the killer alone when it was alone);
+## what is left (nobody eligible) goes back to the player.
 ## The contract completes on its own when the target dies, and is cancelled
 ## when the target leaves without dying (a scavenger slipping home).
 ## Fleets: a target too strong for one ship gets a [MercFleet]; once it
@@ -19,6 +22,8 @@ var payouts: Array[Dictionary] = []
 var killer_name: String = ""
 ## The fleet working it (null when none).
 var fleet: MercFleet
+## Credits reserved for this bounty and not paid out yet.
+var escrow: int = 0
 var _solo: WeakRef
 
 
@@ -73,6 +78,11 @@ func get_target_name() -> String:
 
 func get_reward_text() -> String:
 	return "%d cr" % reward
+
+
+## Taken: a captain is on it (alone or in a fleet).
+func is_taken() -> bool:
+	return not takers.is_empty() or (fleet != null and not fleet.members.is_empty())
 
 
 func get_progress_text() -> String:

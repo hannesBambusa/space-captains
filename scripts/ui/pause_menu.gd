@@ -3,17 +3,24 @@ extends CanvasLayer
 ## key (placing a building and selections handle Esc first). Pauses the sim
 ## while open. Save game writes the current slot, Load game lists the saves
 ## ([SaveList]), Main menu and Quit save first (SaveManager).
-## Also shows short toasts ("Game saved") at the top of the screen, open or not.
+## Also shows short toasts ("Game saved") at the top of the screen, open or not:
+## a banner with an icon, red and held longer for raid warnings, amber for
+## long-range scans and new factions, green otherwise.
 
 const THEME_PATH := "res://ui/theme.tres"
 const TOAST_TIME := 2.2
+## Raid and threat warnings stay up longer.
+const ALERT_TIME := 5.0
 
 var _root: Control
 var _main: VBoxContainer
 var _loads: SaveList
 var _fullscreen_button: Button
 var _was_paused := false
-var _toast: Label
+var _toast: PanelContainer
+var _toast_label: Label
+var _toast_icon: TextureRect
+var _toast_style: ChamferBox
 var _toast_left := 0.0
 
 
@@ -72,12 +79,34 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
-## A short message at the top of the screen.
+## A short message at the top of the screen. The look follows the text:
+## raids and attacks are alerts, scans and new factions warnings.
 func toast(text: String) -> void:
-	_toast.text = text
+	var low := text.to_lower()
+	var color := HudStyle.GOOD
+	var icon_name := &"feed_reward"
+	var hold := TOAST_TIME
+	if low.contains("raid") or low.contains("under attack"):
+		color = HudStyle.BAD
+		icon_name = &"feed_threat"
+		hold = ALERT_TIME
+	elif low.contains("long-range") or low.contains("faction") or low.contains("scan"):
+		color = HudStyle.WARN
+		icon_name = &"warning"
+		hold = ALERT_TIME
+	elif low.contains("fail") or low.contains("error") or low.contains("could not"):
+		color = HudStyle.BAD
+		icon_name = &"feed_loss"
+	_toast_label.text = text
+	_toast_label.add_theme_color_override("font_color", color.lerp(Color.WHITE, 0.6))
+	_toast_icon.texture = HudStyle.icon(icon_name)
+	_toast_icon.modulate = color
+	_toast_style.accent_color = color
+	_toast_style.border_color = Color(color, 0.45)
 	_toast.modulate.a = 1.0
 	_toast.show()
-	_toast_left = TOAST_TIME
+	_toast.reset_size()
+	_toast_left = hold
 
 
 func _process(delta: float) -> void:
@@ -107,27 +136,23 @@ func _build() -> void:
 	_root.add_child(center)
 
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(340, 0)
+	panel.theme_type_variation = &"MenuPanel"
+	panel.custom_minimum_size = Vector2(380, 0)
 	center.add_child(panel)
 
-	var margin := MarginContainer.new()
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 24)
-	panel.add_child(margin)
-
 	var stack := VBoxContainer.new()
-	margin.add_child(stack)
+	panel.add_child(stack)
 
 	_main = VBoxContainer.new()
 	_main.add_theme_constant_override("separation", 10)
 	stack.add_child(_main)
 
-	var title := Label.new()
-	title.text = "PAUSED"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_color_override("font_color", Color(1.0, 0.55, 0.15))
-	title.add_theme_font_size_override("font_size", 22)
+	var kicker := UIUtil.label("OPERATIONS SUSPENDED", &"HeaderLabel")
+	_main.add_child(kicker)
+	var title := UIUtil.label("PAUSED", &"TitleLabel")
+	title.add_theme_font_size_override("font_size", 34)
 	_main.add_child(title)
+	_main.add_child(HSeparator.new())
 
 	_main.add_child(_button("Resume", close))
 	_main.add_child(_button("Save game", _save))
@@ -137,10 +162,9 @@ func _build() -> void:
 	_main.add_child(_button("Main menu", func() -> void: SaveManager.to_main_menu()))
 	_main.add_child(_button("Quit to desktop", func() -> void: SaveManager.quit_game()))
 
-	var hint := Label.new()
-	hint.text = "Esc to resume. The game saves on quit."
+	_main.add_child(HSeparator.new())
+	var hint := UIUtil.label("Esc to resume. The game saves on quit.", &"SmallLabel")
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.modulate = Color(1, 1, 1, 0.5)
 	_main.add_child(hint)
 
 	_loads = SaveList.new()
@@ -151,28 +175,44 @@ func _build() -> void:
 
 
 func _build_toast() -> void:
-	_toast = Label.new()
+	var holder := Control.new()
+	holder.set_anchors_preset(Control.PRESET_FULL_RECT)
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if ResourceLoader.exists(THEME_PATH):
-		_toast.theme = load(THEME_PATH)
-	_toast.theme_type_variation = &"HeaderLabel"
-	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_toast.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	_toast.offset_top = 64.0
-	_toast.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_toast.add_theme_color_override("font_color", Color(0.6, 1.0, 0.68))
-	_toast.add_theme_font_size_override("font_size", 20)
-	_toast.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
-	_toast.add_theme_constant_override("outline_size", 6)
+		holder.theme = load(THEME_PATH)
+	add_child(holder)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	center.offset_top = 60.0
+	center.offset_bottom = 110.0
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	holder.add_child(center)
+	_toast = PanelContainer.new()
+	_toast.theme_type_variation = &"ToastPanel"
 	_toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	center.add_child(_toast)
+	# Own copy of the style: the accent follows the toast kind.
+	var base := holder.theme.get_stylebox(&"panel", &"ToastPanel") if holder.theme else null
+	_toast_style = (base.duplicate() as ChamferBox) if base is ChamferBox else ChamferBox.new()
+	_toast.add_theme_stylebox_override("panel", _toast_style)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 10)
+	_toast.add_child(h)
+	_toast_icon = HudStyle.icon_rect(&"feed_reward", 20.0)
+	h.add_child(_toast_icon)
+	_toast_label = UIUtil.label("", &"HeaderLabel")
+	_toast_label.add_theme_font_size_override("font_size", 19)
+	h.add_child(_toast_label)
 	_toast.hide()
-	add_child(_toast)
 
 
 func _button(text: String, action: Callable) -> Button:
 	var b := Button.new()
-	b.text = text
+	b.text = text.to_upper()
+	b.theme_type_variation = &"MainMenuButton"
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(0, 40)
+	b.custom_minimum_size = Vector2(0, 46)
 	b.pressed.connect(action)
 	return b
 
@@ -200,4 +240,4 @@ func _toggle_fullscreen() -> void:
 
 
 func _update_fullscreen_label() -> void:
-	_fullscreen_button.text = "Windowed" if WindowMode.is_fullscreen() else "Fullscreen"
+	_fullscreen_button.text = "WINDOWED" if WindowMode.is_fullscreen() else "FULLSCREEN"

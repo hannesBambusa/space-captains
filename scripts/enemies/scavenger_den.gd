@@ -8,6 +8,14 @@ extends Node3D
 ## close (the faction's point-defence guns) and can be destroyed: a chain of
 ## explosions, a large scrap field, its belt's danger drops by the den's
 ## danger bonus and no more ships come from it.
+## Base defence: a hit from the player's side raises the alarm for
+## [constant ALERT_TIME] s after the last hit ("Rustjaw Hideout is calling
+## its raiders home", at most every [constant ALERT_REPEAT] s). Its own
+## ships within [constant RECALL_RADIUS] and same-faction ships of other
+## bases within [constant ALLY_RADIUS] come back and fight the attackers
+## (ScavengerBrain.defend), except those already fleeing home; while the
+## alarm lasts it launches below its cap [constant ALERT_RESPAWN_MULT] times
+## faster and every new ship joins the defence.
 ## Model: the faction's den model, else res://assets/models/buildings/scavenger_den.glb
 ## tinted in the faction colour (den_rock, den_salvage, den_hangar_glow
 ## pulsing, den_lights flickering, spawn_point with local -Z pointing out of
@@ -34,6 +42,17 @@ var total_spawned: int = 0
 var stash: float = 0.0
 ## Scrap per stashed load share when the den's stash spills into its ruins.
 const STASH_SCRAP := 30.0
+## Base defence (see the class notes): alarm length after the last hit,
+## the event line's repeat gap, recall and ally radii, how often the call
+## goes out again while hits keep coming, and the faster launches.
+const ALERT_TIME := 25.0
+const ALERT_REPEAT := 90.0
+const RECALL_RADIUS := 14000.0
+const ALLY_RADIUS := 6000.0
+const CALL_INTERVAL := 3.0
+const ALERT_RESPAWN_MULT := 1.5
+## Defenders fight hostiles this close to the base, metres.
+const GUARD_RADIUS := 1600.0
 
 var _model: Node3D
 var _glow_mats: Array[StandardMaterial3D] = []
@@ -55,6 +74,10 @@ var arrived_at: float = -1.0e9
 const ARRIVAL_LOOK_TIME := 6.0
 var _arrival_left: float = 0.0
 var _arrival_mat: ShaderMaterial
+## SimClock.time the alarm ends, and the last "calling its raiders home" line.
+var _alert_until: float = -1.0e9
+var _alert_line_at: float = -1.0e9
+var _call_timer: float = 0.0
 
 
 func setup(den_def: DenDef, claimed: SystemBelt) -> void:
@@ -129,8 +152,9 @@ func sim_step(dt: float) -> void:
 		return
 	durability.step(dt)
 	_prune()
+	_call_timer -= dt
 	if spawns.size() < def.spawn_cap:
-		_respawn_clock -= dt
+		_respawn_clock -= dt * (ALERT_RESPAWN_MULT if is_alerted() else 1.0)
 		if _respawn_clock <= 0.0:
 			_respawn_clock = def.respawn_time
 			spawn_pack(mini(faction_def.pack_size, def.spawn_cap - spawns.size()))
@@ -222,10 +246,61 @@ func take_hit(amount: float, attacker: Node3D, at: Vector3) -> void:
 	durability.apply(amount, attacker)
 	if durability.is_dead():
 		destroy(attacker)
+		return
+	if is_instance_valid(attacker) and attacker.has_method(&"get_faction") and Combat.hostile(int(attacker.call(&"get_faction")), faction):
+		raise_alert()
 	elif _rng.randf() < 0.08:
 		var fx := CombatWorld.fx_of(get_tree())
 		if fx:
 			fx.explode(at, 5.0)
+
+
+# --- Base defence -----------------------------------------------------------------
+
+## The alarm is on (hit in the last [constant ALERT_TIME] s).
+func is_alerted() -> bool:
+	return not dead and SimClock.time < _alert_until
+
+
+## Hit by the player's side: calls the defenders (see the class notes).
+func raise_alert() -> void:
+	var now := SimClock.time
+	var fresh := not is_alerted()
+	_alert_until = now + ALERT_TIME
+	if fresh and now - _alert_line_at >= ALERT_REPEAT:
+		_alert_line_at = now
+		EventLog.post("%s is calling its raiders home" % get_display_name(), EventLog.Kind.THREAT, self, Vector3.INF, "", faction_def.id)
+	if fresh or _call_timer <= 0.0:
+		_call_timer = CALL_INTERVAL
+		call_defenders()
+
+
+## Its ships near enough, and same-faction ships of other bases close by,
+## come back to fight. Returns how many answered.
+func call_defenders() -> int:
+	var n := 0
+	for o in get_tree().get_nodes_in_group(Ship.GROUP):
+		var s := o as ScavengerShip
+		if s == null or s.dead or s.ai == null or s.faction_def == null or s.faction_def.id != faction_def.id:
+			continue
+		var d := global_position.distance_to(s.global_position)
+		if d > (RECALL_RADIUS if s.den == self else ALLY_RADIUS):
+			continue
+		if s.ai.defend(self):
+			n += 1
+	return n
+
+
+## Who to fight near the base: its last attacker while it is close, else
+## the nearest hostile ship inside [constant GUARD_RADIUS]. Null when clear.
+func defence_target() -> Node3D:
+	var la := durability.get_last_attacker() as Node3D
+	if Combat.is_live_target(la) and durability.seconds_since_hit() < 8.0 and global_position.distance_to(la.global_position) < GUARD_RADIUS + get_hit_radius():
+		return la
+	for h in Combat.hostiles_near(get_tree(), global_position, GUARD_RADIUS + get_hit_radius(), faction):
+		if h is Ship:
+			return h
+	return null
 
 
 # --- Spawning -------------------------------------------------------------------
@@ -278,6 +353,8 @@ func spawn(raid: bool = false, out_already: bool = false) -> ScavengerShip:
 		raiders.append(s)
 	else:
 		spawns.append(s)
+		if is_alerted() and s.ai:
+			s.ai.defend(self)
 	total_spawned += 1
 	spawned.emit(self, s)
 	var world := CombatWorld.of(get_tree())
@@ -480,7 +557,8 @@ func save_state() -> Dictionary:
 			rd.append(SaveIds.of(s))
 	return {"id": SaveIds.of(self), "name": def.name if def else String(name), "dead": dead, "durability": SaveUtil.durability(durability),
 			"total_spawned": total_spawned, "stash": stash, "respawn_clock": _respawn_clock, "spawn_seq": _spawn_seq,
-			"gun_cooldown": _gun_cooldown, "arrived_at": arrived_at, "rng": SaveUtil.rng_state(_rng), "spawns": sp, "raiders": rd}
+			"gun_cooldown": _gun_cooldown, "arrived_at": arrived_at, "rng": SaveUtil.rng_state(_rng), "spawns": sp, "raiders": rd,
+			"alert_until": _alert_until, "alert_line_at": _alert_line_at}
 
 
 ## State without the ships (see [method restore_ships]). A dead den gets its
@@ -494,6 +572,8 @@ func load_state(d: Dictionary) -> void:
 	_spawn_seq = int(d.get("spawn_seq", 0))
 	_gun_cooldown = float(d.get("gun_cooldown", 0.0))
 	arrived_at = float(d.get("arrived_at", arrived_at))
+	_alert_until = float(d.get("alert_until", -1.0e9))
+	_alert_line_at = float(d.get("alert_line_at", -1.0e9))
 	SaveUtil.set_rng(_rng, d.get("rng", {}))
 	if bool(d.get("dead", false)) and not dead:
 		dead = true

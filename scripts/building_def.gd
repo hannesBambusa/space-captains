@@ -24,6 +24,10 @@ extends Resource
 @export var placeholder_tint: Color = Color(0, 0, 0, 0)
 ## Optional service node added to the building when placed (e.g. Outfitter).
 @export var service_script: Script
+## Hull raiders can shoot (StructureHull): at 0 the structure is disabled
+## until repaired, never destroyed. 0 = none (addons; turrets and the shield
+## generator have their own, DefenseStructure).
+@export var structure_hull: float = 0.0
 
 @export_group("Placement")
 ## Stands on its own (defense turrets): placed anywhere in the build zone

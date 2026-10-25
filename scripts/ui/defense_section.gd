@@ -3,7 +3,8 @@ extends VBoxContainer
 ## Building panel section for the station defenses ([DefenseStructure]):
 ## hull and shields with the repair state and what repairs cost you, then
 ##   Defense Turret: target, kills, shots, a fire-at-will / hold-fire toggle;
-##   Shield Generator: bubble HP, regen, state, radius.
+##   Shield Generator: bubble HP, regen, state, radius;
+## and what it does in numbers (DefenseStats).
 ## Refreshes a few times a second while shown.
 
 const REFRESH := 0.25
@@ -23,6 +24,7 @@ var _fire_button: Button
 var _bubble_bar: PipMeter
 var _bubble: Label
 var _bubble_info: Label
+var _stats: Label
 var _turret_box: VBoxContainer
 var _shield_box: VBoxContainer
 var _timer := 0.0
@@ -43,6 +45,8 @@ func _ready() -> void:
 	hh.add_child(_hull_bar)
 	_repair = _wrapped(&"DimLabel")
 	add_child(_repair)
+	_stats = _wrapped(&"DimLabel")
+	add_child(_stats)
 
 	_turret_box = VBoxContainer.new()
 	_turret_box.add_theme_constant_override("separation", 4)
@@ -100,6 +104,7 @@ func _refresh() -> void:
 	var s := structure
 	var d := s.durability
 	_header.text = "DEFENSES"
+	_stats.text = DefenseStats.describe(s.building.def) if s.building else ""
 	_hull.text = "Hull %d / %d   shields %d" % [roundi(d.hull), roundi(d.max_hull), roundi(d.shields)]
 	_hull_bar.value = d.fraction()
 	_hull_bar.color = PipMeter.GOOD if d.fraction() > 0.5 else (Color(1.0, 0.75, 0.3) if d.fraction() > 0.25 else PipMeter.BAD)

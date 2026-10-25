@@ -3,7 +3,11 @@ extends PanelContainer
 ## Bottom-right panel for a selected hostile (scavenger ship or Scavenger
 ## Den) or a scrap field. Hostiles: name, status, hull and shield bars, the
 ## bounties posted on them (with cancel) and the "Post bounty" form with a
-## reward stepper. Scrap fields: scrap amount and time left, the salvage
+## reward stepper. Posting a bounty reserves its reward from the credits
+## (blocked, with the reason, when they do not cover it). Under the form a
+## fleet estimate (MercFleet.assess: "Needs about 5 mercenaries, 3
+## available", "Too dangerous for the current fleet") and why the
+## mercenaries who looked at it refused. Scrap fields: scrap amount and time left, the salvage
 ## contracts on it and the "Post salvage contract" form (a per-load bonus on
 ## top of the yard's pay; salvagers also work fields without one). Cargo
 ## shuttles: owner, what they carry where ("Cargo shuttle, Mining Outpost 1:
@@ -42,7 +46,9 @@ var _bounties: VBoxContainer
 var _reward_value: Label
 var _post: Button
 var _post_hint: Label
+var _fleet_hint: Label
 var _refresh_timer := 0.0
+var _fleet_timer := 0.0
 
 
 func _ready() -> void:
@@ -118,6 +124,11 @@ func _ready() -> void:
 	_post_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_post_hint.custom_minimum_size.x = panel_width - 24.0
 	_bounty_box.add_child(_post_hint)
+	_fleet_hint = UIUtil.label("", &"ValueLabel")
+	_fleet_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_fleet_hint.custom_minimum_size.x = panel_width - 24.0
+	_fleet_hint.add_theme_font_size_override("font_size", 13)
+	_bounty_box.add_child(_fleet_hint)
 
 
 func setup(owner_hud: HUD) -> void:
@@ -167,6 +178,7 @@ func show_target(t: Node3D) -> void:
 				sf.amount, ceili(float(sf.amount) / SalvageContract.LOAD_SCRAP), SalvageContract.danger_at(get_tree(), sf.global_position)]
 	_title.text = String(t.call(&"get_display_name"))
 	_title.add_theme_color_override("font_color", (fac.color.lerp(Color.WHITE, 0.25) if fac else Color(1.0, 0.6, 0.5)) if hostile else Color(0.95, 0.9, 0.78))
+	_fleet_timer = 0.0
 	_rebuild_bounties()
 	_refresh()
 
@@ -204,20 +216,64 @@ func _refresh() -> void:
 	_reward_value.text = "%s cr" % UIUtil.amount(reward)
 	if target is ScrapField:
 		var sf := target as ScrapField
-		_post.disabled = sf.amount <= 0
+		_fleet_hint.visible = false
+		var why := ContractBoard.post_problem(reward)
+		_post.disabled = sf.amount <= 0 or not why.is_empty()
+		_post.tooltip_text = why
 		var yard := hud.manager.find_active(&"salvage_yard") if hud and hud.manager else null
 		_post_hint.text = "Optional bonus, paid by you on delivery: %d cr per load on top of the yard's %d. It draws salvagers here first and makes dangerous wrecks worth it. %s" % [reward, SalvageContract.FAIR_REWARD,
 				"Salvagers decide by pay, distance, danger and field size." if yard else "Build a Salvage Yard and hire salvagers to work it."]
 	else:
 		var alive := (target is ScavengerDen or target is ScavengerShip) and Combat.is_live(target)
-		_post.disabled = not alive
+		var why := ContractBoard.post_problem(reward, true)
+		_post.disabled = not alive or not why.is_empty()
+		_post.tooltip_text = why
 		if not alive:
 			_post_hint.text = "Destroyed."
+		elif not why.is_empty():
+			_post_hint.text = why + "."
 		else:
-			_post_hint.text = "Paid on destruction to the mercenaries who fought it, split between them. Nothing is reserved now."
+			_post_hint.text = "Reserved from your credits now (%s cr held for it), paid on destruction to the mercenaries who fought it, split between them; what is left comes back. Cancel: all of it back while nobody has taken it, half once taken." % UIUtil.amount(reward)
+		_fleet_timer -= 0.2
+		if _fleet_timer <= 0.0:
+			_fleet_timer = 1.0
+			_fleet_hint.text = _fleet_text() if alive else ""
+			_fleet_hint.visible = not _fleet_hint.text.is_empty()
 	for c in _bounties.get_children():
 		if c is ContractRow:
 			(c as ContractRow).refresh()
+
+
+## Fleet estimate for the target and the mercenaries' latest refusals of it.
+func _fleet_text() -> String:
+	var bounty: BountyContract = null
+	for c in ContractBoard.get_for_target(target):
+		if c is BountyContract:
+			bounty = c as BountyContract
+	var probe := bounty if bounty else BountyContract.new(target, reward, MercFleet.MAX_SIZE if target is ScavengerDen else 2)
+	var lines: PackedStringArray = []
+	var need := MercFleet.target_need(target)
+	if bounty and bounty.fleet and bounty.fleet.state != MercFleet.State.DONE:
+		lines.append("%s, power %.1f of %.1f needed" % [bounty.fleet.get_label(), bounty.fleet.power(), need * MercFleet.FLEET_POWER_SHARE])
+	elif need <= MercFleet.SOLO_NEED:
+		lines.append("One mercenary can take it on.")
+	else:
+		var a := MercFleet.assess(probe)
+		lines.append("Mercenaries: %s." % String(a["text"]))
+	# Why those who looked at it said no.
+	var tname := probe.get_target_name()
+	var reasons := {}
+	for n in get_tree().get_nodes_in_group(Ship.GROUP):
+		var s := n as Ship
+		var mb := s.brain as MercenaryBrain if s else null
+		if mb and not s.dead and mb.last_refusal_target == tname and not mb.last_refusal.is_empty():
+			reasons[mb.last_refusal] = int(reasons.get(mb.last_refusal, 0)) + 1
+	if not reasons.is_empty():
+		var parts: PackedStringArray = []
+		for r: String in reasons:
+			parts.append("%d: %s" % [int(reasons[r]), r.to_lower()])
+		lines.append("Refusing it: %s." % "; ".join(parts))
+	return "\n".join(lines)
 
 
 func _rebuild_bounties() -> void:
@@ -248,7 +304,7 @@ func _on_post() -> void:
 	if target is ScrapField:
 		ContractBoard.post_salvage(target as ScrapField, reward)
 	elif (target is ScavengerDen or target is ScavengerShip) and Combat.is_live(target):
-		ContractBoard.post_bounty(target, reward, 4 if target is ScavengerDen else 2)
+		ContractBoard.post_bounty(target, reward, MercFleet.MAX_SIZE if target is ScavengerDen else 2)
 
 
 func _bar_row(title: String, color: Color) -> Array:

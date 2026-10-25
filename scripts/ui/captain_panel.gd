@@ -315,6 +315,9 @@ func _ready() -> void:
 	_pay_value = pr
 	var mr := _stepper_row(_escort_box, "Max escorts", _step_max)
 	_max_value = mr
+	Economy.changed.connect(func(_c: int, _m: int) -> void:
+		if is_visible_in_tree():
+			_refresh_form())
 	_request = UIUtil.button("Request escort", &"AccentButton")
 	_request.pressed.connect(_on_request)
 	_escort_box.add_child(_request)
@@ -479,6 +482,10 @@ func _refresh_form() -> void:
 	_pay_value.text = "%d cr" % escort_pay
 	_max_value.text = str(escort_max)
 	_request.tooltip_text = "Pays %d cr to each escort per completed trip, from your credits on delivery." % escort_pay
+	var why := ContractBoard.post_problem(escort_pay)
+	_request.disabled = not why.is_empty()
+	if not why.is_empty():
+		_request.tooltip_text = why
 
 
 func _step_pay(dir: int) -> void:

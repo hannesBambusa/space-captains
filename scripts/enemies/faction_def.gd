@@ -52,6 +52,10 @@ const SCAVENGER_DEN_MODEL := "res://assets/models/buildings/scavenger_den.glb"
 @export var loadout: ShipLoadout
 ## Hit and pick radius, metres.
 @export var hit_radius: float = 9.0
+## Gunnery of its pilots: 0..1 chance a shot hits a target that does not dodge.
+@export_range(0.0, 1.0, 0.01) var ship_accuracy: float = 0.5
+## 0..1 chance its ships dodge an incoming hit (light, fast raiders).
+@export_range(0.0, 0.9, 0.01) var ship_dodge: float = 0.0
 
 @export_group("Behaviour")
 ## Prey: miners, salvagers, escape pods, armed player ships (mercenaries).

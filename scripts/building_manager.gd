@@ -65,6 +65,9 @@ const BAY_NODE := "addon_bay_%d"
 @export var lane_half_width: float = 12.0
 ## Docking lane reach past the spawn point (Building.approach_distance + exit), m.
 @export var lane_reach: float = 80.0
+## Hull of the Home Station itself (StructureHull): raiders can shoot it;
+## at 0 its docking pads close until it is repaired.
+@export var station_hull_points: float = 5000.0
 @export_group("Station keep-outs")
 ## One strip per addon bay along the bay's +Z and one per solar wing. Lengths
 ## and half widths in m.
@@ -103,6 +106,8 @@ var frame: Node3D
 var buildings: Array[Building] = []
 ## Station keep-outs (created with the frame).
 var keepouts: StationKeepouts
+## The station's own hull (created with the frame).
+var station_hull: StructureHull
 var rng := RandomNumberGenerator.new()
 var _counts: Dictionary = {}
 ## Bay number -> the addon Building in it.
@@ -559,6 +564,10 @@ func _make_frame() -> void:
 	solar_system.home_station.add_child(frame)
 	keepouts = StationKeepouts.build(solar_system.home_station.get_node_or_null(^"Station") as HomeStation, station_clearance,
 			bay_keepout_length, bay_keepout_half_width, solar_wing_dirs, solar_wing_span, solar_wing_half_width)
+	if station_hull_points > 0.0:
+		station_hull = StructureHull.new()
+		station_hull.setup("Home Station", station_hull_points, 45.0, 6.0)
+		frame.add_child(station_hull)
 	_install_factory()
 
 
@@ -582,7 +591,10 @@ func save_state() -> Dictionary:
 	for b in buildings:
 		if is_instance_valid(b) and not b.is_queued_for_deletion():
 			list.append(b.save_state())
-	return {"counts": _counts, "rng": SaveUtil.rng_state(rng), "buildings": list}
+	var d := {"counts": _counts, "rng": SaveUtil.rng_state(rng), "buildings": list}
+	if station_hull:
+		d["station_hull"] = station_hull.save_state()
+	return d
 
 
 ## The def with [param id] (buildable ones and the Factory), or null.
@@ -616,3 +628,5 @@ func load_state(d: Dictionary, refs: SaveRefs) -> void:
 			remove_building(b)
 	_counts = (d.get("counts", {}) as Dictionary).duplicate()
 	SaveUtil.set_rng(rng, d.get("rng", {}))
+	if station_hull and d.has("station_hull"):
+		station_hull.load_state(d["station_hull"], refs)

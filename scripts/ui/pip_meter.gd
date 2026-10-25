@@ -21,11 +21,15 @@ const OFF := Color(0.62, 0.72, 0.86, 0.16)
 @export var color: Color = Color(1.0, 0.6, 0.24)
 @export var pip_size: float = 7.0
 @export var pip_gap: float = 3.0
+## PIPS stacked bottom to top (signal bars, each a bit taller) instead of in a row.
+@export var vertical: bool = false
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	if style == Style.PIPS:
+	if style == Style.PIPS and vertical:
+		custom_minimum_size = Vector2(max_value * (pip_size + 1.0) - 1.0, pip_size * 3.0)
+	elif style == Style.PIPS:
 		custom_minimum_size = Vector2(max_value * (pip_size + pip_gap) - pip_gap, pip_size)
 	elif custom_minimum_size == Vector2.ZERO:
 		custom_minimum_size = Vector2(44.0, 5.0)
@@ -46,7 +50,14 @@ func _lit_color() -> Color:
 
 func _draw() -> void:
 	var lit := _lit_color()
-	if style == Style.PIPS:
+	if style == Style.PIPS and vertical:
+		var n := int(max_value)
+		var base := (size.y + pip_size * 3.0) * 0.5
+		for i in n:
+			var hgt := pip_size * 3.0 * float(i + 1) / float(n)
+			var r := Rect2(Vector2(float(i) * (pip_size + 1.0), base - hgt), Vector2(pip_size, hgt))
+			draw_rect(r, lit if float(i) < value else OFF)
+	elif style == Style.PIPS:
 		var n := int(max_value)
 		var y := (size.y - pip_size) * 0.5
 		for i in n:

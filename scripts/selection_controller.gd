@@ -1,7 +1,8 @@
 class_name SelectionController
 extends Node3D
 ## Click selection: buildings (by footprint), ships (hostile scavengers get a
-## red ring), Scavenger Dens, scrap fields, and asteroid belts (a
+## red ring), Scavenger Dens, scrap fields, defence zones (their centre
+## label or their rim; a selected zone brightens instead of a ring), and asteroid belts (a
 ## click near the belt ring or on its label anchor). Draws a ring on the plane
 ## around the selection. Escape or a click on empty space deselects (Escape is
 ## marked handled so the pause menu does not open as well). Double-clicks are
@@ -88,6 +89,8 @@ func select(target: Node3D) -> void:
 	elif target is ScrapField:
 		_ring = RingUtil.make_ring((target as ScrapField).radius * 1.15, SCRAP_RING_COLOR, 1.6, 96)
 		target.add_child(_ring)
+	elif target is DefenseZone:
+		(target as DefenseZone).set_selected(true)
 	elif target is SystemBelt:
 		var belt := target as SystemBelt
 		_ring = RingUtil.make_ring(belt.def.orbit_radius, BELT_RING_COLOR, 1.6, 1024)
@@ -247,7 +250,37 @@ func _pick_selectable(screen_pos: Vector2) -> Node3D:
 		hit = pick_group(screen_pos, ScavengerDen.GROUP)
 	if hit == null:
 		hit = pick_group(screen_pos, ScrapField.GROUP)
+	if hit == null:
+		hit = pick_zone(screen_pos)
 	return hit
+
+
+## Defence zone whose centre label or rim is under [param screen_pos], or null.
+func pick_zone(screen_pos: Vector2) -> DefenseZone:
+	var zones := DefenseZones.of(get_tree())
+	var cam := get_tree().get_first_node_in_group("rts_camera") as RTSCamera
+	if zones == null or cam == null or zones.count() == 0:
+		return null
+	var c3d := cam.get_camera()
+	var world_per_px := cam.get_distance() / maxf(_px_per_rad(c3d), 1.0)
+	var best: DefenseZone = null
+	var best_off := INF
+	for z in zones.zones:
+		if not is_instance_valid(z) or c3d.is_position_behind(z.global_position):
+			continue
+		var off := c3d.unproject_position(z.global_position + Vector3(0.0, 30.0, 0.0)).distance_to(screen_pos)
+		if off <= DefenseZone.CENTER_PICK_PX * 2.0 and off < best_off:
+			best_off = off
+			best = z
+			continue
+		var g := cam.screen_to_ground(screen_pos, z.global_position.y)
+		if g == Vector3.INF:
+			continue
+		var rim := absf(Combat.flat_distance(g, z.global_position) - z.radius) / maxf(world_per_px, 0.01)
+		if rim <= belt_pick_px and rim < best_off:
+			best_off = rim
+			best = z
+	return best
 
 
 func _px_per_rad(cam: Camera3D) -> float:
@@ -255,6 +288,8 @@ func _px_per_rad(cam: Camera3D) -> float:
 
 
 func _clear_ring() -> void:
+	if is_instance_valid(selected) and selected is DefenseZone:
+		(selected as DefenseZone).set_selected(false)
 	if is_instance_valid(_ring):
 		_ring.queue_free()
 	_ring = null

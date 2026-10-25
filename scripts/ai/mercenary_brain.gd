@@ -5,6 +5,17 @@ extends CaptainBrain
 ## - Defence: hostiles inside the home defence radius make docked mercs
 ##   scramble (Loyalty widens the radius); patrols fly loops around the Home
 ##   Station and engage what they find there, no contract needed.
+## - Defence zones (DefenseZones): with zones placed, idle mercs patrol more
+##   often ([constant ZONE_PATROL_BONUS]) and pick where by
+##   [method pick_patrol_zone]: home or a zone, kill-bounty zones weigh more
+##   (Greedy most), far ones less for the Cautious and Lazy, zones with
+##   raiders inside more for the Bold. In a zone they roam random points
+##   inside it. Raiders inside any zone within DefenseZones.ENGAGE_REACH of a
+##   merc (or of its outpost, docked) count as threats: patrols engage them,
+##   docked mercs scramble.
+## - Alarms (ColonyAlarm): a structure, shuttle or the shield bubble under
+##   fire within 5 km calls free mercs ([method answer_alarm]); they fly to
+##   it and fight its attackers until the alarm is over.
 ## - Bounty (HUNTING): fly to the target and fight it until it dies.
 ## - Escort (ESCORTING): join a miner (or wait at its outpost for it to
 ##   launch), fly in formation, engage what comes near it, and finish when it
@@ -54,6 +65,15 @@ const REPAIRED := RepairBay.DONE_AT
 const REPAIR_CALM := 6.0
 ## Lone wolves on a run above their weight retreat this much later.
 const SOLO_RETREAT_SCALE := 0.6
+## Patrol chance per idle look added while any defence zone exists, and
+## more while one pays a kill bounty.
+const ZONE_PATROL_BONUS := 0.2
+const ZONE_BOUNTY_PATROL_BONUS := 0.1
+## Zone patrols last this much longer.
+const ZONE_PATROL_TIME_SCALE := 1.5
+## Answering an alarm: attackers this close to the site, and the guard orbit, metres.
+const GUARD_RADIUS := 1500.0
+const GUARD_ORBIT := 320.0
 ## Warp drop-out short of a bounty target, metres (outside den guns).
 const HUNT_WARP_DROP := 2200.0
 ## Escorts and wingmen hop with their lead within this distance, metres.
@@ -77,14 +97,27 @@ var _last_attacker: WeakRef
 ## The escorted miner has been seen out in space on this trip.
 var _ward_was_out: bool = false
 var _passing_timer: float = 0.0
+## Patrol area: a DefenseZone uid, 0 = around the station.
+var _patrol_zone_id: int = 0
+## Answering an alarm: the site (WeakRef), its name and when the alarm ends.
+var _guard_site: WeakRef
+var _guard_name: String = ""
+var _guard_until: float = 0.0
 
 
 func get_status_text() -> String:
 	match state:
 		State.PATROLLING:
+			if _guard() :
+				return "Defending %s" % _guard_name
+			var z := patrol_zone()
+			if z:
+				return "Patrolling %s" % z.zone_name
 			return "Patrolling" if mode == Mode.PATROL else "Defending home"
 		State.ENGAGING:
 			var tn := _name_of(combat_target)
+			if _guard() and not tn.is_empty():
+				return "Defending %s, engaging %s" % [_guard_name, tn]
 			if mode == Mode.ESCORT and _ward():
 				return "Escorting %s, engaging" % _ward().get_display_name()
 			return "Engaging %s" % tn if not tn.is_empty() else "Engaging"
@@ -213,7 +246,7 @@ func update(dt: float) -> void:
 			_timer -= dt
 			if _timer <= 0.0:
 				_timer = 1.0
-				if _can_scramble() and not home_threats().is_empty():
+				if _can_scramble() and not defence_threats().is_empty():
 					last_decision = "Scrambling to defend home"
 					_note_scramble(true)
 					_launch(Mode.DEFEND, null)
@@ -261,7 +294,7 @@ func update(dt: float) -> void:
 # --- Decisions ----------------------------------------------------------------
 
 func _decide_merc() -> void:
-	if _can_scramble() and not home_threats().is_empty():
+	if _can_scramble() and not defence_threats().is_empty():
 		last_decision = "Scrambling to defend home"
 		_note_scramble(false)
 		_launch(Mode.DEFEND, null)
@@ -288,13 +321,21 @@ func _decide_merc() -> void:
 	var chance := profile.patrol_chance + 0.25 * (Captain.factor(captain.diligence) if captain else 0.0)
 	if captain and captain.has_trait(CaptainTraits.GRUDGE):
 		chance += 0.15
+	var zone_bonus := _zone_patrol_bonus()
+	chance += zone_bonus
 	if rng.randf() < clampf(chance, 0.05, 0.95):
-		last_decision = "Flying a patrol"
+		var pick := pick_patrol_zone()
+		var z := DefenseZones.of(ship.get_tree()).by_id(int(pick["uid"])) if int(pick["uid"]) != 0 else null
+		last_decision = "Flying a patrol in %s" % z.zone_name if z else "Flying a patrol"
 		if captain:
-			note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Flew a patrol around the station",
-					"Patrol chance %d%% per idle look (%s %d%%, Diligence %d%s)" % [roundi(clampf(chance, 0.05, 0.95) * 100.0), captain.get_personality_name(),
-					roundi(profile.patrol_chance * 100.0), captain.diligence, ", Grudge +15%" if captain.has_trait(CaptainTraits.GRUDGE) else ""], "", "patrol")
+			note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Flew a patrol in %s" % z.zone_name if z else "Flew a patrol around the station",
+					"Patrol chance %d%% per idle look (%s %d%%, Diligence %d%s%s)%s" % [roundi(clampf(chance, 0.05, 0.95) * 100.0), captain.get_personality_name(),
+					roundi(profile.patrol_chance * 100.0), captain.diligence, ", Grudge +15%" if captain.has_trait(CaptainTraits.GRUDGE) else "",
+					", defence zones +%d%%" % roundi(zone_bonus * 100.0) if zone_bonus > 0.0 else "", String(pick["why"])], "", "patrol")
 		_launch(Mode.PATROL, null)
+		_patrol_zone_id = int(pick["uid"])
+		if z:
+			_patrol_until = SimClock.time + (_patrol_until - SimClock.time) * ZONE_PATROL_TIME_SCALE
 		return
 	if e == null:
 		last_decision = "No contracts posted"
@@ -339,7 +380,7 @@ func _take(contract: Contract, e: RoleEvaluator.Evaluation = null) -> bool:
 	decided.emit(self, true, last_decision)
 	_launch(m, t)
 	if bounty and terms.has("call_fleet"):
-		MercFleet.call_fleet(bounty, ship, float(terms.get("need", 2.0)))
+		MercFleet.call_fleet(bounty, ship, int(terms["call_fleet"]))
 	elif bounty and terms.has("solo_brave"):
 		solo_brave = true
 		bounty.claim_solo(ship)
@@ -411,6 +452,9 @@ func _launch(m: Mode, t: Trip) -> void:
 		_patrol_until = SimClock.time + rng.randf_range(PATROL_TIME.x, PATROL_TIME.y)
 		_patrol_angle = rng.randf() * TAU
 		_patrol_point = Vector3.INF
+	_patrol_zone_id = 0
+	if m != Mode.DEFEND:
+		_clear_guard()
 	if ship.is_docked():
 		ship.start_undock()
 		_set_state(State.UNDOCKING)
@@ -436,6 +480,8 @@ func return_home(for_repairs: bool) -> void:
 		EventLog.post("%s returning for repairs" % captain.captain_name, EventLog.Kind.COMBAT, ship)
 	retreating = for_repairs
 	_end_trip()
+	_clear_guard()
+	_patrol_zone_id = 0
 	combat_target = null
 	_set_state(State.RETURNING)
 
@@ -534,7 +580,9 @@ func _note_scramble(repairing: bool) -> void:
 	if captain == null:
 		return
 	var n := home_threats().size()
+	var zn := defence_threats().size() - n
 	note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Scrambled to defend the station" + (", repairs cut short" if repairing else ""),
+			("%d raider%s in a defence zone nearby; " % [zn, "" if zn == 1 else "s"] if zn > 0 else "") +
 			"%d hostile ship%s inside the defence radius (%.1f km at Loyalty %d); hull %d%% is enough to fight" % [n, "" if n == 1 else "s",
 			DEFENSE_RADIUS * (1.0 + 0.2 * Captain.factor(captain.loyalty)) / 1000.0, captain.loyalty, roundi(ship.hull_fraction() * 100.0)], "", "scramble")
 
@@ -587,7 +635,13 @@ func retreat_level() -> float:
 func _check_job() -> bool:
 	match mode:
 		Mode.PATROL, Mode.DEFEND:
-			if SimClock.time > _patrol_until and home_threats().is_empty():
+			if _guard_site and SimClock.time > _guard_until and _guard_threats().is_empty():
+				if captain:
+					note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "The alarm at %s is over" % _guard_name, "No hostile near it for %d s" % roundi(ColonyAlarm.ALARM_TIME))
+				_clear_guard()
+			if _patrol_zone_id != 0 and patrol_zone() == null:
+				_patrol_zone_id = 0
+			if SimClock.time > _patrol_until and defence_threats().is_empty():
 				return_home(false)
 				return false
 		Mode.BOUNTY:
@@ -650,7 +704,16 @@ func _pick_target() -> Node3D:
 				if not near.is_empty():
 					return near[0]
 		Mode.PATROL, Mode.DEFEND:
-			var threats := home_threats()
+			# The site under attack first, then raiders in the patrol zone.
+			var guard := _guard_threats()
+			if not guard.is_empty():
+				return guard[0]
+			var z := patrol_zone()
+			if z:
+				var inside := z.hostiles_inside(600.0)
+				if not inside.is_empty():
+					return inside[0]
+			var threats := defence_threats()
 			var best: Node3D = null
 			var best_d := INF
 			for h in threats:
@@ -676,6 +739,175 @@ func home_threats() -> Array[Node3D]:
 	return _hostile_ships_near(tree, sys.home_station.global_position, r)
 
 
+## Everything a merc at home or on patrol defends: [method home_threats],
+## raiders in defence zones near it (DefenseZones.threats_near) and the
+## attackers of the site it answers an alarm for.
+func defence_threats() -> Array[Node3D]:
+	var out := home_threats()
+	var zones := DefenseZones.of(ship.get_tree())
+	if zones and zones.count() > 0:
+		for h in zones.threats_near(ship.global_position):
+			if not out.has(h):
+				out.append(h)
+	for h in _guard_threats():
+		if not out.has(h):
+			out.append(h)
+	return out
+
+
+## The zone this merc patrols, or null (home).
+func patrol_zone() -> DefenseZone:
+	if _patrol_zone_id == 0:
+		return null
+	var zones := DefenseZones.of(ship.get_tree())
+	return zones.by_id(_patrol_zone_id) if zones else null
+
+
+func _zone_patrol_bonus() -> float:
+	var zones := DefenseZones.of(ship.get_tree())
+	if zones == null or zones.count() == 0:
+		return 0.0
+	var bonus := ZONE_PATROL_BONUS
+	for z in zones.zones:
+		if is_instance_valid(z) and z.has_paying_bounty():
+			bonus += ZONE_BOUNTY_PATROL_BONUS
+			break
+	return bonus
+
+
+## Where to patrol: {"uid": zone uid or 0 (around the station), "why": the
+## weights for the decision log}. Home weighs 0.6 (Cautious 0.9, Lazy 1.2);
+## a zone 1, plus its kill bounty (per 40 cr: +1, times 1 + Greed / 2;
+## Greedy x2, Cautious x0.6, Lazy x0.5), plus 1 (Bold 2, Nerve +-0.5) while
+## raiders are inside; past 6 km from home Cautious x0.5, Lazy x0.4, Bold x1.2.
+func pick_patrol_zone() -> Dictionary:
+	var zones := DefenseZones.of(ship.get_tree())
+	if zones == null or zones.count() == 0:
+		return {"uid": 0, "why": ""}
+	var p := captain.personality if captain else profile.personality
+	var greed := Captain.factor(captain.greed) if captain else 0.0
+	var nerve := Captain.factor(captain.nerve) if captain else 0.0
+	var home := home_position()
+	var w_home := 0.6
+	if p == Captain.Personality.CAUTIOUS:
+		w_home = 0.9
+	elif p == Captain.Personality.LAZY:
+		w_home = 1.2
+	var uids: Array[int] = [0]
+	var weights: Array[float] = [w_home]
+	var parts: PackedStringArray = ["home %.1f" % w_home]
+	for z in zones.zones:
+		if not is_instance_valid(z):
+			continue
+		var w := 1.0
+		if z.has_paying_bounty():
+			var pm := 1.0
+			match p:
+				Captain.Personality.GREEDY:
+					pm = 2.0
+				Captain.Personality.CAUTIOUS:
+					pm = 0.6
+				Captain.Personality.LAZY:
+					pm = 0.5
+			w += float(z.kill_bounty) / 40.0 * (1.0 + 0.5 * greed) * pm
+		if z.raiders_inside > 0:
+			w += (2.0 if p == Captain.Personality.BOLD else 1.0) + 0.5 * nerve
+		if Combat.flat_distance(home, z.global_position) > 6000.0:
+			match p:
+				Captain.Personality.CAUTIOUS:
+					w *= 0.5
+				Captain.Personality.LAZY:
+					w *= 0.4
+				Captain.Personality.BOLD:
+					w *= 1.2
+		w = maxf(w, 0.05)
+		uids.append(z.uid)
+		weights.append(w)
+		parts.append("%s %.1f" % [z.zone_name, w])
+	var total := 0.0
+	for w in weights:
+		total += w
+	var roll := rng.randf() * total
+	var pick := 0
+	for i in weights.size():
+		roll -= weights[i]
+		pick = uids[i]
+		if roll <= 0.0:
+			break
+	return {"uid": pick, "why": "; where: %s" % ", ".join(parts)}
+
+
+## The site of the alarm this merc answers (live), or null.
+func _guard() -> Node3D:
+	var s := _guard_site.get_ref() as Node3D if _guard_site else null
+	return s if s and s.is_inside_tree() else null
+
+
+## Hostile ships near the alarm site (and its latest attacker), nearest first.
+func _guard_threats() -> Array[Node3D]:
+	var site := _guard()
+	var out: Array[Node3D] = []
+	if site == null:
+		return out
+	out = _hostile_ships_near(ship.get_tree(), site.global_position, GUARD_RADIUS)
+	var alarm := ColonyAlarm.of(ship.get_tree())
+	var a := alarm.attacker_of(site) if alarm else null
+	if a and not out.has(a) and Combat.flat_distance(a.global_position, site.global_position) < GUARD_RADIUS * 2.0:
+		out.insert(0, a)
+	return out
+
+
+func _clear_guard() -> void:
+	_guard_site = null
+	_guard_name = ""
+	_guard_until = 0.0
+
+
+## The colony alarm asks this merc to defend [param site] ([param site_name])
+## from [param attacker] until [param until]; [param distance] metres away.
+## True when it goes: free (docked, resting or repairing with the hull to
+## scramble, or on patrol / home defence), not on a bounty or escort, not
+## heading home for repairs, not already on this alarm.
+func answer_alarm(site: Node3D, site_name: String, attacker: Node3D, until: float, distance: float) -> bool:
+	if ship.dead or retreating or fleet != null or trip != null:
+		return false
+	if _guard() == site:
+		_guard_until = maxf(_guard_until, until)
+		return false
+	var docked := false
+	match state:
+		State.DOCKED, State.EVALUATING, State.RESTING, State.REPAIRING:
+			if not _can_scramble():
+				return false
+			docked = true
+		State.PATROLLING, State.ENGAGING:
+			if mode != Mode.PATROL and mode != Mode.DEFEND:
+				return false
+			if ship.hull_fraction() < retreat_level() + 0.1:
+				return false
+		_:
+			return false
+	last_decision = "Answering the alarm at %s" % site_name
+	if captain:
+		var by := _name_of(attacker)
+		note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Answered the alarm at %s" % site_name,
+				"%s under attack%s, %.1f km away (mercs answer within %d km); hull %d%%%s" % [site_name.left(1).to_upper() + site_name.substr(1),
+				" by %s" % by if not by.is_empty() else "", distance / 1000.0, roundi(ColonyAlarm.RESPONSE_RANGE / 1000.0), roundi(ship.hull_fraction() * 100.0),
+				", repairs cut short" if state == State.REPAIRING else ""], "", "alarm:%s" % site_name)
+	if docked:
+		_launch(Mode.DEFEND, null)
+	else:
+		mode = Mode.DEFEND
+		combat_target = null
+		_ai_timer = 0.0
+		_patrol_zone_id = 0
+	_guard_site = weakref(site)
+	_guard_name = site_name
+	_guard_until = until
+	_patrol_until = maxf(_patrol_until, until)
+	return true
+
+
 func _hostile_ships_near(tree: SceneTree, pos: Vector3, radius: float) -> Array[Node3D]:
 	var out: Array[Node3D] = []
 	for h in Combat.hostiles_near(tree, pos, radius, ship.faction):
@@ -685,6 +917,23 @@ func _hostile_ships_near(tree: SceneTree, pos: Vector3, radius: float) -> Array[
 
 
 func _patrol_step(_dt: float) -> void:
+	var site := _guard()
+	if site:
+		# Circle the site under attack.
+		var c := site.global_position
+		var goal := c + Vector3(cos(_patrol_angle), 0.0, sin(_patrol_angle)) * GUARD_ORBIT
+		if Combat.flat_distance(ship.global_position, goal) < 90.0:
+			_patrol_angle += rng.randf_range(0.6, 1.0)
+		ship.set_world_goal(goal, SpaceNav.world_velocity(site), Vector3.ZERO, 50.0, ship.max_speed * 0.8)
+		return
+	var z := patrol_zone()
+	if z:
+		# Roam random points inside the zone.
+		if _patrol_point == Vector3.INF or Vector2(_patrol_point.x, _patrol_point.z).length() > z.radius \
+				or Combat.flat_distance(ship.global_position, z.to_global(_patrol_point)) < 160.0:
+			_patrol_point = z.to_local(z.random_point(rng))
+		ship.set_world_goal(z.to_global(_patrol_point), z.frame_velocity(), Vector3.ZERO, 80.0, ship.max_speed * 0.6)
+		return
 	var sys := ship.get_tree().get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
 	if sys == null or sys.home_station == null:
 		return

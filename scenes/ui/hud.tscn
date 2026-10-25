@@ -50,18 +50,17 @@ script = ExtResource("3_marker")
 
 [node name="TopBar" type="PanelContainer" parent="Root"]
 layout_mode = 1
-anchors_preset = 5
-anchor_left = 0.5
-anchor_right = 0.5
-offset_top = 12.0
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 40.0
 grow_horizontal = 2
 script = ExtResource("4_top")
 
 [node name="Overview" type="VBoxContainer" parent="Root"]
 layout_mode = 1
 offset_left = 12.0
-offset_top = 12.0
-offset_right = 392.0
+offset_top = 52.0
+offset_right = 412.0
 mouse_filter = 2
 script = ExtResource("5_over")
 
@@ -85,7 +84,7 @@ anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -12.0
-offset_top = 12.0
+offset_top = 52.0
 offset_right = -12.0
 grow_horizontal = 0
 mouse_filter = 2
@@ -158,7 +157,7 @@ anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 12.0
 offset_top = -12.0
-offset_right = 452.0
+offset_right = 432.0
 offset_bottom = -12.0
 grow_vertical = 0
 mouse_filter = 2

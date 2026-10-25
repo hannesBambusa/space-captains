@@ -9,7 +9,8 @@ extends RoleEvaluator
 ##   danger   = danger_weight * Nerve * (danger - 1)^2 / 4 (escorts: half,
 ##              they fight beside the miner, not into the den)
 ##   utility  = pay - distance - danger + Loyalty bonus + noise
-## Hard rules: the station must be able to pay one reward, and the ship must
+## Hard rules: an escort contract must not be paused (the station can pay
+## one trip; a bounty's reward is reserved when posted), and the ship must
 ## be repaired (hull above [constant MIN_HULL]) unless the captain cannot pay
 ## for repairs; then the danger weighs more the lower the hull
 ## ([constant DAMAGED_DANGER]).
@@ -24,8 +25,13 @@ extends RoleEvaluator
 ##              alone, the danger weighs [constant LONE_WOLF_DANGER] as much
 ##              (brave or foolish), they keep the whole bounty
 ##   call       Teamwork at least [constant CALL_TEAMWORK] (or Grudge against
-##              scavengers): pay and danger are scored per head of the fleet
-##              wanted; taking it calls the fleet
+##              scavengers) and the free mercs together strong enough
+##              (MercFleet.assess: combined power, not each ship alone):
+##              pay and danger are scored per head of the fleet wanted;
+##              taking it calls the fleet. Too few free mercs: refused,
+##              [constant FLEET_SHORT] ("Needs about 5 mercenaries, 3
+##              available" in the log); a full fleet of mercs like the hired
+##              ones would still be too weak: [constant FLEET_TOO_WEAK]
 ##   otherwise  refused, "Too strong to take on alone"
 ## While a fleet forms, the contract is a join offer ([method evaluate_fleet_join]):
 ## the share and the danger per head, then a yes chance from Teamwork,
@@ -46,6 +52,8 @@ const GRUDGE_PAY := 1.4
 const LONE_WOLF_ESCORT := 0.25
 const LONE_WOLF_BONUS := 0.1
 const TOO_STRONG := "Too strong to take on alone"
+const FLEET_SHORT := "Not enough mercenaries free for a fleet"
+const FLEET_TOO_WEAK := "Too dangerous for the current fleet"
 const DECLINED := "Rather not fly in that fleet"
 const FLEET_FULL := "That fleet is full"
 ## Daring needed to take a fight above their weight alone, and how far above.
@@ -63,6 +71,11 @@ const JOIN_PER_TEAMWORK := 0.08
 const JOIN_PERSONALITY: Array[float] = [0.0, 0.15, -0.1, -0.05]
 ## Join chance lost per km from the rally point.
 const JOIN_PER_KM := 0.04
+## Join danger scale by how far the fleet with this ship falls short of the
+## need (need / power), clamped to this range.
+const JOIN_COVER := Vector2(0.6, 1.5)
+## Join chance added when this ship would make the fleet strong enough.
+const JOIN_COMPLETES := 0.3
 
 
 func handles(type: Contract.Type) -> bool:
@@ -99,6 +112,7 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 	e.terms = {"pay": pay, "distance": dist, "danger": dang, "km": km, "reward": contract.reward, "danger_level": danger, "base_danger": danger,
 			"warp_s": trip.x, "flight_s": trip.y, "pay_div": scale, "time_div": MERC_TRAVEL_SCALE_S}
 	var too_strong := false
+	var fleet_block := ""
 	if bounty and cap:
 		var need := MercFleet.need_for(bounty, brain.ship)
 		e.terms["need"] = need
@@ -113,10 +127,21 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 				dang *= LONE_WOLF_DANGER
 				e.terms["solo_brave"] = true
 			elif cap.effective_teamwork() >= CALL_TEAMWORK or grudge:
-				var size := MercFleet.size_for(need, bounty)
+				var a := MercFleet.assess(bounty, brain.ship)
+				var size := int(a["wanted"])
 				pay /= float(size)
 				dang /= float(size)
-				e.terms["call_fleet"] = size
+				e.terms["fleet_text"] = String(a["text"])
+				e.terms["fleet_power"] = float(a["power"])
+				e.terms["fleet_goal"] = float(a["goal"])
+				e.terms["fleet_available"] = int(a["available"])
+				e.terms["fleet_estimate"] = int(a["estimate"])
+				if bool(a["too_strong"]):
+					fleet_block = FLEET_TOO_WEAK
+				elif not bool(a["enough"]):
+					fleet_block = FLEET_SHORT
+				else:
+					e.terms["call_fleet"] = size
 			else:
 				too_strong = true
 			e.terms["pay"] = pay
@@ -127,7 +152,9 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 	e.terms["noise"] = noise
 	if too_strong:
 		e.reason = TOO_STRONG
-	elif Economy.credits < contract.reward:
+	elif not fleet_block.is_empty():
+		e.reason = fleet_block
+	elif contract.is_paused():
 		e.reason = CANT_PAY
 	elif brain.ship.hull_fraction() < MIN_HULL and RepairBay.can_afford(brain.ship):
 		e.reason = NEEDS_REPAIRS
@@ -148,7 +175,7 @@ func evaluate_fleet_join(brain: CaptainBrain, fleet: MercFleet) -> Evaluation:
 	var bounty := fleet.contract
 	var e := Evaluation.new()
 	e.contract = bounty
-	if fleet.declined.has(brain.ship.get_instance_id()):
+	if fleet.has_declined(brain.ship):
 		e.reason = DECLINED
 		return e
 	if not fleet.is_recruiting():
@@ -160,6 +187,10 @@ func evaluate_fleet_join(brain: CaptainBrain, fleet: MercFleet) -> Evaluation:
 	var trip := travel_of(brain, km)
 	var dist := prof.distance_weight * (trip.x + trip.y) / MERC_TRAVEL_SCALE_S
 	var dang := prof.danger_weight * pow(float(maxi(bounty.get_danger() - 1, 0)), 2.0) / 4.0 * (cap.danger_scale() if cap else 1.0) / heads
+	# Combined power: a fleet that covers the need (with this ship) weighs less.
+	var with_me := fleet.power() + MercFleet.power_of(brain.ship)
+	var cover := clampf(MercFleet.target_need(bounty.target) * MercFleet.FLEET_POWER_SHARE / maxf(with_me, 0.1), JOIN_COVER.x, JOIN_COVER.y)
+	dang *= cover
 	var grudge := cap != null and cap.has_trait(CaptainTraits.GRUDGE) and _scavenger_target(bounty)
 	if grudge:
 		pay *= GRUDGE_PAY
@@ -170,12 +201,14 @@ func evaluate_fleet_join(brain: CaptainBrain, fleet: MercFleet) -> Evaluation:
 	if cap:
 		chance += JOIN_PERSONALITY[cap.personality]
 	chance += clampf((pay - 1.0) * 0.05, -0.2, 0.2) - JOIN_PER_KM * km
+	# This ship would make the fleet strong enough to set out.
+	var completes := not fleet.strong_enough() and with_me >= MercFleet.target_need(bounty.target) * MercFleet.FLEET_POWER_SHARE
+	if completes:
+		chance += JOIN_COMPLETES
 	e.terms = {"pay": pay, "distance": dist, "danger": dang, "km": km, "join_chance": chance, "join_fleet": true, "loyal": loyal, "noise": noise,
 			"share": fleet.share_for_next(), "heads": heads, "reward": bounty.reward, "danger_level": bounty.get_danger(), "base_danger": bounty.get_danger(),
-			"grudge": grudge, "leader": fleet.leader_name, "warp_s": trip.x, "flight_s": trip.y, "pay_div": BOUNTY_PAY_SCALE, "time_div": MERC_TRAVEL_SCALE_S}
-	if Economy.credits < bounty.reward:
-		e.reason = CANT_PAY
-	elif brain.ship.hull_fraction() < MIN_HULL and RepairBay.can_afford(brain.ship):
+			"grudge": grudge, "leader": fleet.leader_name, "cover": cover, "completes": completes, "warp_s": trip.x, "flight_s": trip.y, "pay_div": BOUNTY_PAY_SCALE, "time_div": MERC_TRAVEL_SCALE_S}
+	if brain.ship.hull_fraction() < MIN_HULL and RepairBay.can_afford(brain.ship):
 		e.reason = NEEDS_REPAIRS
 	elif grudge:
 		e.accept = true
@@ -183,7 +216,7 @@ func evaluate_fleet_join(brain: CaptainBrain, fleet: MercFleet) -> Evaluation:
 		e.reason = TOO_DANGEROUS if dang > pay * 0.25 else NOT_WORTH_IT
 	elif brain.rng.randf() >= chance:
 		e.reason = DECLINED
-		fleet.declined[brain.ship.get_instance_id()] = true
+		fleet.declined[brain.ship.get_instance_id()] = SimClock.time
 	else:
 		e.accept = true
 	return e

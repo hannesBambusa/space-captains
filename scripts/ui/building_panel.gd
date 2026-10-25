@@ -245,6 +245,11 @@ func _refresh_cargo() -> void:
 	_cargo.visible = depot != null and building.is_active()
 	if _cargo.visible:
 		_cargo.text = depot.summary_text()
+		# The Salvage Yard section shows its own transit lines.
+		if not (building.get_service() is SalvageYard):
+			var lines := depot.transit_lines()
+			if not lines.is_empty():
+				_cargo.text += "\n" + "\n".join(lines)
 
 
 func _refresh_outfitter() -> void:

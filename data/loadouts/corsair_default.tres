@@ -25,16 +25,16 @@ script = ExtResource("1_mod")
 id = &"skin_plating"
 display_name = "Skin Plating"
 slot = 2
-hull_bonus = 30.0
-shield_bonus = 40.0
-shield_regen = 6.0
+hull_bonus = 40.0
+shield_bonus = 110.0
+shield_regen = 8.0
 
 [sub_resource type="Resource" id="m3"]
 script = ExtResource("1_mod")
 id = &"sprint_drive"
 display_name = "Sprint Drive"
 slot = 3
-speed_mult = 1.32
+speed_mult = 1.6
 accel_mult = 1.45
 turn_mult = 1.35
 

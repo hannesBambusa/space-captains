@@ -68,7 +68,21 @@ func get_type_name() -> String:
 
 
 func get_status_name() -> String:
+	if is_paused():
+		return "Paused, station can't pay"
 	return STATUS_NAMES[status]
+
+
+## Paid per delivery or trip from the player's credits at the time (mining,
+## escort, salvage bonus); a bounty is reserved when posted instead.
+func pays_per_delivery() -> bool:
+	return type != Type.BOUNTY
+
+
+## The station cannot pay one payment now: captains do not take it ("Station
+## can't pay") until credits come in. Trips under way are paid what is there.
+func is_paused() -> bool:
+	return not is_finished() and pays_per_delivery() and reward > 0 and Economy.credits < reward
 
 
 ## Short name of the target, e.g. "Cinder Belt".

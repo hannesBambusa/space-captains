@@ -15,6 +15,7 @@ cost_iron = 120
 cost_titanium = 30
 build_time = 25.0
 footprint_radius = 36.0
+structure_hull = 1600.0
 max_hires = 4
 hire_cost_credits = 300
 hire_role = "Mercenary"

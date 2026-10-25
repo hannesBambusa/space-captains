@@ -1,42 +1,54 @@
 class_name OverviewPanel
 extends VBoxContainer
-## Left-side system overview. Lists everything in the SolarSystem, grouped:
-## star, planets (moons nested), asteroid belts, posted contracts (with
-## cancel), jump gates, stations and structures (player buildings and their
-## hired ships with live status, updated live), threats (the bases that
-## have arrived, grouped by faction, with their status and the ships out,
-## raiders included; a base being announced as "arriving in m:ss"; a vague
-## "Next: unknown signals, ~6 min" outlook line from the ThreatDirector), scrap
-## fields and the captain roster (grouped by role, rank badge, live status;
-## captains without a ship included). Mercenaries flying in a fleet are
-## grouped under a fleet line (leader first).
-## Click a row = camera flies to it and follows; the row stays highlighted
-## while the camera follows that target or while it is selected. Collapses
-## with its button or Tab.
+## Left panel, tabbed (the tab row stays when collapsed with its button or
+## Tab). The pilots have their own list on the right ([PilotColumn]).
+## - ALL (default): contracts, threats and the system in one scrolling view.
+## - SYSTEM: star, planets (moons nested), asteroid belts, jump gates,
+##   stations and structures (player buildings with live status), scrap fields.
+## - CONTRACTS: posted contracts (with cancel) and what is reserved for
+##   bounties and zone budgets.
+## - THREATS: the bases that have arrived, grouped by faction, with their
+##   status and the ships out, raiders included; a base being announced as
+##   "arriving in m:ss"; a vague "Next: unknown signals, ~6 min" outlook line
+##   from the ThreatDirector.
+## Each tab shows a live count. Click a list row = camera flies to it and
+## follows; the row stays highlighted while the camera follows that target
+## or while it is selected.
 
+enum Tab { ALL, SYSTEM, CONTRACTS, THREATS }
+
+const TAB_NAMES: PackedStringArray = ["ALL", "SYSTEM", "CONTRACTS", "THREATS"]
+const TAB_ICONS: Array[StringName] = [&"station", &"tab_system", &"tab_contracts", &"tab_threats"]
 const PLANET_TYPES: PackedStringArray = ["Rocky world", "Ocean world", "Desert world", "Ice world", "Lava world", "Gas giant"]
 const MOON_TYPES: PackedStringArray = ["Rocky moon", "Ocean moon", "Desert moon", "Ice moon", "Lava moon", "Gas moon"]
 const ORE_NAMES: PackedStringArray = ["Rock", "Iron", "Titanium", "Crystal"]
 
-@export var panel_width: float = 380.0
+@export var panel_width: float = 400.0
 ## Space kept free below the panel, pixels.
-@export var bottom_margin: float = 160.0
+@export var bottom_margin: float = 172.0
 
 var hud: HUD
 var is_open := true
 var rows: Array[OverviewRow] = []
+var tab: Tab = Tab.ALL
 
 var _toggle_button: Button
-var _body: PanelContainer
+var _frame: PanelContainer
+var _tab_buttons: Array[Button] = []
+var _tab_counts: Array[Label] = []
+var _body: VBoxContainer
 var _scroll: ScrollContainer
 var _list: VBoxContainer
 var _structures: VBoxContainer
 var _contracts: VBoxContainer
+var _contracts_box: VBoxContainer
 var _contracts_header: Label
 var _contract_rows: Array[ContractRow] = []
-var _system_label: Label
+## "Reserved for bounties: 1,600 cr" (bounty escrow), above the contract rows.
+var _escrow_label: Label
 var _structure_rows: Array[OverviewRow] = []
 var _threats: VBoxContainer
+var _threats_box: VBoxContainer
 var _threats_header: Label
 var _threat_rows: Array[OverviewRow] = []
 var _scrap: VBoxContainer
@@ -44,10 +56,6 @@ var _scrap_header: Label
 var _scrap_rows: Array[OverviewRow] = []
 var _threats_dirty := false
 var _outlook: Label
-var _roster: VBoxContainer
-var _roster_header: Label
-var _roster_rows: Array[OverviewRow] = []
-var _roster_key := ""
 var _refresh_timer := 0.0
 
 
@@ -55,34 +63,109 @@ func _ready() -> void:
 	custom_minimum_size.x = panel_width
 	add_theme_constant_override("separation", 0)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var header := PanelContainer.new()
-	header.name = "Header"
-	add_child(header)
-	var hh := HBoxContainer.new()
-	header.add_child(hh)
-	hh.add_child(UIUtil.label("SYSTEM", &"HeaderLabel"))
-	_system_label = UIUtil.label("")
-	hh.add_child(_system_label)
-	hh.add_child(UIUtil.spacer())
-	hh.add_child(UIUtil.label("Tab", &"DimLabel"))
-	_toggle_button = UIUtil.button("-", &"IconButton")
-	_toggle_button.custom_minimum_size = Vector2(26.0, 22.0)
-	_toggle_button.tooltip_text = "Collapse the overview (Tab)"
+	_frame = PanelContainer.new()
+	_frame.name = "Frame"
+	_frame.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	add_child(_frame)
+	var fv := VBoxContainer.new()
+	fv.add_theme_constant_override("separation", 8)
+	_frame.add_child(fv)
+	var tabs := HBoxContainer.new()
+	tabs.add_theme_constant_override("separation", 2)
+	fv.add_child(tabs)
+	for i in TAB_NAMES.size():
+		var b := UIUtil.button("", &"TabButton")
+		b.toggle_mode = true
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size.y = 50.0
+		b.tooltip_text = TAB_NAMES[i].capitalize() + " (Tab collapses the panel)"
+		var v := VBoxContainer.new()
+		v.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		v.alignment = BoxContainer.ALIGNMENT_CENTER
+		v.add_theme_constant_override("separation", 1)
+		b.add_child(v)
+		var top := HBoxContainer.new()
+		top.alignment = BoxContainer.ALIGNMENT_CENTER
+		top.add_theme_constant_override("separation", 5)
+		v.add_child(top)
+		var ic := HudStyle.icon_rect(TAB_ICONS[i], 16.0, HudStyle.TEXT_DIM)
+		ic.name = "Icon"
+		top.add_child(ic)
+		var cnt := UIUtil.label("", &"ValueLabel")
+		cnt.add_theme_font_size_override("font_size", 14)
+		top.add_child(cnt)
+		_tab_counts.append(cnt)
+		var name_l := UIUtil.label(TAB_NAMES[i], &"SubHeaderLabel")
+		name_l.name = "Name"
+		name_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name_l.add_theme_font_size_override("font_size", 12)
+		v.add_child(name_l)
+		UIUtil.ignore_mouse(b)
+		b.pressed.connect(_on_tab_pressed.bind(i))
+		tabs.add_child(b)
+		_tab_buttons.append(b)
+	_toggle_button = UIUtil.button("", &"IconButton")
+	_toggle_button.icon = HudStyle.icon(&"collapse")
+	_toggle_button.custom_minimum_size = Vector2(26.0, 50.0)
+	_toggle_button.tooltip_text = "Collapse the panel (Tab)"
 	_toggle_button.pressed.connect(toggle)
-	hh.add_child(_toggle_button)
+	tabs.add_child(_toggle_button)
 
-	_body = PanelContainer.new()
-	_body.name = "Body"
-	add_child(_body)
+	# One scroll; each tab shows its group, ALL shows the three.
+	_body = VBoxContainer.new()
+	_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	fv.add_child(_body)
 	_scroll = ScrollContainer.new()
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_scroll.focus_mode = Control.FOCUS_NONE
+	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_body.add_child(_scroll)
-	_list = VBoxContainer.new()
-	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list.add_theme_constant_override("separation", 1)
-	_scroll.add_child(_list)
+	var groups := VBoxContainer.new()
+	groups.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	groups.add_theme_constant_override("separation", 14)
+	_scroll.add_child(groups)
+	_contracts = _make_group(groups)
+	_threats = _make_group(groups)
+	_list = _make_group(groups)
+	_set_tab(Tab.ALL)
 	get_viewport().size_changed.connect(_fit_height)
+	_fit_height.call_deferred()
+
+
+## A group of sections in the shared scroll.
+func _make_group(parent: VBoxContainer) -> VBoxContainer:
+	var v := VBoxContainer.new()
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.add_theme_constant_override("separation", 1)
+	parent.add_child(v)
+	return v
+
+
+func _on_tab_pressed(i: int) -> void:
+	if not is_open:
+		set_open(true)
+	_set_tab(i as Tab)
+
+
+func _set_tab(t: Tab) -> void:
+	tab = t
+	_list.visible = t == Tab.ALL or t == Tab.SYSTEM
+	_contracts.visible = t == Tab.ALL or t == Tab.CONTRACTS
+	_threats.visible = t == Tab.ALL or t == Tab.THREATS
+	_scroll.scroll_vertical = 0
+	for i in _tab_buttons.size():
+		var on := i == int(t)
+		_tab_buttons[i].set_pressed_no_signal(on and is_open)
+		var ic := _tab_buttons[i].find_child("Icon", true, false) as TextureRect
+		ic.modulate = HudStyle.ACCENT if on and is_open else HudStyle.TEXT_DIM
+		var nl := _tab_buttons[i].find_child("Name", true, false) as Label
+		nl.add_theme_color_override("font_color", HudStyle.TEXT_BRIGHT if on and is_open else HudStyle.TEXT_DIM)
+
+
+## Opens the panel on [param t] (probes, hotkeys).
+func show_tab(t: Tab) -> void:
+	set_open(true)
+	_set_tab(t)
 
 
 func setup(owner_hud: HUD) -> void:
@@ -116,8 +199,11 @@ func toggle() -> void:
 func set_open(open: bool) -> void:
 	is_open = open
 	_body.visible = open
-	_toggle_button.text = "-" if open else "+"
-	_toggle_button.tooltip_text = ("Collapse" if open else "Expand") + " the overview (Tab)"
+	_frame.size_flags_vertical = Control.SIZE_EXPAND_FILL if open else Control.SIZE_SHRINK_BEGIN
+	_toggle_button.icon = HudStyle.icon(&"collapse" if open else &"expand")
+	_toggle_button.tooltip_text = ("Collapse" if open else "Expand") + " the panel (Tab)"
+	_set_tab(tab)
+	_fit_height()
 	if not open and hud:
 		hud.marker.hover_target = null
 
@@ -139,8 +225,6 @@ func _process(delta: float) -> void:
 			continue
 		if r.target is Building:
 			r.set_subtitle(_building_subtitle(r.target as Building))
-		elif r.target is Ship:
-			r.set_subtitle(_ship_subtitle(r.target as Ship))
 	_refresh_contracts()
 	if _threats_dirty:
 		_threats_dirty = false
@@ -150,13 +234,6 @@ func _process(delta: float) -> void:
 	for r in _scrap_rows:
 		if is_instance_valid(r.target):
 			r.set_subtitle((r.target as ScrapField).get_status_text())
-	if _roster_signature() != _roster_key:
-		_rebuild_roster()
-	else:
-		for r in _roster_rows:
-			var c := r.get_meta(&"captain") as Captain
-			if c:
-				r.set_subtitle(_captain_subtitle(c))
 
 
 # --- Build the list -----------------------------------------------------------
@@ -169,14 +246,15 @@ func _rebuild() -> void:
 	var sys := hud.solar_system
 	if sys == null:
 		return
-	_system_label.text = sys.system_def.system_name if sys.system_def else ""
+	if hud.top_bar:
+		hud.top_bar.set_system_name(sys.system_def.system_name if sys.system_def else "")
 
 	if sys.star:
-		_section("STAR")
+		_section(_list, "STAR", -1, &"star")
 		var temp := int(sys.system_def.star_temperature) if sys.system_def else 0
 		_add_row(_list, sys.star, sys.system_def.system_name if sys.system_def else "Star", "%d K" % temp)
 
-	_section("PLANETS", sys.planets.size())
+	_section(_list, "PLANETS", sys.planets.size(), &"planet")
 	for p in sys.planets:
 		_add_row(_list, p, p.def.name, PLANET_TYPES[p.def.type])
 		for c in p.get_children():
@@ -185,52 +263,46 @@ func _rebuild() -> void:
 				_add_row(_list, m, m.def.name, MOON_TYPES[m.def.type], 1)
 
 	if not sys.belts.is_empty():
-		_section("ASTEROID BELTS", sys.belts.size())
+		_section(_list, "ASTEROID BELTS", sys.belts.size(), &"belt")
 		for i in sys.belts.size():
 			_add_belt_row(sys.belts[i], sys.belt_anchors[i] if i < sys.belt_anchors.size() else null)
 
-	_contracts_header = _section("CONTRACTS", 0)
-	_contracts = VBoxContainer.new()
-	_contracts.add_theme_constant_override("separation", 1)
-	_list.add_child(_contracts)
-	_rebuild_contracts()
-
-	_roster_header = _section("CAPTAINS", 0)
-	_roster = VBoxContainer.new()
-	_roster.add_theme_constant_override("separation", 1)
-	_list.add_child(_roster)
-	_rebuild_roster()
-
-	_threats_header = _section("THREATS", 0)
-	_threats = VBoxContainer.new()
-	_threats.add_theme_constant_override("separation", 1)
-	_list.add_child(_threats)
-	_rebuild_threats()
-
-	if not sys.gates.is_empty():
-		_section("JUMP GATES", sys.gates.size())
-		for g in sys.gates:
-			_add_row(_list, g, g.def.name, "to %s" % g.def.target_system)
-
-	_section("STATIONS & STRUCTURES")
+	_section(_list, "STATIONS AND STRUCTURES", -1, &"station")
 	_structures = VBoxContainer.new()
 	_structures.add_theme_constant_override("separation", 1)
 	_list.add_child(_structures)
 	_rebuild_structures()
 
-	_scrap_header = _section("SCRAP FIELDS", 0)
+	if not sys.gates.is_empty():
+		_section(_list, "JUMP GATES", sys.gates.size(), &"gate")
+		for g in sys.gates:
+			_add_row(_list, g, g.def.name, "to %s" % g.def.target_system)
+
+	_scrap_header = _section(_list, "SCRAP FIELDS", 0, &"scrap")
 	_scrap = VBoxContainer.new()
 	_scrap.add_theme_constant_override("separation", 1)
 	_list.add_child(_scrap)
 	_rebuild_scrap()
 
+	_contracts_header = _section(_contracts, "POSTED CONTRACTS", 0, &"tab_contracts")
+	_contracts_box = VBoxContainer.new()
+	_contracts_box.add_theme_constant_override("separation", 1)
+	_contracts.add_child(_contracts_box)
+	_rebuild_contracts()
+
+	_threats_header = _section(_threats, "HOSTILES OUT", 0, &"tab_threats")
+	_threats_box = VBoxContainer.new()
+	_threats_box.add_theme_constant_override("separation", 1)
+	_threats.add_child(_threats_box)
+	_rebuild_threats()
+
 
 # --- Threats and scrap ----------------------------------------------------------
 
 func _rebuild_threats() -> void:
-	if _threats == null:
+	if _threats_box == null:
 		return
-	_clear_rows(_threats, _threat_rows)
+	_clear_rows(_threats_box, _threat_rows)
 	var dens: Array[ScavengerDen] = []
 	if hud.solar_system:
 		dens = hud.solar_system.dens
@@ -268,9 +340,23 @@ func _rebuild_threats() -> void:
 		(head.get_node(^"Count") as Label).text = "%d/%d bases, %d ships%s" % [live, group.size(), out, arriving]
 	if _threats_header:
 		_threats_header.text = str(count)
+	var live_bases := 0
+	var raiders := 0
+	for d in dens:
+		if is_instance_valid(d) and d.is_alive():
+			live_bases += 1
+			for sc in d.raiders:
+				if is_instance_valid(sc) and not sc.dead:
+					raiders += 1
+	_set_count(Tab.THREATS, str(live_bases), raiders > 0)
+	_tab_buttons[Tab.THREATS].tooltip_text = "Threats: %d hostile bases, %d ships out%s" % [live_bases, count, (", %d raiding" % raiders) if raiders > 0 else ""]
+	if count == 0 and groups.is_empty():
+		var none := UIUtil.label("No hostile bases detected.", &"DimLabel")
+		none.name = "None"
+		_threats_box.add_child(none)
 	_outlook = UIUtil.label("", &"DimLabel")
 	_outlook.name = "Outlook"
-	_threats.add_child(_outlook)
+	_threats_box.add_child(_outlook)
 	_update_outlook()
 	_sync_pressed(hud.camera.get_follow_target() if hud.camera else null)
 	_fit_height.call_deferred()
@@ -293,13 +379,13 @@ func _faction_header(f: FactionDef) -> HBoxContainer:
 	var c := UIUtil.label("", &"DimLabel")
 	c.name = "Count"
 	h.add_child(c)
-	_threats.add_child(h)
+	_threats_box.add_child(h)
 	return h
 
 
 ## The base's row and one per ship it has out. Returns the ships listed.
 func _add_den_rows(d: ScavengerDen, f: FactionDef) -> int:
-	var row := _add_row(_threats, d, d.get_display_name(), _den_subtitle(d))
+	var row := _add_row(_threats_box, d, d.get_display_name(), _den_subtitle(d))
 	row.title_label.add_theme_color_override("font_color", f.color.lerp(Color.WHITE, 0.3) if d.is_alive() else Color(0.55, 0.55, 0.58))
 	var bar := PipMeter.new()
 	bar.style = PipMeter.Style.BAR
@@ -313,7 +399,7 @@ func _add_den_rows(d: ScavengerDen, f: FactionDef) -> int:
 	_threat_rows.append(row)
 	var ships := _live_ships(d)
 	for sc in ships:
-		var sr := _add_row(_threats, sc, sc.callsign + (" (raider)" if sc.is_raider else ""), sc.get_status_text().to_lower(), 1)
+		var sr := _add_row(_threats_box, sc, sc.callsign + (" (raider)" if sc.is_raider else ""), sc.get_status_text().to_lower(), 1)
 		sr.title_label.add_theme_color_override("font_color", f.color.lerp(Color.WHITE, 0.4))
 		_threat_rows.append(sr)
 	return ships.size()
@@ -321,7 +407,7 @@ func _add_den_rows(d: ScavengerDen, f: FactionDef) -> int:
 
 ## A base being announced: no hull, a countdown.
 func _add_site_row(site: DenArrivalSite, f: FactionDef) -> void:
-	var row := _add_row(_threats, site, site.get_display_name(), site.get_status_text().to_lower())
+	var row := _add_row(_threats_box, site, site.get_display_name(), site.get_status_text().to_lower())
 	row.title_label.add_theme_color_override("font_color", Color(f.color.lerp(Color.WHITE, 0.3), 0.75))
 	row.tooltip_text = "%s\nLong-range scans: %s ships gathering near %s.\nArrives in %s." % [site.get_display_name(), f.unit_name, site.def.belt_name, site.countdown_text()]
 	_threat_rows.append(row)
@@ -389,130 +475,18 @@ func _rebuild_scrap() -> void:
 	_fit_height.call_deferred()
 
 
-# --- Captain roster --------------------------------------------------------------
+# --- Tab counts ---------------------------------------------------------------------
 
-## Every hired captain still alive, grouped by role.
-func _captains_by_role() -> Dictionary:
-	var out: Dictionary = {}
-	if hud.manager == null:
-		return out
-	for b in hud.manager.buildings:
-		if not is_instance_valid(b):
-			continue
-		for c in b.captains:
-			if not c.alive:
-				continue
-			if not out.has(c.role):
-				out[c.role] = []
-			(out[c.role] as Array).append({"captain": c, "building": b})
-	return out
-
-
-func _roster_signature() -> String:
-	var parts: PackedStringArray = []
-	var by := _captains_by_role()
-	for role: String in by:
-		for e: Dictionary in by[role]:
-			var c := e["captain"] as Captain
-			var f := _fleet_of(c)
-			parts.append("%s:%s:%d:%d:%d:%d" % [role, c.captain_name, c.rank, (c.ship.get_instance_id() if is_instance_valid(c.ship) else 0),
-					f.get_instance_id() if f else 0, f.members.size() if f else 0])
-	return ",".join(parts)
-
-
-func _rebuild_roster() -> void:
-	if _roster == null:
-		return
-	_roster_key = _roster_signature()
-	_clear_rows(_roster, _roster_rows)
-	var by := _captains_by_role()
-	var total := 0
-	for role in ["Miner", "Mercenary", "Salvager"]:
-		if not by.has(role):
-			continue
-		var list: Array = _group_fleets(by[role])
-		var h := HBoxContainer.new()
-		h.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		h.add_child(UIUtil.spacer(14.0))
-		h.add_child(UIUtil.label(UIUtil.plural(role), &"DimLabel"))
-		h.add_child(UIUtil.label(str(list.size()), &"DimLabel"))
-		_roster.add_child(h)
-		var shown_fleet: MercFleet = null
-		for e: Dictionary in list:
-			var c := e["captain"] as Captain
-			var t: Node3D = c.ship if is_instance_valid(c.ship) else e["building"] as Building
-			var f := _fleet_of(c)
-			if f and f != shown_fleet:
-				shown_fleet = f
-				var fh := HBoxContainer.new()
-				fh.mouse_filter = Control.MOUSE_FILTER_IGNORE
-				fh.add_child(UIUtil.spacer(26.0))
-				var fl := UIUtil.label("%s's fleet (%d) for %s" % [f.leader_name, f.members.size(), f.contract.get_target_name()], &"DimLabel")
-				fl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.45))
-				fh.add_child(fl)
-				_roster.add_child(fh)
-			var row := _add_row(_roster, t, c.captain_name, _captain_subtitle(c), 2 if f else 1)
-			row.set_meta(&"captain", c)
-			row.title_label.add_theme_color_override("font_color", BuildingPanel.PERSONALITY_COLORS[c.personality].lerp(Color.WHITE, 0.55))
-			row.title_label.size_flags_stretch_ratio = 0.9
-			var names: PackedStringArray = []
-			for id in c.trait_ids():
-				names.append(CaptainTraits.trait_name(id))
-			row.tooltip_text = "%s %s, %s\n%d reputation%s" % [c.get_rank_name(), c.role.to_lower(), c.get_personality_name(), roundi(c.reputation),
-					("\n" + ", ".join(names)) if not names.is_empty() else ""]
-			row.add_right(UIUtil.rank_badge(c.rank))
-			_roster_rows.append(row)
-			total += 1
-	if total == 0:
-		var none := UIUtil.label("None hired yet. Build an outpost to hire captains.", &"DimLabel")
-		var m := MarginContainer.new()
-		m.add_theme_constant_override("margin_left", 8)
-		m.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		m.add_child(none)
-		_roster.add_child(m)
-	if _roster_header:
-		_roster_header.text = str(total)
-	_sync_pressed(hud.camera.get_follow_target() if hud.camera else null)
-	_fit_height.call_deferred()
-
-
-## The fleet [param c]'s ship flies in, or null.
-static func _fleet_of(c: Captain) -> MercFleet:
-	if not is_instance_valid(c.ship):
-		return null
-	var mb := c.ship.brain as MercenaryBrain
-	return mb.fleet if mb and mb.fleet and mb.fleet.state != MercFleet.State.DONE else null
-
-
-## Roster entries with each fleet's members together, leader first, in
-## the place of the fleet's first member.
-static func _group_fleets(list: Array) -> Array:
-	var out: Array = []
-	var done: Dictionary = {}
-	for e: Dictionary in list:
-		var f := _fleet_of(e["captain"] as Captain)
-		if f == null:
-			out.append(e)
-			continue
-		if done.has(f):
-			continue
-		done[f] = true
-		var group: Array = []
-		for g: Dictionary in list:
-			if _fleet_of(g["captain"] as Captain) == f:
-				group.append(g)
-		group.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-			return f.members.find((a["captain"] as Captain).ship) < f.members.find((b["captain"] as Captain).ship))
-		out.append_array(group)
-	return out
-
-
-func _captain_subtitle(c: Captain) -> String:
-	if c.stranded:
-		return "waiting for a ship"
-	if is_instance_valid(c.ship):
-		return c.ship.get_status_text().to_lower()
-	return ""
+## The count on a tab; [param alert] tints it red (fighting, raiders out).
+func _set_count(t: Tab, text: String, alert: bool = false) -> void:
+	var l := _tab_counts[int(t)]
+	l.text = text
+	l.add_theme_color_override("font_color", HudStyle.BAD if alert else HudStyle.TEXT_BRIGHT)
+	var ic := _tab_buttons[int(t)].find_child("Icon", true, false) as TextureRect
+	if alert:
+		ic.modulate = HudStyle.BAD
+	elif int(t) != int(tab) or not is_open:
+		ic.modulate = HudStyle.TEXT_DIM
 
 
 func _clear_rows(box: Container, list: Array[OverviewRow]) -> void:
@@ -548,13 +522,6 @@ func _rebuild_structures() -> void:
 			if not is_instance_valid(b):
 				continue
 			_structure_rows.append(_add_row(_structures, b, b.display_name, _building_subtitle(b), 1))
-			for s in b.ships:
-				var cap := s.captain
-				var row := _add_row(_structures, s, cap.captain_name, _ship_subtitle(s), 2)
-				row.title_label.add_theme_color_override("font_color", BuildingPanel.PERSONALITY_COLORS[cap.personality].lerp(Color.WHITE, 0.55))
-				row.title_label.size_flags_stretch_ratio = 0.9
-				row.tooltip_text = "%s, %s: %s" % [cap.role, cap.get_personality_name(), cap.get_personality_hint()]
-				_structure_rows.append(row)
 	_sync_pressed(hud.camera.get_follow_target() if hud.camera else null)
 	_fit_height.call_deferred()
 
@@ -574,68 +541,90 @@ func _building_subtitle(b: Building) -> String:
 	return "active"
 
 
-## Live status, plus the last refusal while waiting at home.
-func _ship_subtitle(s: Ship) -> String:
-	var text := s.get_status_text()
-	var br := s.brain
-	if br and not br.last_refusal.is_empty() and (br.state == CaptainBrain.State.DOCKED or br.state == CaptainBrain.State.EVALUATING):
-		text += ": " + br.last_refusal.to_lower()
-	return text
-
-
 func _rebuild_contracts() -> void:
-	if _contracts == null:
+	if _contracts_box == null:
 		return
 	for r in _contract_rows:
 		rows.erase(r)
 	_contract_rows.clear()
-	for c in _contracts.get_children():
-		_contracts.remove_child(c)
+	for c in _contracts_box.get_children():
+		_contracts_box.remove_child(c)
 		c.queue_free()
 	var list := ContractBoard.get_listed()
 	if _contracts_header:
 		_contracts_header.text = str(list.size())
+	_set_count(Tab.CONTRACTS, str(list.size()))
 	if list.is_empty():
 		var none := UIUtil.label("None. Select a belt, ship or scrap field to post one.", &"DimLabel")
 		var m := MarginContainer.new()
 		m.add_theme_constant_override("margin_left", 8)
 		m.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		m.add_child(none)
-		_contracts.add_child(m)
+		_contracts_box.add_child(m)
+	_escrow_label = UIUtil.label("", &"DimLabel")
+	_escrow_label.add_theme_font_size_override("font_size", 12)
+	var em := MarginContainer.new()
+	em.add_theme_constant_override("margin_left", 8)
+	em.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	em.add_child(_escrow_label)
+	_contracts_box.add_child(em)
+	_update_escrow()
 	for c in list:
 		var row := ContractRow.new(c, hud, true)
-		_contracts.add_child(row)
+		_contracts_box.add_child(row)
 		_contract_rows.append(row)
 		rows.append(row)
 	_fit_height.call_deferred()
 
 
 func _refresh_contracts() -> void:
+	_update_escrow()
 	for r in _contract_rows:
 		if is_instance_valid(r):
 			r.refresh()
 
 
-## Adds a section header; returns its count label (null without a count).
-func _section(title: String, count: int = -1) -> Label:
-	var spacer := Control.new()
-	spacer.custom_minimum_size.y = 6.0 if _list.get_child_count() > 0 else 0.0
-	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_list.add_child(spacer)
+func _update_escrow() -> void:
+	if not is_instance_valid(_escrow_label):
+		return
+	var held := ContractBoard.escrow_total()
+	var zones := ContractBoard.zone_escrow_total()
+	_escrow_label.text = "Reserved for bounties: %s cr" % UIUtil.amount(held - zones)
+	if zones > 0:
+		_escrow_label.text += ", zone budgets: %s cr" % UIUtil.amount(zones)
+	(_escrow_label.get_parent() as Control).visible = held > 0
+
+
+## Adds a section header strip to [param parent]; returns its count label
+## (null without a count).
+func _section(parent: VBoxContainer, title: String, count: int = -1, icon_name: StringName = &"") -> Label:
+	if parent.get_child_count() > 0:
+		var spacer := Control.new()
+		spacer.custom_minimum_size.y = 8.0
+		spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		parent.add_child(spacer)
+	var strip := PanelContainer.new()
+	strip.theme_type_variation = &"SectionPanel"
+	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(strip)
 	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 6)
 	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var l := UIUtil.label(title, &"HeaderLabel")
-	h.add_child(UIUtil.spacer(8.0))
-	h.add_child(l)
+	strip.add_child(h)
+	if not icon_name.is_empty():
+		h.add_child(HudStyle.icon_rect(icon_name, 14.0, HudStyle.ACCENT))
+	h.add_child(UIUtil.label(title, &"HeaderLabel"))
+	h.add_child(UIUtil.spacer())
 	var count_label: Label = null
 	if count >= 0:
-		count_label = UIUtil.label(str(count), &"DimLabel")
+		count_label = UIUtil.label(str(count), &"ValueLabel")
+		count_label.add_theme_font_size_override("font_size", 13)
+		count_label.add_theme_color_override("font_color", HudStyle.TEXT_DIM)
 		h.add_child(count_label)
-	_list.add_child(h)
-	var sep := HSeparator.new()
-	sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	sep.add_theme_constant_override("separation", 4)
-	_list.add_child(sep)
+	var gap := Control.new()
+	gap.custom_minimum_size.y = 3.0
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(gap)
 	return count_label
 
 
@@ -707,9 +696,16 @@ func _sync_pressed(target: Node3D) -> void:
 			r.set_pressed_no_signal(r.target != null and (r.target == target or r.target == sel))
 
 
+## The panel runs from its top down to [member bottom_margin] above the
+## screen bottom (the event feed lives below it).
 func _fit_height() -> void:
-	if _list == null:
+	if _frame == null:
 		return
-	var max_h := get_viewport_rect().size.y - global_position.y - bottom_margin - 40.0
-	var want := _list.get_combined_minimum_size().y
-	_scroll.custom_minimum_size.y = clampf(want, 60.0, maxf(max_h, 60.0))
+	var vp := get_viewport_rect().size
+	var h := vp.y - position.y - bottom_margin
+	if is_open:
+		custom_minimum_size.y = maxf(h, 200.0)
+		size.y = custom_minimum_size.y
+	else:
+		custom_minimum_size.y = 0.0
+		size.y = 0.0

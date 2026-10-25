@@ -14,8 +14,8 @@ extends DefenseStructure
 ## [member pitch_min_port_deg] over the -Z side (the barrels would clip the
 ## port block), [member pitch_min_deg] elsewhere. Fires alternately from
 ## muzzle_l / muzzle_r once lined up, through the ProjectilePool (friendly
-## tracers pass out through the station shield). About half a mercenary's
-## damage per second, with more range.
+## tracers pass out through the station shield). About two thirds of a stock
+## mercenary's damage per second (24 vs about 35), with more range.
 ## Hold fire ([member fire_at_will] off): it still tracks, but does not shoot.
 ## Status light (turret_status_light): green idle, amber tracking, red firing.
 
@@ -31,7 +31,7 @@ const FIRE_COLOR := Color(1.0, 0.18, 0.12)
 const FIRE_HOLD := 0.6
 
 @export var weapon_range: float = 900.0
-@export var weapon_damage: float = 11.0
+@export var weapon_damage: float = 13.0
 ## Shots per sim second (both barrels together).
 @export var fire_rate: float = 2.6
 @export var accuracy: float = 0.72
@@ -66,8 +66,8 @@ var _rng := RandomNumberGenerator.new()
 
 
 func _init() -> void:
-	max_hull = 520.0
-	max_shields = 120.0
+	max_hull = 650.0
+	max_shields = 150.0
 	shield_regen = 8.0
 	hit_radius = 11.0
 	aim_height = 14.0

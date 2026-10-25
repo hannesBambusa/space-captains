@@ -48,6 +48,10 @@ func _prepare_model(model: Node3D) -> void:
 
 func _on_ready_ship() -> void:
 	attack_side = 1.0 if randf() < 0.5 else -1.0
+	# No captain: the faction sets gunnery and evasion.
+	if stats and faction_def:
+		stats.accuracy = faction_def.ship_accuracy
+		stats.dodge = faction_def.ship_dodge
 	ai = ScavengerBrain.new(self)
 	set_meta(&"focus_distance", 170.0)
 

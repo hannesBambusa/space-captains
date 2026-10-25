@@ -70,7 +70,7 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 	e.terms = {"pay": pay, "distance": dist, "danger": dang, "size": size, "crowd": crowd, "km": km, "fair": fair, "reward": roundi(total), "bonus": sc.reward,
 			"scrap": sc.field.amount,
 			"danger_level": danger, "base_danger": danger, "loyal": loyal, "noise": noise, "warp_s": trip.x, "flight_s": trip.y, "pay_div": PAY_SCALE, "time_div": TRAVEL_SCALE_S}
-	if sc.reward > 0 and Economy.credits < sc.reward:
+	if sc.is_paused():
 		e.reason = CANT_PAY
 	elif too_long(prof, trip):
 		e.reason = TOO_FAR

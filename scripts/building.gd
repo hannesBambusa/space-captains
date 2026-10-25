@@ -7,6 +7,10 @@ extends Node3D
 ## ship script: MinerShip, MercenaryShip, SalvagerShip). Lost ships free
 ## their berth.
 ##
+## Construction: [ConstructionLook] (blueprint, welding seam, completion
+## flash) and [ConstructionDrones] (cosmetic worker drones) are children
+## while building.
+##
 ## Stage 3: a captain who ejected keeps the berth: their pod lands here
 ## ([method receive_pod]) and they wait ([member waiting]) until their wallet
 ## buys a new ship ([member BuildingDef.ship_cost]) or the player pays for one
@@ -24,6 +28,7 @@ signal hires_changed(building: Building)
 
 enum State { CONSTRUCTING, ACTIVE }
 
+## Hologram look of arriving hostile bases (DenArrivalSite, ScavengerDen).
 const CONSTRUCTION_SHADER: Shader = preload("res://shaders/construction.gdshader")
 const BAR_SHADER: Shader = preload("res://shaders/screen_bar.gdshader")
 const RENDER_LAYER := 2
@@ -46,7 +51,7 @@ const WAIT_CHECK_INTERVAL := 2.0
 ## Approach point distance out from the spawn point, metres.
 @export var approach_distance: float = 60.0
 ## Construction progress bar size on screen, pixels.
-@export var bar_size_px: Vector2 = Vector2(84.0, 8.0)
+@export var bar_size_px: Vector2 = Vector2(80.0, 6.0)
 
 var def: BuildingDef
 var display_name: String = ""
@@ -63,12 +68,17 @@ var captain_rng: RandomNumberGenerator
 var bay: int = 0
 
 var _model: Node3D
-var _construction_mat: ShaderMaterial
+var _look: ConstructionLook
+var _drones: ConstructionDrones
+## A constructing frame was shown, so finishing posts the completion event;
+## a building finished at once (load, demos) skips it.
+var _watched := false
 var _bar: MeshInstance3D
 var _bar_mat: ShaderMaterial
 var _model_box: AABB
 var _service: Node
 var _depot: CargoDepot
+var _hull: StructureHull
 var _unload_fx: OutpostUnloadFx
 var _wait_timer := 0.0
 
@@ -105,6 +115,11 @@ func _ready() -> void:
 			add_child(_service)
 			if _service.has_method(&"setup"):
 				_service.call(&"setup", self)
+	if def.structure_hull > 0.0 and not def.station_addon and not (_service is DefenseStructure):
+		_hull = StructureHull.new()
+		_hull.setup(display_name, def.structure_hull, maxf(def.footprint_radius * 0.6, 12.0), 10.0, self)
+		_hull.disabled_changed.connect(func(_on: bool) -> void: state_changed.emit(self))
+		add_child(_hull)
 	if def.max_shuttles > 0:
 		_depot = CargoDepot.new()
 		_depot.name = "CargoDepot"
@@ -125,6 +140,11 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	if state == State.CONSTRUCTING:
+		_watched = true
+		if _drones == null and _look:
+			_drones = ConstructionDrones.new()
+			_drones.setup(self, _look)
+			add_child(_drones)
 		_update_construction()
 	if not SimClock.paused:
 		sim_step(delta * SimClock.speed)
@@ -147,6 +167,16 @@ func sim_step(dt: float) -> void:
 ## The unloading look (Mining Outpost) or null.
 func get_unload_fx() -> OutpostUnloadFx:
 	return _unload_fx
+
+
+## The hull raiders shoot (outposts, BuildingDef.structure_hull) or null.
+func get_hull() -> StructureHull:
+	return _hull
+
+
+## Shot down to 0 hull and not repaired yet: no shuttles, no hiring.
+func is_disabled() -> bool:
+	return _hull != null and _hull.disabled
 
 
 ## The cargo depot (outposts with shuttles) or null.
@@ -194,8 +224,12 @@ func get_status_text() -> String:
 		return "Constructing %d%%" % int(get_progress() * 100.0)
 	if _service is DefenseStructure:
 		return (_service as DefenseStructure).get_status_text()
+	var hull := _hull.get_status_text() if _hull else ""
+	if not hull.is_empty() and _hull.disabled:
+		return hull
 	var n := repairing_count()
-	return "Active, repairing %d" % n if n > 0 else "Active"
+	var text := "Active, repairing %d" % n if n > 0 else "Active"
+	return text + (", " + hull.to_lower() if not hull.is_empty() else "")
 
 
 ## Docked ships being repaired now.
@@ -244,6 +278,8 @@ func hire_block_reason() -> String:
 		return "This building does not hire captains"
 	if state != State.ACTIVE:
 		return "Finish construction first"
+	if is_disabled():
+		return "Disabled: wait for repairs"
 	if captains.size() >= def.max_hires:
 		return "All %d berths are taken" % def.max_hires
 	return Economy.shortfall_text(def.hire_cost_credits)
@@ -469,9 +505,8 @@ func _dock_outward() -> Vector3:
 func _update_construction() -> void:
 	var p := get_progress()
 	_bar_mat.set_shader_parameter("progress", p)
-	var lo := _model_box.position.y
-	var hi := _model_box.end.y
-	_construction_mat.set_shader_parameter("fill_y", global_position.y + lerpf(lo - 0.5, hi + 0.5, p))
+	if _look:
+		_look.update(p)
 	if p >= 1.0:
 		_activate()
 		state_changed.emit(self)
@@ -480,6 +515,12 @@ func _update_construction() -> void:
 func _activate() -> void:
 	state = State.ACTIVE
 	_apply_construction_look(false)
+	if _drones:
+		_drones.depart()
+		_drones = null
+	if _watched:
+		EventLog.post("%s construction complete" % display_name, EventLog.Kind.INFO, self)
+	_watched = false
 	if _bar:
 		_bar.visible = false
 	set_meta(&"focus_radius", def.footprint_radius)
@@ -487,14 +528,28 @@ func _activate() -> void:
 	add_to_group(RTSCamera.FOCUS_GROUP)
 
 
+## On: the construction look. Off: the original materials back. The drone
+## crew comes with the first shown frame ([method _process]) and flies home
+## in [method _activate], so sites finished at once (loads, demos) get none.
 func _apply_construction_look(on: bool) -> void:
-	if on and _construction_mat == null:
-		_construction_mat = ShaderMaterial.new()
-		_construction_mat.shader = CONSTRUCTION_SHADER
-		_construction_mat.set_shader_parameter("grid_size", maxf(def.footprint_radius / 12.0, 1.0))
-	for mi in ModelLoader.meshes_of(_model):
-		mi.material_override = _construction_mat if on else null
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if on else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	if on and _look == null:
+		_look = ConstructionLook.new()
+		_look.setup(self, _model, _model_box)
+		add_child(_look)
+	elif not on and _look:
+		_look.restore()
+		_look.queue_free()
+		_look = null
+
+
+## The construction look while building, else null.
+func get_construction_look() -> ConstructionLook:
+	return _look
+
+
+## The drone crew while building (and while it flies home), else null.
+func get_construction_drones() -> ConstructionDrones:
+	return _drones
 
 
 func _make_bar() -> void:
@@ -510,13 +565,13 @@ func _make_bar() -> void:
 	_bar_mat.render_priority = 20
 	# Set explicitly: the shader's vertex-stage uniform defaults did not apply.
 	_bar_mat.set_shader_parameter("size_px", bar_size_px)
-	_bar_mat.set_shader_parameter("offset_px", Vector2(0.0, 46.0))
+	_bar_mat.set_shader_parameter("offset_px", Vector2(0.0, 22.0))
 	_bar_mat.set_shader_parameter("progress", 0.0)
 	_bar_mat.set_shader_parameter("fill_color", Color(1.0, 0.6, 0.24))
-	_bar_mat.set_shader_parameter("back_color", Color(0.03, 0.05, 0.08, 0.85))
-	_bar_mat.set_shader_parameter("border_color", Color(0.75, 0.82, 0.9, 0.7))
+	_bar_mat.set_shader_parameter("back_color", Color(0.02, 0.04, 0.07, 0.8))
+	_bar_mat.set_shader_parameter("border_color", Color(0.45, 0.8, 1.0, 0.55))
 	_bar.material_override = _bar_mat
-	_bar.position = local_center() + Vector3(0.0, _model_box.end.y + 4.0, 0.0)
+	_bar.position = local_center() + Vector3(0.0, _model_box.end.y + 2.0, 0.0)
 	add_child(_bar)
 
 
@@ -537,6 +592,8 @@ func save_state() -> Dictionary:
 		d["service"] = _service.call(&"save_state")
 	if _depot:
 		d["depot"] = _depot.save_state()
+	if _hull:
+		d["hull"] = _hull.save_state()
 	return d
 
 
@@ -569,6 +626,8 @@ func load_services(d: Dictionary, refs: SaveRefs) -> void:
 		_service.call(&"load_state", d["service"], refs)
 	if _depot and d.has("depot"):
 		_depot.load_state(d["depot"], refs)
+	if _hull and d.has("hull"):
+		_hull.load_state(d["hull"], refs)
 
 
 ## Puts a loaded ship back: in its berth ([param docked]) or under the space

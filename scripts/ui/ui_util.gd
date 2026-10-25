@@ -23,11 +23,16 @@ static func spacer(width: float = 0.0) -> Control:
 
 
 ## Buttons never take keyboard focus, so WASD keeps panning after a click.
+## An "x" IconButton (close, cancel) gets the close icon instead of the letter.
 static func button(text: String, variation: StringName = &"") -> Button:
 	var b := Button.new()
 	b.text = text
 	b.theme_type_variation = variation
 	b.focus_mode = Control.FOCUS_NONE
+	if text == "x" and variation == &"IconButton":
+		b.text = ""
+		b.icon = HudStyle.icon(&"close")
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	return b
 
 

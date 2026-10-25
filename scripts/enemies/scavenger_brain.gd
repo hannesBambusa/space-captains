@@ -17,12 +17,20 @@ extends RefCounted
 ## - ATTACKING whoever shoots at it;
 ## - FLEEING to the den when the hull drops below the faction's flee_hull
 ##   (docks there and leaves the map with its loot);
-## - RAIDING (raiders): fly at the colony and attack it in order: the
-##   station shield bubble while it is up (nothing inside can be hit through
-##   it), then the defense turrets, then the shield generator, then ships
-##   near home; with nothing left to shoot, loot credits from a structure
-##   until driven off. RaidStyle.STRUCTURES (the Syndicate) skips the ships
-##   near home (unless they shoot) and besieges the outposts, looting more.
+## - RAIDING (raiders): fly at the raid's objective ([member raid_objective]:
+##   an outpost, a cargo shuttle or the station itself, picked by the
+##   RaidDirector) and attack the colony in order: the station shield bubble
+##   while it is up (nothing inside can be hit through it), then the defense
+##   turrets, then the shield generator, then the objective (a structure's
+##   hull, StructureHull, or the shuttle), then shuttles and ships near home;
+##   with nothing left to shoot (structures disabled), loot credits from a
+##   structure until driven off. RaidStyle.STRUCTURES (the Syndicate) skips
+##   the ships near home (unless they shoot) and shoots every structure's
+##   hull, looting more.
+## - DEFENDING a base under attack (ScavengerDen.call_defenders): fly back
+##   and fight its attackers (ScavengerDen.defence_target); once the base's
+##   alarm is over and nothing hostile is near it, back to roaming (or
+##   raiding). Fleeing below the flee threshold still comes first.
 ## Targets inside an up shield bubble are never chased from outside: the
 ## bubble is attacked instead (raiders, retaliation) or the prey is skipped.
 ## Checks run on a timer ([constant AI_INTERVAL]).
@@ -31,9 +39,11 @@ extends RefCounted
 ## player time; fleeing and returning scavengers hop home when no player gun
 ## is near. Roaming, hunting and fighting never warp.
 
-enum State { LAUNCHING, ROAMING, HUNTING, ATTACKING, FLEEING, RAIDING, RETURNING }
+enum State { LAUNCHING, ROAMING, HUNTING, ATTACKING, FLEEING, RAIDING, RETURNING, DEFENDING }
 
-const STATE_NAMES: PackedStringArray = ["Launching", "Roaming", "Hunting", "Attacking", "Fleeing", "Raiding", "Returning to hideout"]
+const STATE_NAMES: PackedStringArray = ["Launching", "Roaming", "Hunting", "Attacking", "Fleeing", "Raiding", "Returning to hideout", "Defending"]
+## Defenders farther than this from their base may warp back, metres.
+const DEFEND_WARP_DISTANCE := 4000.0
 const AI_INTERVAL := 0.5
 ## Scavenger defaults (FactionDef.flee_hull, steal_share).
 const FLEE_HULL := 0.35
@@ -65,12 +75,17 @@ var state: State = State.LAUNCHING
 var target: Node3D
 var stolen_from: String = ""
 var credits_looted: int = 0
+## The base this ship is defending (DEFENDING).
+var defend_den: ScavengerDen
 
 var _ai_timer: float = 0.0
 var _roam_point := Vector3.INF
 var _steal_time: float = 0.0
 var _loot_clock: float = 0.0
 var _raid_target: Building
+## What this raid came for: a Building, a CargoShuttle or the station's
+## StructureHull (null = the nearest structure).
+var raid_objective: Node3D
 var _last_attacker: WeakRef
 var _lead: WeakRef
 var _rng := RandomNumberGenerator.new()
@@ -96,6 +111,33 @@ func lead() -> ScavengerShip:
 	return l if l and not l.dead and l.is_inside_tree() and l.ai else null
 
 
+## Sets the raid's objective (see [member raid_objective]).
+func set_raid_objective(t: Node3D) -> void:
+	raid_objective = t
+	if t is Building:
+		_raid_target = t as Building
+
+
+## The objective's name, or "" when there is none (any more).
+func objective_name() -> String:
+	if not is_instance_valid(raid_objective):
+		return ""
+	if raid_objective is Building:
+		return (raid_objective as Building).display_name
+	return _name_of(raid_objective)
+
+
+## The objective's combatant: a building's hull, the shuttle, the station
+## hull. Null when it cannot be shot now.
+func _objective_combatant() -> Node3D:
+	if not is_instance_valid(raid_objective):
+		return null
+	var c: Node3D = raid_objective
+	if raid_objective is Building:
+		c = (raid_objective as Building).get_hull()
+	return c if Combat.is_live_target(c) else null
+
+
 func get_status_text() -> String:
 	match state:
 		State.RETURNING:
@@ -108,11 +150,17 @@ func get_status_text() -> String:
 			return "Hunting %s" % _name_of(target)
 		State.ATTACKING:
 			return "Attacking %s" % _name_of(target)
+		State.DEFENDING:
+			var dn := defend_den.get_display_name() if is_instance_valid(defend_den) else "its base"
+			return "Defending %s, attacking %s" % [dn, _name_of(target)] if Combat.is_live_target(target) else "Flying back to defend %s" % dn
 		State.FLEEING:
 			return "Fleeing with loot" if ship.loot > 0.0 else "Fleeing"
 		State.RAIDING:
 			if Combat.is_live_target(target):
 				return "Raiding, attacking %s" % _name_of(target)
+			var obj := objective_name()
+			if not obj.is_empty():
+				return "Raiding %s" % obj
 			if is_instance_valid(_raid_target):
 				return "Raiding %s" % _raid_target.display_name
 			return "Raiding"
@@ -127,6 +175,9 @@ func can_warp() -> bool:
 			return not Combat.is_live_target(target)
 		State.FLEEING, State.RETURNING:
 			return Combat.nearest_hostile(ship.get_tree(), ship.global_position, WARP_CLEAR, ship.faction) == null
+		State.DEFENDING:
+			return is_instance_valid(defend_den) and ship.global_position.distance_to(defend_den.global_position) > DEFEND_WARP_DISTANCE \
+					and Combat.nearest_hostile(ship.get_tree(), ship.global_position, WARP_CLEAR, ship.faction) == null
 	return false
 
 
@@ -137,8 +188,9 @@ func cruise_free() -> bool:
 		State.ROAMING, State.RETURNING:
 			return true
 		State.RAIDING:
-			return not Combat.is_live_target(target) and is_instance_valid(_raid_target) \
-					and Combat.flat_distance(ship.global_position, _raid_target.global_position) > RAID_LOOT_RANGE * 3.0
+			var goal := _raid_goal()
+			return not Combat.is_live_target(target) and goal != null \
+					and Combat.flat_distance(ship.global_position, goal.global_position) > RAID_LOOT_RANGE * 3.0
 	return false
 
 
@@ -149,15 +201,37 @@ func warp_drop() -> float:
 func destination_name() -> String:
 	match state:
 		State.RAIDING:
+			var obj := objective_name()
+			if not obj.is_empty():
+				return obj
 			return _raid_target.display_name if is_instance_valid(_raid_target) else "the colony"
 		State.FLEEING, State.RETURNING:
 			return ship.den.get_display_name() if is_instance_valid(ship.den) else ""
+		State.DEFENDING:
+			return defend_den.get_display_name() if is_instance_valid(defend_den) else ""
 	return ""
 
 
 func on_attacked(attacker: Node3D) -> void:
 	if is_instance_valid(attacker):
 		_last_attacker = weakref(attacker)
+
+
+## [param den] is under attack: come back and fight for it. False when this
+## ship cannot (fleeing home, too damaged, already on it).
+func defend(den: ScavengerDen) -> bool:
+	if not is_instance_valid(den) or not den.is_alive() or ship.dead:
+		return false
+	if state == State.FLEEING or state == State.RETURNING or ship.hull_fraction() < fac.flee_hull:
+		return false
+	if state == State.DEFENDING and defend_den == den:
+		return false
+	defend_den = den
+	_steal_time = 0.0
+	target = den.defence_target()
+	_set_state(State.DEFENDING)
+	_ai_timer = 0.0
+	return true
 
 
 func update(dt: float) -> void:
@@ -182,6 +256,8 @@ func update(dt: float) -> void:
 			_return_step()
 		State.RAIDING:
 			_raid_step(dt)
+		State.DEFENDING:
+			_defend_step()
 
 
 # --- Thinking -------------------------------------------------------------------
@@ -199,6 +275,9 @@ func _think() -> void:
 			_set_state(State.RAIDING)
 		return
 	if state == State.LAUNCHING:
+		return
+	if state == State.DEFENDING:
+		_defend_think()
 		return
 	# Self-defence.
 	var la := _last_attacker.get_ref() as Node3D if _last_attacker else null
@@ -312,14 +391,20 @@ func _guns_near(pos: Vector3, radius: float) -> int:
 	return n
 
 
-## Raid objective: the shield bubble while it is up (from outside), then the
-## nearest turret, then the shield generator, then the nearest ship.
+## Raid target now: the shield bubble while it is up (from outside), then
+## the nearest turret, then the shield generator, then the raid's objective,
+## then a shuttle or ship near home (STRUCTURES: any structure's hull
+## instead). Null = fly on to the objective / loot.
 func _raid_pick() -> Node3D:
 	var tree := ship.get_tree()
 	var pos := ship.global_position
 	var sys := tree.get_first_node_in_group(SolarSystem.GROUP) as SolarSystem
 	var home := sys.home_station.global_position if sys and sys.home_station else pos
 	if Combat.flat_distance(pos, home) > RAID_ENGAGE_RADIUS * 2.0:
+		# A shuttle out in space can be caught on the way in.
+		var far := _objective_combatant()
+		if far is CargoShuttle and pos.distance_to(far.global_position) < RAID_ENGAGE_RADIUS:
+			return _through_shield(far)
 		return null
 	var bubble := StationShield.find(tree)
 	if bubble and bubble.is_up() and not bubble.contains(pos):
@@ -332,7 +417,13 @@ func _raid_pick() -> Node3D:
 	for h in near:
 		if h is ShieldGenerator:
 			return h
+	var obj := _objective_combatant()
+	if obj and pos.distance_to(obj.global_position) < RAID_ENGAGE_RADIUS * 1.5:
+		return _through_shield(obj)
 	if fac.raid_style == FactionDef.RaidStyle.STRUCTURES:
+		for h in near:
+			if h is StructureHull:
+				return h
 		return null
 	for h in near:
 		if h is Ship:
@@ -346,7 +437,46 @@ func _through_shield(t: Node3D) -> Node3D:
 	return bubble if bubble else t
 
 
+## Defending: the base's attacker (or whoever shoots this ship near the
+## base), until the alarm is over and the base is clear.
+func _defend_think() -> void:
+	var den := defend_den
+	if not is_instance_valid(den) or not den.is_alive():
+		_end_defence()
+		return
+	var t := den.defence_target()
+	var la := _last_attacker.get_ref() as Node3D if _last_attacker else null
+	if t == null and Combat.is_live_target(la) and ship.durability.seconds_since_hit() < 4.0 \
+			and den.global_position.distance_to(la.global_position) < ScavengerDen.GUARD_RADIUS * 1.5:
+		t = la
+	if t:
+		target = t
+	elif not den.is_alerted():
+		_end_defence()
+	else:
+		target = null
+
+
+func _end_defence() -> void:
+	defend_den = null
+	target = null
+	_set_state(State.RAIDING if ship.is_raider else State.ROAMING)
+
+
 # --- Steps ---------------------------------------------------------------------
+
+func _defend_step() -> void:
+	if Combat.is_live_target(target):
+		ship.fight_step(target, ship.attack_side)
+		return
+	var den := defend_den
+	if not is_instance_valid(den):
+		return
+	# Hold off the mouth until something comes near.
+	var guard := den.get_mouth_position() + den.get_outward() * 300.0
+	ship.set_world_goal(guard, Vector3.ZERO, Vector3.ZERO, 60.0)
+
+
 
 func _launch_step() -> void:
 	var den := ship.den
@@ -355,7 +485,8 @@ func _launch_step() -> void:
 		return
 	var out := den.get_mouth_position() + den.get_outward() * 260.0
 	ship.set_world_goal(out, Vector3.ZERO, Vector3.ZERO, 40.0, ship.max_speed * 0.5)
-	if ship.global_position.distance_to(out) < 80.0:
+	# Flat: in open space the ship holds its lane height, not the mouth's.
+	if Combat.flat_distance(ship.global_position, out) < 80.0:
 		_set_state(State.RAIDING if ship.is_raider else State.ROAMING)
 
 
@@ -429,6 +560,12 @@ func _raid_step(dt: float) -> void:
 	if Combat.is_live_target(target):
 		ship.fight_step(target, ship.attack_side)
 		return
+	# Not a building (a shuttle, the station): fly at it until it can be shot
+	# or is gone, then loot the nearest structure.
+	var obj := _objective_combatant()
+	if obj and not (raid_objective is Building):
+		ship.set_world_goal(obj.global_position, SpaceNav.world_velocity(obj), Vector3.ZERO, RAID_LOOT_RANGE * 0.6)
+		return
 	if not is_instance_valid(_raid_target):
 		_raid_target = _pick_raid_building()
 		if _raid_target == null:
@@ -456,6 +593,13 @@ func _raid_step(dt: float) -> void:
 			EventLog.post("%s are looting %s" % [who, _raid_target.display_name], EventLog.Kind.THREAT, _raid_target, Vector3.INF, "", fac.id)
 		if credits_looted >= roundi(RAID_LOOT_MAX * fac.raid_loot_mult):
 			_set_state(State.FLEEING)
+
+
+## Where the raid flies: the objective (or its building), else the structure to loot.
+func _raid_goal() -> Node3D:
+	if is_instance_valid(raid_objective) and not (raid_objective is Building) and _objective_combatant():
+		return raid_objective
+	return _raid_target if is_instance_valid(_raid_target) else null
 
 
 func _pick_raid_building() -> Building:

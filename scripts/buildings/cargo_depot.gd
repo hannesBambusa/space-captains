@@ -15,9 +15,17 @@ extends Node
 ## throughput grows ([method wanted_shuttles]: units delivered over the last
 ## [member throughput_window] s against what one shuttle moves per minute on
 ## this outpost's round trip, plus one while the backlog is over two loads),
-## up to BuildingDef.max_shuttles. A docked shuttle loads when the stock fills
-## a load ([member BuildingDef.shuttle_capacity]) or the oldest unit has
-## waited [member max_wait] s. Only one shuttle loads at a time.
+## up to BuildingDef.max_shuttles, plus one while the oldest unit has waited
+## [member stuck_wait] s with every shuttle away). A docked shuttle loads when
+## the stock fills a load ([member BuildingDef.shuttle_capacity]) or the
+## oldest unit has waited [member max_wait] s, so a small purchase leaves
+## within that time once a shuttle is in. Only one shuttle loads at a time.
+##
+## Transit: [method in_flight] is the ore aboard shuttles on their way,
+## [method pending] that plus the stock waiting here, [method pending_all]
+## the same over every depot (the top bar's "+40" hint) and
+## [method departure_eta] / [method transit_text] say when the waiting stock
+## leaves ("In transit: 40 iron (shuttle leaving in 0:12)").
 ##
 ## [member supply_interval] > 0 (BuildingDef.shuttle_supply_interval, the
 ## Mercenary Outpost): no cargo, the shuttle flies a cosmetic supply run that
@@ -32,6 +40,8 @@ const TYPES := 3
 
 ## Oldest waiting unit leaves after this many sim seconds, even short of a full load.
 @export var max_wait: float = 40.0
+## Stock waiting this long with no shuttle docked brings in one more shuttle, sim seconds.
+@export var stuck_wait: float = 90.0
 ## Sim seconds of deliveries the throughput is measured over.
 @export var throughput_window: float = 180.0
 ## Docking and loading overhead per round trip, sim seconds (shuttle sizing).
@@ -124,6 +134,8 @@ func waiting_total() -> int:
 
 ## True when a docked shuttle should load now.
 func load_ready() -> bool:
+	if building and building.is_disabled():
+		return false
 	if is_supply_only():
 		return _supply_timer <= 0.0
 	var n := waiting_total()
@@ -180,6 +192,8 @@ func wanted_shuttles() -> int:
 	var n := ceili(throughput_per_min() / maxf(shuttle_rate_per_min(), 0.01) - 0.05)
 	if waiting_total() >= capacity() * 2:
 		n = maxi(n, shuttles.size() + 1)
+	if waiting_total() > 0 and SimClock.time - _waiting_since >= stuck_wait and docked_shuttle() == null:
+		n = maxi(n, shuttles.size() + 1)
 	return clampi(n, 1, building.def.max_shuttles)
 
 
@@ -189,6 +203,91 @@ func loading_busy(asking: CargoShuttle) -> bool:
 		if s != asking and is_instance_valid(s) and s.is_loading():
 			return true
 	return false
+
+
+## A shuttle parked at the berth and free to load, or null.
+func docked_shuttle() -> CargoShuttle:
+	for s in shuttles:
+		if is_instance_valid(s) and not s.dead and s.phase == CargoShuttle.Phase.PARKED:
+			return s
+	return null
+
+
+## Ore aboard this depot's shuttles on their way to the station (loading
+## counts: it is no longer in the stock).
+func in_flight() -> PackedInt32Array:
+	var out := PackedInt32Array([0, 0, 0])
+	for s in shuttles:
+		if is_instance_valid(s) and not s.dead and s.is_carrying_cargo():
+			for i in TYPES:
+				out[i] += s.cargo[i]
+	return out
+
+
+## Ore of this depot not yet at the station: waiting here plus in flight.
+func pending() -> PackedInt32Array:
+	var out := in_flight()
+	if not is_supply_only():
+		for i in TYPES:
+			out[i] += stock[i]
+	return out
+
+
+## Pending ore over every depot (see [method pending]).
+static func pending_all(tree: SceneTree) -> PackedInt32Array:
+	var out := PackedInt32Array([0, 0, 0])
+	for n in tree.get_nodes_in_group(GROUP):
+		var d := n as CargoDepot
+		if d and is_instance_valid(d.building) and d.building.is_active():
+			var p := d.pending()
+			for i in TYPES:
+				out[i] += p[i]
+	return out
+
+
+## Sim seconds until the waiting stock leaves: 0 = loading now or about
+## to, -1 = nothing waiting or no shuttle docked (all away).
+func departure_eta() -> float:
+	if is_supply_only() or waiting_total() <= 0:
+		return -1.0
+	if docked_shuttle() == null:
+		return -1.0
+	if waiting_total() >= capacity():
+		return 0.0
+	return maxf(max_wait - (SimClock.time - _waiting_since), 0.0)
+
+
+## "40 iron, 3 crystal" for [param ore] ("" when empty).
+static func ore_text(ore: PackedInt32Array) -> String:
+	var parts: PackedStringArray = []
+	for i in mini(ore.size(), TYPES):
+		if ore[i] > 0:
+			parts.append("%s %s" % [UIUtil.amount(ore[i]), Economy.ORE_NAMES[i].to_lower()])
+	return ", ".join(parts)
+
+
+## Lines about the stock on its way: "In transit: 40 iron (shuttle leaving
+## in 0:12)" for the waiting stock and "On the way to the station: 31 iron"
+## for what is aboard. Empty when nothing is pending.
+func transit_lines() -> PackedStringArray:
+	var out: PackedStringArray = []
+	if is_supply_only():
+		return out
+	var waiting := ore_text(stock)
+	if not waiting.is_empty():
+		var eta := departure_eta()
+		var when := ""
+		if eta < 0.0:
+			when = "waiting for a shuttle to come back"
+		elif eta <= 0.5:
+			when = "shuttle loading now"
+		else:
+			when = "shuttle leaving in %s" % UIUtil.clock(ceilf(eta))
+		out.append("In transit: %s (%s)" % [waiting, when])
+	var aboard := ore_text(in_flight())
+	if not aboard.is_empty():
+		out.append("On the way to the station: %s" % aboard)
+	return out
 
 
 ## A free shuttle berth index (0 ..), parked beside the apron.

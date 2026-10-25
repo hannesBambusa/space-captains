@@ -60,40 +60,53 @@ func _build() -> void:
 	margin.set_anchors_preset(Control.PRESET_LEFT_WIDE)
 	margin.offset_right = 760.0
 	margin.add_theme_constant_override("margin_left", 110)
-	margin.add_theme_constant_override("margin_top", 150)
+	margin.add_theme_constant_override("margin_top", 110)
 	add_child(margin)
 
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 18)
 	margin.add_child(col)
 
+	var kicker := HBoxContainer.new()
+	kicker.add_theme_constant_override("separation", 10)
+	var bar := ColorRect.new()
+	bar.color = TITLE_COLOR
+	bar.custom_minimum_size = Vector2(36, 3)
+	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	kicker.add_child(bar)
+	var kl := UIUtil.label("SOLACE SECTOR  /  STATION ADMINISTRATION", &"HeaderLabel")
+	kl.add_theme_font_size_override("font_size", 15)
+	kicker.add_child(kl)
+	col.add_child(kicker)
 	var title := Label.new()
 	title.text = "SPACE CAPTAINS"
-	title.add_theme_color_override("font_color", TITLE_COLOR)
-	title.add_theme_font_size_override("font_size", 64)
-	title.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
-	title.add_theme_constant_override("outline_size", 8)
+	title.add_theme_font_override("font", HudStyle.font("Bold", true, false, 4))
+	title.add_theme_color_override("font_color", Color(0.96, 0.97, 1.0))
+	title.add_theme_font_size_override("font_size", 92)
+	title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
+	title.add_theme_constant_override("shadow_offset_y", 3)
+	title.add_theme_constant_override("shadow_outline_size", 10)
 	col.add_child(title)
 	var sub := UIUtil.label("Run the station. Hire the captains. Let them choose.", &"DimLabel")
-	sub.add_theme_font_size_override("font_size", 18)
+	sub.add_theme_font_size_override("font_size", 20)
+	sub.add_theme_color_override("font_color", Color(0.72, 0.77, 0.84))
 	col.add_child(sub)
 	col.add_child(UIUtil.spacer(0.0))
 
 	var panel := PanelContainer.new()
+	panel.theme_type_variation = &"MenuPanel"
 	panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	col.add_child(panel)
-	var pm := MarginContainer.new()
-	for side in ["left", "right", "top", "bottom"]:
-		pm.add_theme_constant_override("margin_" + side, 24)
-	panel.add_child(pm)
 	var stack := VBoxContainer.new()
-	pm.add_child(stack)
+	panel.add_child(stack)
 
 	_main = VBoxContainer.new()
-	_main.custom_minimum_size = Vector2(340, 0)
+	_main.custom_minimum_size = Vector2(380, 0)
 	_main.add_theme_constant_override("separation", 10)
 	stack.add_child(_main)
 	_continue = _button("Continue", _on_continue, &"AccentButton")
+	_continue.custom_minimum_size.y = 54.0
+	_continue.add_theme_font_size_override("font_size", 21)
 	_main.add_child(_continue)
 	_continue_hint = UIUtil.label("", &"DimLabel")
 	_continue_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -114,11 +127,10 @@ func _build() -> void:
 	stack.add_child(_loads)
 
 	_settings = VBoxContainer.new()
-	_settings.custom_minimum_size = Vector2(340, 0)
+	_settings.custom_minimum_size = Vector2(380, 0)
 	_settings.add_theme_constant_override("separation", 10)
 	stack.add_child(_settings)
 	var st := UIUtil.label("SETTINGS", &"TitleLabel")
-	st.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_settings.add_child(st)
 	_fullscreen = _button("", _toggle_fullscreen)
 	_settings.add_child(_fullscreen)
@@ -130,9 +142,11 @@ func _build() -> void:
 	UIUtil.no_focus(self)
 
 
-func _button(text: String, action: Callable, variation: StringName = &"") -> Button:
-	var b := UIUtil.button(text, variation)
-	b.custom_minimum_size = Vector2(0, 44)
+func _button(text: String, action: Callable, variation: StringName = &"MainMenuButton") -> Button:
+	var b := UIUtil.button(text.to_upper(), variation)
+	b.custom_minimum_size = Vector2(0, 46)
+	if variation == &"MainMenuButton":
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.pressed.connect(action)
 	b.mouse_entered.connect(func() -> void:
 		if not b.disabled:
@@ -220,4 +234,4 @@ func _toggle_fullscreen() -> void:
 
 
 func _update_fullscreen() -> void:
-	_fullscreen.text = "Fullscreen: on" if WindowMode.is_fullscreen() else "Fullscreen: off"
+	_fullscreen.text = "FULLSCREEN: ON" if WindowMode.is_fullscreen() else "FULLSCREEN: OFF"

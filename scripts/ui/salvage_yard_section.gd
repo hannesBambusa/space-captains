@@ -3,8 +3,10 @@ extends VBoxContainer
 ## Building panel section for the Salvage Yard's business ([SalvageYard]):
 ## scrap in stock and reprocessing, the reprocessed ore per type with the
 ## yard's ask against the Factory's bid (your margin) and Buy 10 / Buy all
-## buttons, the auto-buy toggle with its credit floor, the yard's funds and
-## debts, and the recent deliveries. Refreshes a few times a second.
+## buttons, the ore you bought on its way to the station ("In transit: 40
+## iron (shuttle leaving in 0:12)", "On the way to the station: ..."), the
+## auto-buy toggle with its credit floor, the yard's funds and debts, and the
+## recent deliveries. Refreshes a few times a second.
 
 const REFRESH := 0.25
 const BUY_STEP := 10
@@ -17,6 +19,8 @@ var _scrap: Label
 var _scrap_bar: PipMeter
 var _funds: Label
 var _auto: Button
+var _transit: Label
+var _transit_note: Label
 ## Per ore: {stock, price, buy10, buy_all}.
 var _rows: Array[Dictionary] = []
 var _deliveries: VBoxContainer
@@ -78,6 +82,12 @@ func _ready() -> void:
 		buy_all.pressed.connect(func() -> void: _buy(i, 1 << 30))
 		row.add_child(buy_all)
 		_rows.append({"stock": stock, "price": price, "buy10": buy10, "buy_all": buy_all})
+	_transit = _wrapped(&"ValueLabel")
+	_transit.add_theme_color_override("font_color", Color(0.55, 1.0, 0.65))
+	add_child(_transit)
+	_transit_note = _wrapped(&"DimLabel")
+	_transit_note.add_theme_font_size_override("font_size", 12)
+	add_child(_transit_note)
 	_auto = UIUtil.button("", &"AccentButton")
 	_auto.toggle_mode = true
 	_auto.toggled.connect(func(on: bool) -> void:
@@ -125,7 +135,7 @@ func _refresh() -> void:
 		var price := r["price"] as Label
 		price.text = "%.1f / %.1f  +%.1f" % [ask, bid, bid - ask]
 		price.mouse_filter = Control.MOUSE_FILTER_PASS
-		price.tooltip_text = "The yard asks %d%% of what the Factory pays now. Bought ore goes into your stock; the Factory market sells it on." % roundi(y.discount * 100.0)
+		price.tooltip_text = "The yard asks %d%% of what the Factory pays now. Bought ore flies to the station by cargo shuttle and goes into your stock when it lands; the Factory market can sell it on." % roundi(y.discount * 100.0)
 		var can := y.affordable(i) > 0
 		for key in ["buy10", "buy_all"]:
 			var b := r[key] as Button
@@ -133,12 +143,30 @@ func _refresh() -> void:
 			b.tooltip_text = "Nothing in stock" if y.stock[i] <= 0 else ("Not enough credits" if not can else
 					"%d %s for %s cr" % [mini(y.stock[i], BUY_STEP) if key == "buy10" else y.affordable(i), Economy.ORE_NAMES[i].to_lower(),
 					UIUtil.amount(y.price_of(i, mini(y.stock[i], BUY_STEP) if key == "buy10" else y.affordable(i)))])
+	_refresh_transit(y)
 	_auto.set_pressed_no_signal(y.auto_buy)
 	_auto.text = "Auto-buy on, keeps %s cr (click: off)" % UIUtil.amount(y.credit_floor) if y.auto_buy else "Auto-buy off (click: on)"
 	_auto.tooltip_text = "Buys all reprocessed ore as it comes in, as long as you keep at least %s credits." % UIUtil.amount(y.credit_floor)
 	if _shown_deliveries != y.delivery_count:
 		_shown_deliveries = y.delivery_count
 		_rebuild_deliveries()
+
+
+## Bought ore not at the station yet, and where it goes when it lands.
+func _refresh_transit(y: SalvageYard) -> void:
+	var depot := CargoDepot.of(y.building)
+	var lines: PackedStringArray = depot.transit_lines() if depot else PackedStringArray()
+	_transit.text = "\n".join(lines) if not lines.is_empty() else "Bought ore: nothing in transit"
+	_transit.add_theme_color_override("font_color", Color(0.55, 1.0, 0.65) if not lines.is_empty() else Color(0.6, 0.64, 0.7))
+	var note := "Bought ore waits here for a cargo shuttle (it leaves with a full load of %d or after %d s) and counts as yours when it lands at the station." % [
+			depot.capacity() if depot else 0, roundi(depot.max_wait) if depot else 0]
+	var f := Factory.find(get_tree()) if is_inside_tree() else null
+	if f and f.market.auto_sell:
+		var keep: PackedStringArray = []
+		for i in SalvageYard.TYPES:
+			keep.append("%d %s" % [f.market.reserve[i], Economy.ORE_NAMES[i].to_lower()])
+		note += " Factory auto-sell is on: it sells what you hold above your keep-at-least (%s)." % ", ".join(keep)
+	_transit_note.text = note
 
 
 func _rebuild_deliveries() -> void:

@@ -5,7 +5,9 @@ extends RefCounted
 ## (targets, takers, escort assignments, the mining contract of a linked
 ## escort) are saved by save id. Restoring builds every contract first and
 ## links them in a second pass ([method restore_all]), after the ships, dens
-## and scrap fields exist.
+## and scrap fields exist. A bounty keeps its escrow (the credits reserved
+## for it); a bounty from a save made before escrow reserves its reward from
+## the loaded credits (what they cover).
 
 const BASE_FIELDS: PackedStringArray = ["id", "reward", "status", "max_takers", "created_time", "credits_paid", "times_taken"]
 
@@ -47,7 +49,7 @@ static func save_contract(c: Contract, listed: bool) -> Dictionary:
 	elif c is BountyContract:
 		var bc := c as BountyContract
 		var solo := bc.solo_runner()
-		d["bounty"] = {"payouts": bc.payouts, "killer_name": bc.killer_name, "solo": SaveIds.of(solo) if solo else 0}
+		d["bounty"] = {"payouts": bc.payouts, "killer_name": bc.killer_name, "solo": SaveIds.of(solo) if solo else 0, "escrow": bc.escrow}
 	elif c is EscortContract:
 		var ec := c as EscortContract
 		var pairs := []
@@ -103,6 +105,13 @@ static func _make(s: Dictionary, refs: SaveRefs, belts: Dictionary) -> Contract:
 			var bd: Dictionary = s.get("bounty", {})
 			bc.payouts.assign(bd.get("payouts", []))
 			bc.killer_name = String(bd.get("killer_name", ""))
+			if bd.has("escrow"):
+				bc.escrow = int(bd["escrow"])
+			elif bool(s.get("listed", false)) and int(s.get("status", 0)) < Contract.Status.COMPLETED:
+				# Saved before escrow: reserve it now from the loaded credits.
+				var held := mini(int(s["reward"]), maxi(Economy.credits, 0))
+				if held > 0 and Economy.spend(held):
+					bc.escrow = held
 			c = bc
 		Contract.Type.ESCORT:
 			var ed: Dictionary = s.get("escort", {})

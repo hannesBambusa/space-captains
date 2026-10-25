@@ -1,7 +1,8 @@
 class_name CombatWorld
 extends Node3D
 ## Scene node that owns the shared combat systems: the tracer pool, the
-## effects pool, the scrap fields, the raid director and the threat director (base arrivals), and knows the
+## effects pool, the scrap fields, the raid director, the threat director (base arrivals), the defence zones
+## and the colony alarm, and knows the
 ## station shield bubbles the tracers test against. Also the hub for
 ## combat events the UI listens to (spawns, deaths, scrap fields).
 ## Lives in scenes/system.tscn; every lookup is null-safe so scenes without
@@ -25,6 +26,9 @@ var projectiles: ProjectilePool
 var fx: CombatFx
 var raids: RaidDirector
 var threats: ThreatDirector
+## Defence zones and the colony alarm (mercenaries answer attacks).
+var zones: DefenseZones
+var alarm: ColonyAlarm
 var scrap_root: Node3D
 ## Station shield bubbles that stop hostile tracers (ProjectilePool).
 var shields: Array[StationShield] = []
@@ -61,6 +65,12 @@ func _ready() -> void:
 	threats = ThreatDirector.new()
 	threats.name = "ThreatDirector"
 	add_child(threats)
+	zones = DefenseZones.new()
+	zones.name = "DefenseZones"
+	add_child(zones)
+	alarm = ColonyAlarm.new()
+	alarm.name = "ColonyAlarm"
+	add_child(alarm)
 
 
 func register_shield(s: StationShield) -> void:

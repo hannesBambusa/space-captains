@@ -280,6 +280,7 @@ func absorb(amount: float, attacker: Node3D, at: Vector3) -> void:
 	hits_taken += 1
 	damage_taken += amount
 	hp = maxf(hp - amount, 0.0)
+	ColonyAlarm.raise(get_tree(), self, "the station shield", attacker)
 	if is_instance_valid(attacker) and attacker is ScavengerShip:
 		var f := (attacker as ScavengerShip).faction_def
 		var who := "Raiders" if f == null or f.id == Factions.DEFAULT_ID else "%s raiders" % f.unit_name

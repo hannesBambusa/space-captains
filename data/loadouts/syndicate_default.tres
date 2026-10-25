@@ -9,7 +9,7 @@ id = &"siege_cannons"
 display_name = "Siege Cannons"
 slot = 0
 weapon_kind = 2
-weapon_damage = 18.0
+weapon_damage = 24.0
 weapon_range = 720.0
 fire_rate = 1.6
 
@@ -25,8 +25,8 @@ id = &"bastion_armor"
 display_name = "Bastion Armor"
 slot = 2
 hull_bonus = 80.0
-shield_bonus = 200.0
-shield_regen = 10.0
+shield_bonus = 460.0
+shield_regen = 12.0
 
 [sub_resource type="Resource" id="m3"]
 script = ExtResource("1_mod")
@@ -44,7 +44,7 @@ sensor_range = 2800.0
 [resource]
 script = ExtResource("0_load")
 role_name = "Syndicate"
-base_hull = 380.0
+base_hull = 540.0
 base_speed = 115.0
 base_acceleration = 22.0
 base_turn_rate_deg = 78.0

@@ -159,6 +159,9 @@ func _ready() -> void:
 	var ep := _step_button("+", "Raise the escort pay")
 	ep.pressed.connect(_step_escort.bind(1))
 	_escort_row.add_child(ep)
+	Economy.changed.connect(func(_c: int, _m: int) -> void:
+		if is_visible_in_tree():
+			_refresh_form())
 	_post = UIUtil.button("Post mining contract", &"AccentButton")
 	_post.pressed.connect(_on_post)
 	v.add_child(_post)
@@ -288,6 +291,11 @@ func _refresh_form() -> void:
 	_post.text = "Post escorted mining contract" if escorted else "Post mining contract"
 	if escorted:
 		_post_hint.text += " Escorts: %d cr each per trip." % escort_pay
+	var why := ContractBoard.post_problem(reward)
+	_post.disabled = not why.is_empty()
+	_post.tooltip_text = why
+	if not why.is_empty():
+		_post_hint.text = why + "."
 
 
 func _step_reward(dir: int) -> void:

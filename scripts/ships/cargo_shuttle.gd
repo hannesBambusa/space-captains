@@ -16,8 +16,11 @@ extends Ship
 ## "cargo_containers" mesh shows only while carrying something (smaller for
 ## supplies).
 ##
-## Not targetable for now (raiders ignore it, not in Combat.GROUP), but it
-## has a hull ([member Ship.durability]) so it can be made a target later.
+## Raiders can shoot it while it flies in open space (to the station and
+## back); docked, loading or on the pads it is safe. Hits raise the colony
+## alarm (ColonyAlarm); destroyed, the ore aboard is lost and the depot
+## sends a new shuttle. While the station is disabled (StructureHull) its
+## pads are closed: shuttles wait at the approach point.
 ## Model: assets/models/ships/cargo_shuttle.glb; while missing, the miner
 ## glb scaled [constant FALLBACK_SCALE] with a tint. Sim time only
 ## ([method sim_step], also under SimStepper).
@@ -95,8 +98,6 @@ func setup_shuttle(owner_depot: CargoDepot, berth: int, shuttle_number: int) -> 
 
 
 func _on_ready_ship() -> void:
-	# Not a combatant for now (see the class notes).
-	remove_from_group(Combat.GROUP)
 	set_meta(&"focus_radius", 8.0)
 	set_meta(&"focus_distance", 90.0)
 	_cargo_node = _model.find_child(CARGO_NODE, true, false) as Node3D
@@ -132,9 +133,15 @@ func _leaves_scrap() -> bool:
 	return false
 
 
-## Not a target for raiders yet.
+## Only in open space (see the class notes).
 func is_targetable() -> bool:
-	return false
+	return not dead and is_inside_tree() and mover.avoid_enabled and phase in [Phase.OUTBOUND, Phase.WAITING_PAD, Phase.RETURNING]
+
+
+func take_hit(amount: float, attacker: Node3D, at: Vector3) -> void:
+	super.take_hit(amount, attacker, at)
+	if not dead:
+		ColonyAlarm.raise(get_tree(), self, "a cargo shuttle of %s" % home.display_name if is_instance_valid(home) else "a cargo shuttle", attacker)
 
 
 ## Warp hops follow the usual rules (never near the station or structures).
@@ -195,6 +202,11 @@ func cargo_total() -> int:
 ## True while carrying ore or supplies.
 func is_loaded() -> bool:
 	return supplies or cargo_total() > 0
+
+
+## Ore aboard on the way to the station (loading through unloading).
+func is_carrying_cargo() -> bool:
+	return cargo_total() > 0 and phase in [Phase.LOADING, Phase.UNDOCKING, Phase.OUTBOUND, Phase.WAITING_PAD, Phase.LANDING, Phase.UNLOADING]
 
 
 ## Loading at the outpost (or about to leave with the load).
@@ -282,6 +294,12 @@ func _fly_to_pad() -> void:
 	set_world_goal(goal, vel, Vector3.ZERO, 20.0, CRUISE_SPEED)
 	if not _handoff_ready(goal):
 		return
+	var mgr := get_tree().get_first_node_in_group(BuildingManager.GROUP) as BuildingManager
+	if mgr and mgr.station_hull and mgr.station_hull.disabled:
+		if phase != Phase.WAITING_PAD:
+			phase = Phase.WAITING_PAD
+			status_changed.emit(self)
+		return
 	if not _claim_pad(pad):
 		var other := 1 - pad
 		if _claim_pad(other):
@@ -326,6 +344,9 @@ func _deliver() -> void:
 		Economy.receive_cargo(cargo, get_display_name())
 		total_delivered += n
 		show_toast("+%s" % load_text(), Color(0.55, 1.0, 0.65))
+		if is_instance_valid(home) and home.get_service() is SalvageYard:
+			# Ore the player bought: say that it arrived (mining loads land too often to log).
+			EventLog.post("Ore bought from %s landed at the station: %s" % [home.display_name, load_text()], EventLog.Kind.INFO, self)
 	if depot and is_instance_valid(depot):
 		depot.note_shipped(cargo)
 	cargo = PackedInt32Array([0, 0, 0])
@@ -343,7 +364,12 @@ func _retire() -> void:
 	queue_free()
 
 
-func _on_destroyed(_killer: Node3D) -> void:
+func _on_destroyed(killer: Node3D) -> void:
+	var lost := cargo_total()
+	var by := ""
+	if is_instance_valid(killer) and killer.has_method(&"get_display_name"):
+		by = " by %s" % String(killer.call(&"get_display_name"))
+	EventLog.post("%s destroyed%s%s" % [get_display_name(), by, ", %s lost" % load_text() if lost > 0 else ""], EventLog.Kind.LOSS, null, global_position)
 	_release_pad()
 	if depot and is_instance_valid(depot):
 		depot.remove_shuttle(self)

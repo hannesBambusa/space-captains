@@ -2,7 +2,8 @@ class_name Minimap
 extends PanelContainer
 ## Top-right minimap of the system plane, turned with the camera (view
 ## forward is up): the star, planet orbits and planets, belts as rings, dens,
-## the home station and its shield bubble ring (while it is up), the camera's
+## the home station and its shield bubble ring (while it is up), the defence
+## zones (cyan, gold with a kill bounty, red with raiders inside), the camera's
 ## view on the plane, and a dot for every ship in the [ShipMarkers] colours.
 ## Click a ship dot to select and follow it, anywhere else to fly the camera
 ## there. The wheel (or the 1x button)
@@ -17,7 +18,7 @@ const BELT_COLOR := Color(0.75, 0.62, 0.48, 0.28)
 const HOME_COLOR := Color(1.0, 0.7, 0.35)
 const VIEW_COLOR := Color(0.85, 0.92, 1.0, 0.55)
 
-@export var map_px: float = 232.0
+@export var map_px: float = 300.0
 @export var dot_pick_px: float = 7.0
 
 var hud: HUD
@@ -41,7 +42,8 @@ func _ready() -> void:
 	add_child(v)
 	var h := HBoxContainer.new()
 	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	h.add_child(UIUtil.label("MAP", &"HeaderLabel"))
+	h.add_child(HudStyle.icon_rect(&"tab_system", 14.0, HudStyle.ACCENT))
+	h.add_child(UIUtil.label("SECTOR MAP", &"HeaderLabel"))
 	h.add_child(UIUtil.spacer())
 	_mode_button = UIUtil.button("Markers: All", &"IconButton")
 	_mode_button.custom_minimum_size = Vector2(0.0, 22.0)
@@ -55,7 +57,8 @@ func _ready() -> void:
 	_zoom_button.tooltip_text = "Zoom the map around the view (mouse wheel over the map)"
 	_zoom_button.pressed.connect(func() -> void: _set_zoom((_zoom + 1) % ZOOM_LEVELS.size()))
 	h.add_child(_zoom_button)
-	_toggle_button = UIUtil.button("-", &"IconButton")
+	_toggle_button = UIUtil.button("", &"IconButton")
+	_toggle_button.icon = HudStyle.icon(&"collapse")
 	_toggle_button.custom_minimum_size = Vector2(26.0, 22.0)
 	_toggle_button.tooltip_text = "Collapse the map"
 	_toggle_button.pressed.connect(toggle)
@@ -64,6 +67,7 @@ func _ready() -> void:
 	_canvas = Control.new()
 	_canvas.name = "Map"
 	_canvas.custom_minimum_size = Vector2(map_px, map_px)
+	_canvas.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_canvas.clip_contents = true
 	_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
 	_canvas.mouse_default_cursor_shape = Control.CURSOR_CROSS
@@ -82,13 +86,13 @@ func setup(owner_hud: HUD, ship_markers: ShipMarkers) -> void:
 func toggle() -> void:
 	is_open = not is_open
 	_canvas.visible = is_open
-	_toggle_button.text = "-" if is_open else "+"
+	_toggle_button.icon = HudStyle.icon(&"collapse" if is_open else &"expand")
 	_toggle_button.tooltip_text = ("Collapse" if is_open else "Expand") + " the map"
 	reset_size()
 
 
 func _sync_mode() -> void:
-	_mode_button.text = "Markers: %s" % markers.get_mode_name()
+	_mode_button.text = "MARKERS: %s" % markers.get_mode_name().to_upper()
 
 
 func _set_zoom(z: int) -> void:
@@ -206,7 +210,19 @@ func _fly_to(p: Vector3) -> void:
 func _draw_map() -> void:
 	var c := _canvas
 	var size := Vector2(map_px, map_px)
-	c.draw_rect(Rect2(Vector2.ZERO, size), Color(0.02, 0.035, 0.06, 0.72), true)
+	c.draw_rect(Rect2(Vector2.ZERO, size), Color(0.02, 0.03, 0.045, 0.8), true)
+	# Survey grid and corner brackets.
+	for i in range(1, 4):
+		var g := size.x * float(i) / 4.0
+		c.draw_line(Vector2(g, 0), Vector2(g, size.y), Color(0.6, 0.67, 0.76, 0.06), 1.0)
+		c.draw_line(Vector2(0, g), Vector2(size.x, g), Color(0.6, 0.67, 0.76, 0.06), 1.0)
+	var bk := Color(HudStyle.ACCENT, 0.6)
+	for corner: Vector2 in [Vector2(0, 0), Vector2(1, 0), Vector2(0, 1), Vector2(1, 1)]:
+		var p := corner * size
+		var sx := 1.0 if corner.x == 0.0 else -1.0
+		var sy := 1.0 if corner.y == 0.0 else -1.0
+		c.draw_line(p, p + Vector2(10.0 * sx, 0), bk, 1.0)
+		c.draw_line(p, p + Vector2(0, 10.0 * sy), bk, 1.0)
 	if hud == null or hud.solar_system == null:
 		return
 	var sys := hud.solar_system
@@ -239,6 +255,14 @@ func _draw_map() -> void:
 		var bc := _to_map(bubble.global_position)
 		var br := maxf(bubble.radius / sc, 6.0)
 		c.draw_arc(bc, br, 0.0, TAU, 48, Color(DefenseSection.SHIELD_COLOR, lerpf(0.35, 0.9, bubble.charge())), 1.5, true)
+	var zones := DefenseZones.of(get_tree())
+	if zones:
+		for z in zones.zones:
+			if is_instance_valid(z):
+				var zc := DefenseZone.BOUNTY_COLOR if z.kill_bounty > 0 else DefenseZone.PLAIN_COLOR
+				if z.raiders_inside > 0:
+					zc = Color(1.0, 0.35, 0.25)
+				c.draw_arc(_to_map(z.global_position), maxf(z.radius / sc, 3.0), 0.0, TAU, 48, Color(zc, 0.7), 1.2, true)
 	_draw_view(c)
 	var selected := hud.selection.selected if hud.selection else null
 	var hostiles: Array[Node3D] = []
