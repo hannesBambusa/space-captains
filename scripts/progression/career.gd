@@ -60,8 +60,8 @@ static func appeal(captain: Captain, target: String) -> float:
 
 
 ## Active outpost of [param role] with a free berth, or null.
-static func find_berth(tree: SceneTree, role: String) -> Building:
-	var mgr := BuildingManager.of(tree)
+static func find_berth(ctx: Node, role: String) -> Building:
+	var mgr := BuildingManager.of(ctx)
 	if mgr == null:
 		return null
 	for b in mgr.buildings:
@@ -77,7 +77,7 @@ static func block_reason(ship: Ship, target: String, offered: bool) -> String:
 		return "Cannot fly as a %s" % target.to_lower()
 	if c.rank < MIN_RANK:
 		return "Needs %s rank first" % Reputation.rank_name(MIN_RANK)
-	var b := find_berth(ship.get_tree(), target)
+	var b := find_berth(ship, target)
 	if b == null:
 		return "No free berth at a %s outpost" % target.to_lower()
 	if c.wallet < b.def.ship_cost:
@@ -151,7 +151,7 @@ static func offer(ship: Ship, target: String) -> String:
 ## [param why] goes to the decision log.
 static func switch(ship: Ship, target: String, why: String = "") -> Ship:
 	var c := ship.captain
-	var b := find_berth(ship.get_tree(), target)
+	var b := find_berth(ship, target)
 	if c == null or b == null or c.wallet < b.def.ship_cost:
 		return null
 	var old_role := c.role

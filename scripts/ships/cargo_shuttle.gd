@@ -141,7 +141,7 @@ func is_targetable() -> bool:
 func take_hit(amount: float, attacker: Node3D, at: Vector3) -> void:
 	super.take_hit(amount, attacker, at)
 	if not dead:
-		ColonyAlarm.raise(get_tree(), self, "a cargo shuttle of %s" % home.display_name if is_instance_valid(home) else "a cargo shuttle", attacker)
+		ColonyAlarm.raise(self, self, "a cargo shuttle of %s" % home.display_name if is_instance_valid(home) else "a cargo shuttle", attacker)
 
 
 ## Warp hops follow the usual rules (never near the station or structures).
@@ -299,7 +299,7 @@ func _fly_to_pad() -> void:
 	set_world_goal(goal, vel, Vector3.ZERO, 20.0, CRUISE_SPEED)
 	if not _handoff_ready(goal):
 		return
-	var mgr := BuildingManager.of(get_tree())
+	var mgr := BuildingManager.of(self)
 	if mgr and mgr.station_hull and mgr.station_hull.disabled:
 		if phase != Phase.WAITING_PAD:
 			phase = Phase.WAITING_PAD
@@ -351,7 +351,7 @@ func _deliver() -> void:
 		show_toast("+%s" % load_text(), TOAST_DELIVERY)
 		if is_instance_valid(home) and home.get_service() is SalvageYard:
 			# Bought ore is held back from Factory auto-sell.
-			var f := Factory.find(get_tree())
+			var f := Factory.find(self)
 			if f:
 				f.market.hold(cargo)
 			# Ore the player bought: say that it arrived (mining loads land too often to log).
@@ -391,17 +391,17 @@ func _exit_tree() -> void:
 
 ## The station's non-rotating structures frame (pads and outposts live in it).
 func _frame() -> Node3D:
-	var mgr := BuildingManager.of(get_tree())
+	var mgr := BuildingManager.of(self)
 	return mgr.frame if mgr else null
 
 
 func _station() -> HomeStation:
-	var sys := SolarSystem.of(get_tree())
+	var sys := SolarSystem.of(self)
 	return sys.home_station.get_node_or_null(^"Station") as HomeStation if sys and sys.home_station else null
 
 
 func _station_world() -> Vector3:
-	var sys := SolarSystem.of(get_tree())
+	var sys := SolarSystem.of(self)
 	return sys.home_station.global_position if sys and sys.home_station else Vector3.INF
 
 

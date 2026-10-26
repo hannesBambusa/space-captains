@@ -62,8 +62,10 @@ var _star_color := Color.WHITE
 var _view_args: Array = []
 
 
-static func of(tree: SceneTree) -> SolarSystem:
-	return tree.get_first_node_in_group(GROUP) as SolarSystem if tree else null
+## The system [param n] is in (see [method SystemWorld.of]).
+static func of(n: Node) -> SolarSystem:
+	var w := SystemWorld.of(n)
+	return w.sys if w else null
 
 
 func _ready() -> void:
@@ -432,7 +434,7 @@ func _apply_sky_seed(seed_value: float) -> void:
 # --- Camera and zoom fades ----------------------------------------------------
 
 func _configure_camera() -> void:
-	var cam := RTSCamera.of(get_tree())
+	var cam := RTSCamera.of(self)
 	if cam == null:
 		return
 	var extent := get_extent()

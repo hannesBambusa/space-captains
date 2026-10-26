@@ -52,7 +52,7 @@ func is_armed() -> bool:
 
 
 func arm() -> void:
-	var zones := DefenseZones.of(get_tree())
+	var zones := DefenseZones.of(self)
 	if zones == null or zones.count() >= DefenseZones.MAX_ZONES:
 		return
 	var pc := get_tree().get_first_node_in_group(PlacementController.GROUP) as PlacementController
@@ -60,14 +60,14 @@ func arm() -> void:
 		pc.cancel()
 	cancel()
 	armed = true
-	_camera = RTSCamera.of(get_tree())
+	_camera = RTSCamera.of(self)
 	_ghost = DefenseZone.new()
 	_ghost.name = "ZoneGhost"
 	_ghost.zone_name = "New zone"
 	_ghost.radius = radius
-	SpaceNav.space_root(get_tree()).add_child(_ghost)
+	SpaceNav.space_root(self).add_child(_ghost)
 	_ghost.visible = false
-	var sys := SolarSystem.of(get_tree())
+	var sys := SolarSystem.of(self)
 	if _camera and sys and sys.home_station:
 		_camera.frame_area(sys.home_station, Vector3.ZERO, VIEW_RADIUS, VIEW_PITCH, true, false, Vector2(0.6, 2.2))
 	valid = false
@@ -95,7 +95,7 @@ func confirm() -> DefenseZone:
 	_update()
 	if not armed or not valid:
 		return null
-	var zones := DefenseZones.of(get_tree())
+	var zones := DefenseZones.of(self)
 	var z := zones.place(world_pos, radius) if zones else null
 	if z:
 		placed.emit(z)
@@ -151,7 +151,7 @@ func _process(_delta: float) -> void:
 func _update() -> void:
 	if not armed or _camera == null:
 		return
-	var mgr := BuildingManager.of(get_tree())
+	var mgr := BuildingManager.of(self)
 	var height := mgr.frame.global_position.y if mgr and mgr.frame else 0.0
 	var screen := cursor_override if cursor_override.x >= 0.0 else _cursor
 	var hit := _camera.screen_to_ground(screen, height)
@@ -163,7 +163,7 @@ func _update() -> void:
 		_set_valid(false, "Point at open space")
 		return
 	world_pos = hit
-	var zones := DefenseZones.of(get_tree())
+	var zones := DefenseZones.of(self)
 	var why := zones.place_problem(hit) if zones else "No defence zones here"
 	if _ghost:
 		_ghost.visible = true

@@ -77,9 +77,9 @@ static func _register_free(f: ScrapField, c: SalvageContract) -> void:
 
 
 ## Free salvage contracts open now, one per scrap field with scrap left.
-static func free_contracts(tree: SceneTree) -> Array[Contract]:
+static func free_contracts(ctx: Node) -> Array[Contract]:
 	var out: Array[Contract] = []
-	for f in ScrapField.all(tree):
+	for f in ScrapField.all(ctx):
 		if f.amount <= 0:
 			continue
 		var c := free_for(f)
@@ -163,12 +163,12 @@ func get_progress_text() -> String:
 func get_danger() -> int:
 	if not is_instance_valid(field) or not field.is_inside_tree():
 		return 1
-	return danger_at(field.get_tree(), field.global_position)
+	return danger_at(field, field.global_position)
 
 
 ## Danger 1..5 at [param pos]: living dens nearby, else the cluster it lies in.
-static func danger_at(tree: SceneTree, pos: Vector3) -> int:
-	var sys := SolarSystem.of(tree)
+static func danger_at(ctx: Node, pos: Vector3) -> int:
+	var sys := SolarSystem.of(ctx)
 	if sys == null:
 		return 1
 	var d := 1

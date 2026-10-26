@@ -16,13 +16,14 @@ var _ball: MeshInstance3D
 var _light: OmniLight3D
 
 
-## Adds a flash at [param pos] (world) under the ships' space root.
-static func flash(tree: SceneTree, pos: Vector3, size: float = 30.0) -> void:
-	if tree == null or DisplayServer.get_name() == "headless":
+## Adds a flash at [param pos] (world) under the ships' space root of
+## [param ctx]'s system.
+static func flash(ctx: Node, pos: Vector3, size: float = 30.0) -> void:
+	if ctx == null or not ctx.is_inside_tree() or DisplayServer.get_name() == "headless":
 		return
 	var fx := WarpFx.new()
 	fx._size = size
-	SpaceNav.space_root(tree).add_child(fx)
+	SpaceNav.space_root(ctx).add_child(fx)
 	fx.global_position = pos
 
 

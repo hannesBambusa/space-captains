@@ -37,11 +37,12 @@ const SHIP_FIELDS: PackedStringArray = ["trip_lowest_hull", "trip_was_hit", "rep
 
 # --- Save ---------------------------------------------------------------------
 
-## Every live ship, ready to save. Contracts the ships' trips are on are
-## added to [param contracts] (they may be off the board already).
-static func save_all(tree: SceneTree, contracts: Array[Contract]) -> Array:
+## Every live ship in [param ctx]'s system, ready to save. Contracts the
+## ships' trips are on are added to [param contracts] (they may be off the
+## board already).
+static func save_all(ctx: Node, contracts: Array[Contract]) -> Array:
 	var out := []
-	for n in tree.get_nodes_in_group(Ship.GROUP):
+	for n in SystemWorld.nodes_in(ctx, Ship.GROUP):
 		var s := n as Ship
 		if s == null or s.dead or s.is_queued_for_deletion() or not s.is_inside_tree():
 			continue
@@ -143,19 +144,19 @@ static func _save_scavenger(s: ScavengerShip, d: Dictionary) -> void:
 
 # --- Restore, step 1 ----------------------------------------------------------
 
-## Puts the ship of [param d] back and registers it. Null when it cannot be
-## (its home or captain is gone).
-static func create(tree: SceneTree, d: Dictionary, refs: SaveRefs) -> Ship:
+## Puts the ship of [param d] back into [param ctx]'s system and registers
+## it. Null when it cannot be (its home or captain is gone).
+static func create(ctx: Node, d: Dictionary, refs: SaveRefs) -> Ship:
 	var s: Ship = null
 	match String(d.get("kind", "")):
 		KIND_HIRED:
 			s = _create_hired(d, refs)
 		KIND_POD:
-			s = _create_pod(tree, d, refs)
+			s = _create_pod(ctx, d, refs)
 		KIND_SHUTTLE:
-			s = _create_shuttle(tree, d, refs)
+			s = _create_shuttle(ctx, d, refs)
 		KIND_SCAVENGER:
-			s = _create_scavenger(tree, d, refs)
+			s = _create_scavenger(ctx, d, refs)
 	if s == null:
 		return null
 	refs.add(int(d["id"]), s)
@@ -213,18 +214,18 @@ static func _loadout(role_name: String, ids: Array) -> ShipLoadout:
 	return l
 
 
-static func _create_pod(tree: SceneTree, d: Dictionary, refs: SaveRefs) -> Ship:
+static func _create_pod(ctx: Node, d: Dictionary, refs: SaveRefs) -> Ship:
 	var cap := refs.captain(int(d["captain"]))
 	if cap == null:
 		return null
 	var pod := EscapePod.new()
 	pod.setup_pod(cap, refs.building(int(d.get("home", 0))))
-	SpaceNav.space_root(tree).add_child(pod)
+	SpaceNav.space_root(ctx).add_child(pod)
 	_place_in_space(pod, d)
 	return pod
 
 
-static func _create_shuttle(tree: SceneTree, d: Dictionary, refs: SaveRefs) -> Ship:
+static func _create_shuttle(ctx: Node, d: Dictionary, refs: SaveRefs) -> Ship:
 	var home := refs.building(int(d["home"]))
 	var depot := CargoDepot.of(home)
 	if depot == null:
@@ -240,7 +241,7 @@ static func _create_shuttle(tree: SceneTree, d: Dictionary, refs: SaveRefs) -> S
 		s.rotation.y = ShipMover.yaw_for(-berth.basis.z)
 		home.add_child(s)
 	else:
-		SpaceNav.space_root(tree).add_child(s)
+		SpaceNav.space_root(ctx).add_child(s)
 		s.mover.avoid_enabled = true
 		_place_in_space(s, d)
 	depot.shuttles.append(s)
@@ -269,14 +270,14 @@ static func _create_shuttle(tree: SceneTree, d: Dictionary, refs: SaveRefs) -> S
 	return s
 
 
-static func _create_scavenger(tree: SceneTree, d: Dictionary, refs: SaveRefs) -> Ship:
+static func _create_scavenger(ctx: Node, d: Dictionary, refs: SaveRefs) -> Ship:
 	var den := refs.find(int(d.get("den", 0))) as ScavengerDen
 	var sd: Dictionary = d.get("scavenger", {})
 	var fdef := Factions.get_def(StringName(sd.get("faction", Factions.DEFAULT_ID)))
 	var s: ScavengerShip
 	var cd: Dictionary = d.get("constructor", {})
 	if not cd.is_empty():
-		var body := PlanetRaidContract.find_planet(tree, String(cd.get("planet", "")))
+		var body := PlanetRaidContract.find_planet(ctx, String(cd.get("planet", "")))
 		if body == null:
 			return null
 		var c := ClaimConstructor.new()
@@ -287,7 +288,7 @@ static func _create_scavenger(tree: SceneTree, d: Dictionary, refs: SaveRefs) ->
 	else:
 		s = ScavengerShip.new()
 		s.setup_scavenger(den, String(sd.get("callsign", "?")), bool(sd.get("raider", false)), fdef)
-	SpaceNav.space_root(tree).add_child(s)
+	SpaceNav.space_root(ctx).add_child(s)
 	s.mover.avoid_enabled = true
 	_place_in_space(s, d)
 	s.loot = float(sd.get("loot", 0.0))
@@ -303,7 +304,7 @@ static func _create_scavenger(tree: SceneTree, d: Dictionary, refs: SaveRefs) ->
 					s.ai.state = ScavengerBrain.State.RAIDING if s.is_raider else ScavengerBrain.State.ROAMING
 			ScavengerBrain.State.HUNTING, ScavengerBrain.State.ATTACKING:
 				s.ai.state = ScavengerBrain.State.RAIDING if s.is_raider else ScavengerBrain.State.ROAMING
-	var world := CombatWorld.of(tree)
+	var world := CombatWorld.of(ctx)
 	if world:
 		world.notify_spawned(s)
 	return s
@@ -325,12 +326,12 @@ static func finish(s: Ship, d: Dictionary, refs: SaveRefs) -> void:
 			(s as ScavengerShip).ai.set_lead(refs.ship(lead_id) as ScavengerShip)
 		var gb := String(sd.get("guard_body", ""))
 		var gid := int(sd.get("guard", 0))
-		var gnode: Node3D = PlanetRaidContract.find_planet(s.get_tree(), gb) if not gb.is_empty() else (refs.node3d(gid) if gid != 0 else null)
+		var gnode: Node3D = PlanetRaidContract.find_planet(s, gb) if not gb.is_empty() else (refs.node3d(gid) if gid != 0 else null)
 		if gnode:
 			(s as ScavengerShip).ai.set_guard(gnode, float(sd.get("guard_radius", 3000.0)), float(sd.get("guard_inner", 0.0)))
 		var obj_id := int(sd.get("objective", 0))
 		if obj_id == -1:
-			var mgr := BuildingManager.of(s.get_tree())
+			var mgr := BuildingManager.of(s)
 			if mgr and mgr.station_hull:
 				(s as ScavengerShip).ai.set_raid_objective(mgr.station_hull)
 		elif obj_id != 0:

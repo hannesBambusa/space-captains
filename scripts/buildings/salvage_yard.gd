@@ -72,8 +72,8 @@ var _ore_acc := PackedFloat32Array([0.0, 0.0, 0.0])
 var _buy_timer := 0.0
 
 
-static func find(tree: SceneTree) -> SalvageYard:
-	return Building.first_active_service(tree, GROUP) as SalvageYard
+static func find(ctx: Node) -> SalvageYard:
+	return Building.first_active_service(ctx, GROUP) as SalvageYard
 
 
 ## The yard [param ship] belongs to, or null.
@@ -193,7 +193,7 @@ func _pay_debts() -> void:
 
 ## What the Factory pays per unit of [param ore] now.
 func factory_bid(ore: int) -> float:
-	var f := Factory.find(get_tree()) if is_inside_tree() else null
+	var f := Factory.find(self) if is_inside_tree() else null
 	return f.market.willing_price(ore) if f else float(FALLBACK_BID[ore])
 
 

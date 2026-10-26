@@ -4,8 +4,12 @@ extends Resource
 ## Angles: 0 deg = +X, 90 deg = +Z. All distances in metres, times in sim seconds.
 
 @export var system_name: String = "System"
+## 1..5. Generated systems: about the gate depth from home (SystemGenerator).
+@export_range(1, 5, 1) var danger: int = 1
 
 @export_group("Star")
+## Spectral class, for labels ("G", "K", "M", "F", "A", "B").
+@export var star_class: String = "G"
 @export var star_radius: float = 1500.0
 ## Surface temperature in kelvin; drives the star and light colour.
 @export var star_temperature: float = 5600.0
@@ -21,6 +25,8 @@ extends Resource
 @export var gates: Array[GateDef] = []
 ## Hostile bases at fixed spots; each adds its danger to clusters nearby.
 @export var dens: Array[DenDef] = []
+## Derelict hulks (data only for now; their scene comes later).
+@export var derelicts: Array[DerelictDef] = []
 
 @export_group("Asteroid clusters")
 ## Clusters kept in the system: below the minimum a new one is surveyed.

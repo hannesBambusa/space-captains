@@ -224,7 +224,7 @@ func _refresh_form() -> void:
 	var mats := rules.materials_for(belt.ore_type)
 	var ore := Economy.ore_of_belt(belt.ore_type)
 	var worth := ""
-	var f := Factory.find(get_tree())
+	var f := Factory.find(self)
 	_profit.visible = f != null
 	if f:
 		var load_value := roundi(float(mats) * f.market.willing_price(ore))

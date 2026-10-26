@@ -23,7 +23,6 @@ const BELT_RING_COLOR := Color(1.0, 0.62, 0.26, 0.55)
 const HOSTILE_RING_COLOR := Color(1.0, 0.28, 0.22, 0.95)
 const SCRAP_RING_COLOR := Color(0.9, 0.82, 0.62, 0.8)
 
-@export var manager_path: NodePath = ^"../Buildings"
 ## Minimum pick radius in pixels, so tiny far-away buildings stay clickable.
 @export var min_pick_px: float = 14.0
 ## Selection ring radius as a multiple of the footprint.
@@ -46,7 +45,8 @@ var _press_pos := Vector2.INF
 
 func _ready() -> void:
 	add_to_group(GROUP)
-	manager = get_node_or_null(manager_path) as BuildingManager
+	# The viewed system's (this controller sits outside the systems, game.tscn).
+	manager = BuildingManager.of(self)
 
 
 func _process(_delta: float) -> void:
@@ -118,7 +118,7 @@ func deselect() -> void:
 ## Building whose footprint covers [param screen_pos], or null. Station
 ## addons are picked around their body (Building.pick_center), not the bay.
 func pick_building(screen_pos: Vector2) -> Building:
-	var cam := get_viewport().get_camera_3d()
+	var cam := SystemWorld.camera_3d(self)
 	if cam == null or manager == null:
 		return null
 	var px_per_rad := _px_per_rad(cam)
@@ -141,13 +141,13 @@ func pick_building(screen_pos: Vector2) -> Building:
 
 ## Ship under [param screen_pos], or null.
 func pick_ship(screen_pos: Vector2) -> Ship:
-	var cam := get_viewport().get_camera_3d()
+	var cam := SystemWorld.camera_3d(self)
 	if cam == null:
 		return null
 	var px_per_rad := _px_per_rad(cam)
 	var best: Ship = null
 	var best_score := INF
-	for n in get_tree().get_nodes_in_group(Ship.GROUP):
+	for n in SystemWorld.nodes_in(self, Ship.GROUP):
 		var s := n as Ship
 		if s == null or not s.is_visible_in_tree() or cam.is_position_behind(s.global_position):
 			continue
@@ -162,13 +162,13 @@ func pick_ship(screen_pos: Vector2) -> Ship:
 
 ## Den or scrap field under [param screen_pos], or null.
 func pick_group(screen_pos: Vector2, group: String) -> Node3D:
-	var cam := get_viewport().get_camera_3d()
+	var cam := SystemWorld.camera_3d(self)
 	if cam == null:
 		return null
 	var px_per_rad := _px_per_rad(cam)
 	var best: Node3D = null
 	var best_score := INF
-	for n in get_tree().get_nodes_in_group(group):
+	for n in SystemWorld.nodes_in(self, group):
 		var t := n as Node3D
 		if t == null or t.is_queued_for_deletion() or cam.is_position_behind(t.global_position):
 			continue
@@ -184,8 +184,8 @@ func pick_group(screen_pos: Vector2, group: String) -> Node3D:
 ## Cluster whose footprint (plus a few pixels) contains the point under
 ## [param screen_pos] (on the plane at the cluster's height), or null.
 func pick_belt(screen_pos: Vector2) -> AsteroidCluster:
-	var cam := RTSCamera.of(get_tree())
-	var sys := SolarSystem.of(get_tree())
+	var cam := RTSCamera.of(self)
+	var sys := SolarSystem.of(self)
 	if cam == null or sys == null:
 		return null
 	var c3d := cam.get_camera()
@@ -209,7 +209,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mb := event as InputEventMouseButton
 		if mb.button_index != MOUSE_BUTTON_LEFT:
 			return
-		var cam := RTSCamera.of(get_tree())
+		var cam := RTSCamera.of(self)
 		# Select on release, so a left drag can orbit the camera instead. A
 		# single click only selects; a double click also centres the camera.
 		if mb.pressed:
@@ -269,8 +269,8 @@ func _pick_selectable(screen_pos: Vector2) -> Node3D:
 
 ## Defence zone whose centre label or rim is under [param screen_pos], or null.
 func pick_zone(screen_pos: Vector2) -> DefenseZone:
-	var zones := DefenseZones.of(get_tree())
-	var cam := RTSCamera.of(get_tree())
+	var zones := DefenseZones.of(self)
+	var cam := RTSCamera.of(self)
 	if zones == null or cam == null or zones.count() == 0:
 		return null
 	var c3d := cam.get_camera()

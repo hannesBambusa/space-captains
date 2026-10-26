@@ -172,7 +172,7 @@ func sim_step(dt: float) -> void:
 func play_arrival() -> void:
 	arrived_at = SimClock.time
 	var k := faction_def.den_scale()
-	WarpFx.flash(get_tree(), global_position, 110.0 * k)
+	WarpFx.flash(self, global_position, 110.0 * k)
 	_arrival_mat = faction_def.holo_material(6.0 * k)
 	for mi in ModelLoader.meshes_of(_model):
 		mi.material_override = _arrival_mat
@@ -260,7 +260,7 @@ func claim_name() -> String:
 func _near_cluster() -> AsteroidCluster:
 	if not is_inside_tree():
 		return null
-	var sys := SolarSystem.of(get_tree())
+	var sys := SolarSystem.of(self)
 	return sys.cluster_near(global_position, AsteroidCluster.DEN_REACH) if sys else null
 
 
@@ -285,7 +285,7 @@ func take_hit(amount: float, attacker: Node3D, at: Vector3) -> void:
 	if is_instance_valid(attacker) and attacker.has_method(&"get_faction") and Combat.hostile(int(attacker.call(&"get_faction")), faction):
 		raise_alert()
 	elif _rng.randf() < 0.08:
-		var fx := CombatWorld.fx_of(get_tree())
+		var fx := CombatWorld.fx_of(self)
 		if fx:
 			fx.explode(at, 5.0)
 
@@ -314,7 +314,7 @@ func raise_alert() -> void:
 ## come back to fight. Returns how many answered.
 func call_defenders() -> int:
 	var n := 0
-	for o in get_tree().get_nodes_in_group(Ship.GROUP):
+	for o in SystemWorld.nodes_in(self, Ship.GROUP):
 		var s := o as ScavengerShip
 		if s == null or s.dead or s.ai == null or s.faction_def == null or s.faction_def.id != faction_def.id:
 			continue
@@ -332,7 +332,7 @@ func defence_target() -> Node3D:
 	var la := durability.get_last_attacker() as Node3D
 	if Combat.is_live_target(la) and durability.seconds_since_hit() < 8.0 and global_position.distance_to(la.global_position) < GUARD_RADIUS + get_hit_radius():
 		return la
-	for h in Combat.hostiles_near(get_tree(), global_position, GUARD_RADIUS + get_hit_radius(), faction):
+	for h in Combat.hostiles_near(self, global_position, GUARD_RADIUS + get_hit_radius(), faction):
 		if h is Ship:
 			return h
 	return null
@@ -377,7 +377,7 @@ func spawn(raid: bool = false, out_already: bool = false) -> ScavengerShip:
 	if out_already:
 		pos += out_dir.cross(Vector3.UP) * _rng.randf_range(-250.0, 250.0)
 	pos.y = mouth.y
-	var root := SpaceNav.space_root(get_tree())
+	var root := SpaceNav.space_root(self)
 	root.add_child(s)
 	s.global_position = pos
 	s.set_heading(ShipMover.yaw_for(out_dir))
@@ -391,7 +391,7 @@ func spawn(raid: bool = false, out_already: bool = false) -> ScavengerShip:
 			s.ai.defend(self)
 	total_spawned += 1
 	spawned.emit(self, s)
-	var world := CombatWorld.of(get_tree())
+	var world := CombatWorld.of(self)
 	if world:
 		world.notify_spawned(s)
 	return s
@@ -451,11 +451,11 @@ func _guns(dt: float) -> void:
 		return
 	if _gun_timer <= 0.0:
 		_gun_timer = 0.5
-		_gun_target = Combat.nearest_hostile(get_tree(), global_position, f.den_gun_range + get_hit_radius(), faction)
+		_gun_target = Combat.nearest_hostile(self, global_position, f.den_gun_range + get_hit_radius(), faction)
 	if _gun_cooldown > 0.0 or not Combat.is_live_target(_gun_target):
 		return
 	_gun_cooldown = 1.0 / f.den_gun_rate
-	var pool := CombatWorld.projectiles_of(get_tree())
+	var pool := CombatWorld.projectiles_of(self)
 	if pool == null:
 		return
 	var spread := f.den_scale()
@@ -475,7 +475,7 @@ func destroy(killer: Node3D = null) -> void:
 	if dead:
 		return
 	dead = true
-	var world := CombatWorld.of(get_tree())
+	var world := CombatWorld.of(self)
 	if world:
 		var size := faction_def.den_scale()
 		world.fx.explode_chain(global_position, 45.0 * size, 7, 2.4)

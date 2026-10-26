@@ -64,7 +64,7 @@ func try_fire(target: Node3D) -> bool:
 		return false
 	if not in_range(target) or not facing(target):
 		return false
-	var pool := CombatWorld.projectiles_of(ship.get_tree())
+	var pool := CombatWorld.projectiles_of(ship)
 	if pool == null:
 		return false
 	_cooldown = 1.0 / stats.fire_rate

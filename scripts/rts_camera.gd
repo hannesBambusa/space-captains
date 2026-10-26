@@ -115,8 +115,10 @@ var _left_pending := Vector2.ZERO
 var _orbiting := false
 
 
-static func of(tree: SceneTree) -> RTSCamera:
-	return tree.get_first_node_in_group(GROUP) as RTSCamera if tree else null
+## The camera of [param n]'s system (see [method SystemWorld.of]).
+static func of(n: Node) -> RTSCamera:
+	var w := SystemWorld.of(n)
+	return w.camera if w else null
 
 
 func _ready() -> void:
@@ -294,7 +296,7 @@ func pick_focusable(screen_pos: Vector2) -> Node3D:
 	var best_score := INF
 	var vp_h := maxf(get_viewport().get_visible_rect().size.y, 1.0)
 	var px_per_rad := vp_h / (2.0 * tan(deg_to_rad(camera.fov) * 0.5))
-	for node in get_tree().get_nodes_in_group(FOCUS_GROUP):
+	for node in SystemWorld.nodes_in(self, FOCUS_GROUP):
 		var n := node as Node3D
 		if n == null or not n.is_visible_in_tree():
 			continue
@@ -390,7 +392,8 @@ func _notification(what: int) -> void:
 
 
 func _process(delta: float) -> void:
-	var gui_busy := get_viewport().gui_get_focus_owner() != null
+	# The HUD sits in the window, outside this system's SubViewport.
+	var gui_busy := get_window().gui_get_focus_owner() != null
 	var move := Vector2.ZERO
 	if not gui_busy:
 		move = Vector2(Input.get_axis("cam_left", "cam_right"), Input.get_axis("cam_up", "cam_down"))
@@ -509,7 +512,9 @@ func _drag_pan(from_px: Vector2, to_px: Vector2) -> void:
 func _edge_pan_vector() -> Vector2:
 	if not _mouse_seen or not DisplayServer.window_is_focused():
 		return Vector2.ZERO
-	var vp := get_viewport()
+	# The window's mouse: this system's SubViewport only hears the events
+	# the HUD left (same base-size coordinates).
+	var vp := get_window()
 	var rect := vp.get_visible_rect()
 	var m := vp.get_mouse_position()
 	if not rect.has_point(m):

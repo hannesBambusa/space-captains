@@ -72,7 +72,7 @@ func _goal() -> Dictionary:
 	if is_instance_valid(home):
 		var p := home.to_global(home.approach_point())
 		return {"pos": p, "vel": SpaceNav.world_velocity(home)}
-	var sys := SolarSystem.of(get_tree())
+	var sys := SolarSystem.of(self)
 	if sys and sys.home_station:
 		var st := sys.home_station
 		return {"pos": st.global_position, "vel": SpaceNav.world_velocity(st)}

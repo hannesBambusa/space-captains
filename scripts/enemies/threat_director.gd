@@ -97,8 +97,8 @@ func wants_claim(d: DenDef) -> bool:
 ## planet held already, or one that is missing, is skipped.
 func _claim_first(sys: SolarSystem, d: DenDef) -> void:
 	claimed_for[d.name] = SimClock.time
-	var world := CombatWorld.of(get_tree())
-	var body := PlanetRaidContract.find_planet(get_tree(), d.claim_planet)
+	var world := CombatWorld.of(self)
+	var body := PlanetRaidContract.find_planet(self, d.claim_planet)
 	if world == null or world.claims == null or body == null:
 		return
 	var f := d.get_faction()
@@ -145,7 +145,7 @@ func growth_met(d: DenDef) -> bool:
 
 ## Living captains hired at the player's buildings.
 func hired_captains() -> int:
-	var mgr := BuildingManager.of(get_tree())
+	var mgr := BuildingManager.of(self)
 	var n := 0
 	if mgr:
 		for b in mgr.buildings:
@@ -157,7 +157,7 @@ func hired_captains() -> int:
 
 
 func active_structures() -> int:
-	var mgr := BuildingManager.of(get_tree())
+	var mgr := BuildingManager.of(self)
 	var n := 0
 	if mgr:
 		for b in mgr.buildings:
@@ -232,7 +232,7 @@ func _all_cleared(sys: SolarSystem) -> bool:
 
 
 func _system() -> SolarSystem:
-	return SolarSystem.of(get_tree())
+	return SolarSystem.of(self)
 
 
 func _toast(text: String) -> void:

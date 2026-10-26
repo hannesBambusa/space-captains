@@ -40,7 +40,7 @@ func _draw() -> void:
 
 
 func _bracket(target: Node3D, color: Color, only_below_px: float = INF) -> void:
-	var cam := get_viewport().get_camera_3d()
+	var cam := SystemWorld.camera_3d(self)
 	if cam == null or not target.is_inside_tree():
 		return
 	var p := target.global_position

@@ -242,9 +242,9 @@ func _make_goods_box(res: HBoxContainer) -> void:
 
 ## Counts, tooltips and which goods show (held or on the way).
 func _update_goods() -> void:
-	var pending := CargoDepot.pending_all(get_tree())
-	var f := Factory.find(get_tree())
-	var mgr := BuildingManager.of(get_tree())
+	var pending := CargoDepot.pending_all(self)
+	var f := Factory.find(self)
+	var mgr := BuildingManager.of(self)
 	var dock_def := mgr.def_by_id(&"raider_dock") if mgr else null
 	var dock := dock_def != null and mgr.count_of(dock_def) > 0
 	var any := false
@@ -344,7 +344,7 @@ func _update_demand() -> void:
 	var research := Research.escrow_total()
 	if research > 0:
 		_credits.tooltip_text += " Reserved for research: %s cr (used up when a project is done, back if you cancel)." % UIUtil.amount(research)
-	var f := Factory.find(get_tree())
+	var f := Factory.find(self)
 	for i in _ore_demand.size():
 		var pips := _ore_demand[i]
 		pips.visible = f != null
@@ -361,7 +361,7 @@ func _update_demand() -> void:
 
 ## "+40" after each ore while cargo shuttles have some on the way.
 func _update_pending() -> void:
-	var pending := CargoDepot.pending_all(get_tree())
+	var pending := CargoDepot.pending_all(self)
 	for i in _ore_pending.size():
 		var l := _ore_pending[i]
 		var n := pending[i] if i < pending.size() else 0
@@ -373,7 +373,7 @@ func _update_pending() -> void:
 
 
 func _update_shield() -> void:
-	var b := StationShield.find(get_tree())
+	var b := StationShield.find(self)
 	_shield_box.visible = b != null
 	if b == null:
 		return
@@ -394,7 +394,7 @@ func _update_shield() -> void:
 
 ## Research box: lab built (or projects funded), projects at work, the lead's progress.
 func _update_research() -> void:
-	var lab := ScienceLab.find(get_tree())
+	var lab := ScienceLab.find(self)
 	var active := Research.active_projects()
 	_research_box.visible = lab != null or not active.is_empty()
 	if not _research_box.visible:

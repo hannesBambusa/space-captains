@@ -208,7 +208,7 @@ func _ship_at(m: Vector2) -> Node3D:
 ## Ships, live dens and arriving bases shown as dots (parked ships excluded).
 func _map_targets() -> Array[Node3D]:
 	var out: Array[Node3D] = []
-	for n in get_tree().get_nodes_in_group(Ship.GROUP):
+	for n in SystemWorld.nodes_in(self, Ship.GROUP):
 		var s := n as Ship
 		if s and not s.dead and s.is_inside_tree() and not ShipMarkers.is_parked(s):
 			out.append(s)
@@ -216,7 +216,7 @@ func _map_targets() -> Array[Node3D]:
 		for d in hud.solar_system.dens:
 			if is_instance_valid(d) and not d.dead:
 				out.append(d)
-		for n in get_tree().get_nodes_in_group(DenArrivalSite.GROUP):
+		for n in SystemWorld.nodes_in(self, DenArrivalSite.GROUP):
 			out.append(n as Node3D)
 	return out
 
@@ -227,7 +227,7 @@ func _fly_to(p: Vector3) -> void:
 	if not is_instance_valid(_anchor):
 		_anchor = Node3D.new()
 		_anchor.name = "MinimapAnchor"
-		get_tree().current_scene.add_child(_anchor)
+		SystemWorld.of(self).add_child(_anchor)
 	_anchor.global_position = Vector3(p.x, 0.0, p.z)
 	hud.camera.focus_on(_anchor, hud.camera.get_distance())
 
@@ -280,7 +280,7 @@ func _draw_map() -> void:
 		# Top-down projection of the inclined orbit (a slight ellipse).
 		c.draw_polyline(xf * _orbit_points(p), ORBIT_COLOR, 1.0, true)
 	_draw_clusters(c, sys, sc, xf)
-	var claims := PlanetClaims.of(get_tree())
+	var claims := PlanetClaims.of(self)
 	for p in sys.planets:
 		var pm := _to_map(p.global_position)
 		var pr := clampf(p.def.radius / sc, 2.0, 6.0)
@@ -298,12 +298,12 @@ func _draw_map() -> void:
 		c.draw_rect(Rect2(hm - Vector2(3.5, 3.5), Vector2(7.0, 7.0)), HOME_COLOR, true)
 		if markers:
 			c.draw_arc(hm, markers.home_threat_radius / sc, 0.0, TAU, 64, Color(HOME_COLOR, 0.25), 1.0, true)
-	var bubble := StationShield.find(get_tree())
+	var bubble := StationShield.find(self)
 	if bubble and bubble.is_up():
 		var bc := _to_map(bubble.global_position)
 		var br := maxf(bubble.radius / sc, 6.0)
 		c.draw_arc(bc, br, 0.0, TAU, 48, Color(DefenseSection.SHIELD_COLOR, lerpf(0.35, 0.9, bubble.charge())), 1.5, true)
-	var zones := DefenseZones.of(get_tree())
+	var zones := DefenseZones.of(self)
 	if zones:
 		for z in zones.zones:
 			if is_instance_valid(z):

@@ -53,9 +53,9 @@ var _layout_left := 0.0
 func _ready() -> void:
 	add_to_group(GROUP)
 	var tree := get_tree()
-	solar_system = SolarSystem.of(tree)
-	camera = RTSCamera.of(tree)
-	manager = BuildingManager.of(tree)
+	solar_system = SolarSystem.of(self)
+	camera = RTSCamera.of(self)
+	manager = BuildingManager.of(self)
 	placement = tree.get_first_node_in_group(PlacementController.GROUP) as PlacementController
 	zone_placement = tree.get_first_node_in_group(ZonePlacement.GROUP) as ZonePlacement
 	selection = tree.get_first_node_in_group(SelectionController.GROUP) as SelectionController
@@ -246,7 +246,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 ## like a double click on it.
 ## Selects the Science Lab (the top bar's research box).
 func select_lab() -> void:
-	var lab := ScienceLab.find(get_tree())
+	var lab := ScienceLab.find(self)
 	if lab and selection:
 		selection.select(lab.building)
 

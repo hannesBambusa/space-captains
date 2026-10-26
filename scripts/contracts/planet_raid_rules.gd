@@ -88,7 +88,7 @@ func danger_of(body: PlanetBody, home: Vector3) -> int:
 		d += 2
 	elif km > far_km:
 		d += 1
-	d = maxi(d, SalvageContract.danger_at(body.get_tree(), body.global_position))
+	d = maxi(d, SalvageContract.danger_at(body, body.global_position))
 	return clampi(d, 1, 5)
 
 

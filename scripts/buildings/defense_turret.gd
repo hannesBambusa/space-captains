@@ -89,7 +89,7 @@ func _on_setup() -> void:
 		_light_base = maxf(_light_mat.emission_energy_multiplier, 1.5)
 	_yaw = _rng.randf_range(-PI, PI)
 	_apply_pose()
-	var world := CombatWorld.of(building.get_tree())
+	var world := CombatWorld.of(building)
 	if world:
 		world.combatant_destroyed.connect(_on_combatant_destroyed)
 
@@ -157,7 +157,7 @@ func _in_range(t: Node3D) -> bool:
 func _pick_target() -> void:
 	var best: Node3D = null
 	var best_score := INF
-	for h in Combat.hostiles_near(get_tree(), global_position, weapon_range + 60.0, Combat.Faction.PLAYER):
+	for h in Combat.hostiles_near(self, global_position, weapon_range + 60.0, Combat.Faction.PLAYER):
 		var score := SpaceNav.flat_distance(global_position, h.global_position)
 		var sc := h as ScavengerShip
 		if sc:
@@ -212,7 +212,7 @@ func _apply_pose() -> void:
 
 
 func _fire(t: Node3D, lead: Vector3) -> void:
-	var pool := CombatWorld.projectiles_of(get_tree())
+	var pool := CombatWorld.projectiles_of(self)
 	if pool == null:
 		return
 	_cooldown = 1.0 / fire_rate

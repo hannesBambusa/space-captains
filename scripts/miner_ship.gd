@@ -216,7 +216,7 @@ func lose_cargo(share: float) -> float:
 func _on_damaged(_amount: float, attacker: Node3D) -> void:
 	if captain == null or not is_inside_tree():
 		return
-	var where := SpaceNav.place_name(get_tree(), global_position)
+	var where := SpaceNav.place_name(self, global_position)
 	EventLog.post("%s attacked %s" % [captain.captain_name, where], EventLog.Kind.COMBAT, self, Vector3.INF, "attacked:" + captain.captain_name)
 	if brain and brain.state != CaptainBrain.State.FLEEING and brain.state != CaptainBrain.State.DOCKING and is_instance_valid(attacker):
 		# Everyone runs once the shields are down; the nervous ones sooner.

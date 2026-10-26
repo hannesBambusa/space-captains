@@ -322,7 +322,7 @@ func _decide_merc() -> void:
 	chance += zone_bonus
 	if rng.randf() < clampf(chance, 0.05, 0.95):
 		var pick := pick_patrol_zone()
-		var z := DefenseZones.of(ship.get_tree()).by_id(int(pick["uid"])) if int(pick["uid"]) != 0 else null
+		var z := DefenseZones.of(ship).by_id(int(pick["uid"])) if int(pick["uid"]) != 0 else null
 		last_decision = "Flying a patrol in %s" % z.zone_name if z else "Flying a patrol"
 		if captain:
 			note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Flew a patrol in %s" % z.zone_name if z else "Flew a patrol around the station",
@@ -664,7 +664,6 @@ func _check_job() -> bool:
 
 ## Who to shoot now, or null.
 func _pick_target() -> Node3D:
-	var tree := ship.get_tree()
 	var pos := ship.global_position
 	# Fight back first.
 	var la := _last_attacker.get_ref() as Node3D if _last_attacker else null
@@ -689,7 +688,7 @@ func _pick_target() -> Node3D:
 				var wl := w.durability.get_last_attacker() as Node3D
 				if Combat.is_live_target(wl) and w.durability.seconds_since_hit() < 6.0:
 					return wl
-				var near := _hostile_ships_near(tree, w.global_position, ESCORT_GUARD_RADIUS)
+				var near := _hostile_ships_near(ship, w.global_position, ESCORT_GUARD_RADIUS)
 				if not near.is_empty():
 					return near[0]
 		Mode.PATROL, Mode.DEFEND:
@@ -716,13 +715,12 @@ func _pick_target() -> Node3D:
 
 ## Hostile ships (not dens) inside the home defence radius.
 func home_threats() -> Array[Node3D]:
-	var tree := ship.get_tree()
-	var sys := SolarSystem.of(tree)
+	var sys := SolarSystem.of(ship)
 	if sys == null or sys.home_station == null:
 		var none: Array[Node3D] = []
 		return none
 	var r := DEFENSE_RADIUS * (1.0 + 0.2 * (Captain.factor(captain.loyalty) if captain else 0.0))
-	return _hostile_ships_near(tree, sys.home_station.global_position, r)
+	return _hostile_ships_near(ship, sys.home_station.global_position, r)
 
 
 ## Everything a merc at home or on patrol defends: [method home_threats],
@@ -730,7 +728,7 @@ func home_threats() -> Array[Node3D]:
 ## attackers of the site it answers an alarm for.
 func defence_threats() -> Array[Node3D]:
 	var out := home_threats()
-	var zones := DefenseZones.of(ship.get_tree())
+	var zones := DefenseZones.of(ship)
 	if zones and zones.count() > 0:
 		for h in zones.threats_near(ship.global_position):
 			if not out.has(h):
@@ -750,10 +748,9 @@ func defence_threats() -> Array[Node3D]:
 func claim_constructors() -> Array[Node3D]:
 	var out: Array[Node3D] = []
 	var dists: Array[float] = []
-	var tree := ship.get_tree()
 	var zone := patrol_zone()
 	var site := _guard()
-	for n in tree.get_nodes_in_group(Combat.GROUP):
+	for n in SystemWorld.nodes_in(ship, Combat.GROUP):
 		var c := n as ClaimConstructor
 		if c == null or not Combat.is_live_target(c) or not Combat.hostile(c.get_faction(), ship.faction):
 			continue
@@ -786,12 +783,12 @@ func _note_constructor(c: Node3D) -> void:
 func patrol_zone() -> DefenseZone:
 	if _patrol_zone_id == 0:
 		return null
-	var zones := DefenseZones.of(ship.get_tree())
+	var zones := DefenseZones.of(ship)
 	return zones.by_id(_patrol_zone_id) if zones else null
 
 
 func _zone_patrol_bonus() -> float:
-	var zones := DefenseZones.of(ship.get_tree())
+	var zones := DefenseZones.of(ship)
 	if zones == null or zones.count() == 0:
 		return 0.0
 	var bonus := ZONE_PATROL_BONUS
@@ -808,7 +805,7 @@ func _zone_patrol_bonus() -> float:
 ## Greedy x2, Cautious x0.6, Lazy x0.5), plus 1 (Bold 2, Nerve +-0.5) while
 ## raiders are inside; past 6 km from home Cautious x0.5, Lazy x0.4, Bold x1.2.
 func pick_patrol_zone() -> Dictionary:
-	var zones := DefenseZones.of(ship.get_tree())
+	var zones := DefenseZones.of(ship)
 	if zones == null or zones.count() == 0:
 		return {"uid": 0, "why": ""}
 	var p := captain.personality if captain else profile.personality
@@ -876,8 +873,8 @@ func _guard_threats() -> Array[Node3D]:
 	var out: Array[Node3D] = []
 	if site == null:
 		return out
-	out = _hostile_ships_near(ship.get_tree(), site.global_position, GUARD_RADIUS)
-	var alarm := ColonyAlarm.of(ship.get_tree())
+	out = _hostile_ships_near(ship, site.global_position, GUARD_RADIUS)
+	var alarm := ColonyAlarm.of(ship)
 	var a := alarm.attacker_of(site) if alarm else null
 	if a and not out.has(a) and SpaceNav.flat_distance(a.global_position, site.global_position) < GUARD_RADIUS * 2.0:
 		out.insert(0, a)
@@ -935,9 +932,9 @@ func answer_alarm(site: Node3D, site_name: String, attacker: Node3D, until: floa
 	return true
 
 
-func _hostile_ships_near(tree: SceneTree, pos: Vector3, radius: float) -> Array[Node3D]:
+func _hostile_ships_near(ctx: Node, pos: Vector3, radius: float) -> Array[Node3D]:
 	var out: Array[Node3D] = []
-	for h in Combat.hostiles_near(tree, pos, radius, ship.faction):
+	for h in Combat.hostiles_near(ctx, pos, radius, ship.faction):
 		if h is Ship:
 			out.append(h)
 	return out
@@ -961,7 +958,7 @@ func _patrol_step(_dt: float) -> void:
 			_patrol_point = z.to_local(z.random_point(rng))
 		ship.set_world_goal(z.to_global(_patrol_point), z.frame_velocity(), Vector3.ZERO, 80.0, ship.max_speed * 0.6)
 		return
-	var sys := SolarSystem.of(ship.get_tree())
+	var sys := SolarSystem.of(ship)
 	if sys == null or sys.home_station == null:
 		return
 	var st := sys.home_station
@@ -1013,8 +1010,7 @@ func _waiting_spot(ec: EscortContract, w: Ship) -> Dictionary:
 				b = (t as Ship).home
 				break
 	if b == null:
-		var tree := ship.get_tree()
-		var mgr := BuildingManager.of(tree)
+		var mgr := BuildingManager.of(ship)
 		if mgr:
 			for bb in mgr.buildings:
 				if bb.def.hire_ship_script == null and bb.def.can_hire():

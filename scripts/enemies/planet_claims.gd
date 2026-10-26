@@ -46,8 +46,9 @@ var _wrecks: Array = []
 var _rng := RandomNumberGenerator.new()
 
 
-static func of(tree: SceneTree) -> PlanetClaims:
-	return tree.get_first_node_in_group(GROUP) as PlanetClaims if tree else null
+static func of(n: Node) -> PlanetClaims:
+	var w := CombatWorld.of(n)
+	return w.claims if w and w.claims and w.claims.is_in_group(GROUP) else null
 
 
 func _ready() -> void:
@@ -75,7 +76,7 @@ func garrison_of(body: Node3D) -> ClaimGarrison:
 static func claim_reason(body: Node3D) -> String:
 	if body == null or not body.is_inside_tree():
 		return ""
-	var pc := of(body.get_tree())
+	var pc := of(body)
 	var g := pc.garrison_of(body) if pc else null
 	if g == null:
 		return ""
@@ -151,7 +152,7 @@ func _register(g: ClaimGarrison) -> void:
 
 ## Landers on their way to a newly claimed world turn back.
 func _abort_landers(body: PlanetBody) -> void:
-	for n in get_tree().get_nodes_in_group(Ship.GROUP):
+	for n in SystemWorld.nodes_in(self, Ship.GROUP):
 		var lb := (n as Ship).brain as LanderBrain if n is Ship else null
 		if lb:
 			lb.check_claim(body)
@@ -209,7 +210,7 @@ func sim_step(_dt: float) -> void:
 
 func _step_waiting(r: Dictionary, now: float) -> void:
 	var fdef := Factions.get_def(StringName(r["faction"]))
-	var body := PlanetRaidContract.find_planet(get_tree(), String(r["planet"]))
+	var body := PlanetRaidContract.find_planet(self, String(r["planet"]))
 	if body == null or garrison_of(body) != null:
 		reclaims.erase(r)
 		changed.emit()
@@ -252,15 +253,15 @@ func _launch(r: Dictionary, body: PlanetBody, fdef: FactionDef) -> void:
 		if to.length() > 1.0:
 			dir = to.normalized()
 	var at := site + dir * GROUP_DISTANCE + Vector3.UP * 250.0
-	var root := SpaceNav.space_root(get_tree())
-	WarpFx.flash(get_tree(), at, 90.0)
+	var root := SpaceNav.space_root(self)
+	WarpFx.flash(self, at, 90.0)
 	var c := ClaimConstructor.new()
 	c.setup_constructor(body, float(r["angle"]), fdef, String(r["gang"]))
 	root.add_child(c)
 	c.global_position = at
 	c.set_heading(ShipMover.yaw_for(-dir))
 	c.mover.avoid_enabled = true
-	var world := CombatWorld.of(get_tree())
+	var world := CombatWorld.of(self)
 	if world:
 		world.notify_spawned(c)
 	var escorts: Array[ScavengerShip] = []
@@ -329,7 +330,7 @@ func _on_deployed(c: ClaimConstructor, r: Dictionary) -> void:
 		if is_instance_valid(o) and not (o as ScavengerShip).dead:
 			live.append(o as ScavengerShip)
 	var g := claim(c.planet, c.faction_def, c.gang, false, c.site_angle, live.is_empty())
-	WarpFx.flash(get_tree(), c.global_position, 60.0)
+	WarpFx.flash(self, c.global_position, 60.0)
 	c.leave_map()
 	if g == null:
 		return
@@ -431,9 +432,8 @@ func load_state(d: Dictionary) -> void:
 			g.queue_free()
 	garrisons.clear()
 	reclaims.clear()
-	var tree := get_tree()
 	for gd: Dictionary in d.get("garrisons", []):
-		var body := PlanetRaidContract.find_planet(tree, String(gd.get("planet", "")))
+		var body := PlanetRaidContract.find_planet(self, String(gd.get("planet", "")))
 		if body == null:
 			continue
 		var g := ClaimGarrison.new()
@@ -485,7 +485,7 @@ func restore_links(refs: SaveRefs) -> void:
 
 
 func _system() -> SolarSystem:
-	return SolarSystem.of(get_tree())
+	return SolarSystem.of(self)
 
 
 func _toast(text: String) -> void:

@@ -76,7 +76,7 @@ func setup(owner_hud: HUD) -> void:
 				if n > 0:
 					_ore_in = true
 					break)
-	_zones = DefenseZones.of(get_tree())
+	_zones = DefenseZones.of(self)
 	if _zones:
 		_zones.zones_changed.connect(_check)
 	_hook_factory.call_deferred()
@@ -169,7 +169,7 @@ func _has_crew(id: StringName) -> bool:
 func _hook_factory() -> void:
 	if _market and is_instance_valid(_market):
 		return
-	var f := Factory.find(get_tree())
+	var f := Factory.find(self)
 	if f == null or f.market == null:
 		return
 	_market = f.market

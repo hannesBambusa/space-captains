@@ -34,7 +34,6 @@ const ZONE_SHADER: Shader = preload("res://shaders/placement_zone.gdshader")
 const MAX_ZONE_DISCS := 48
 const MAX_ZONE_SEGS := 64
 
-@export var manager_path: NodePath = ^"../Buildings"
 ## Max mouse travel (px) between press and release that still counts as a click.
 @export var click_slop_px: float = 3.0
 @export_group("Build view")
@@ -77,7 +76,8 @@ var _idle_mat: StandardMaterial3D
 
 func _ready() -> void:
 	add_to_group(GROUP)
-	manager = get_node_or_null(manager_path) as BuildingManager
+	# The viewed system's (this controller sits outside the systems, game.tscn).
+	manager = BuildingManager.of(self)
 	if manager:
 		manager.building_added.connect(func(_b: Building) -> void: _update_zone())
 	set_process(false)
@@ -92,7 +92,7 @@ func arm(building_def: BuildingDef) -> void:
 		return
 	cancel()
 	def = building_def
-	_camera = RTSCamera.of(get_tree())
+	_camera = RTSCamera.of(self)
 	if def.station_addon:
 		_build_bay_ghosts()
 	else:

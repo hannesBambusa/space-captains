@@ -156,7 +156,7 @@ func _refresh_transit(y: SalvageYard) -> void:
 	_transit.add_theme_color_override("font_color", Color(0.55, 1.0, 0.65) if not lines.is_empty() else HudStyle.TEXT_DIM)
 	var note := "Bought ore waits here for a cargo shuttle (it leaves with a full load of %d or after %d s) and counts as yours when it lands at the station." % [
 			depot.capacity() if depot else 0, roundi(depot.max_wait) if depot else 0]
-	var f := Factory.find(get_tree()) if is_inside_tree() else null
+	var f := Factory.find(self) if is_inside_tree() else null
 	if f and f.market.auto_sell:
 		note += " Factory auto-sell never sells bought ore: it is held back until you spend or sell it yourself."
 	_transit_note.text = note

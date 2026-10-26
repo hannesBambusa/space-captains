@@ -254,7 +254,6 @@ func step(dt: float) -> void:
 	var limit := max_speed if goal_speed <= 0.0 else minf(goal_speed, max_speed)
 	var via := false
 	if avoid_enabled and _has_goal and not hold_climb:
-		var tree := ship.get_tree()
 		var flat := Vector3(pos.x, 0.0, pos.z)
 		var g := _outside_bodies(Vector3(goal_pos.x, 0.0, goal_pos.z), goal_pos.y)
 		if g.x != goal_pos.x or g.z != goal_pos.z:
@@ -272,7 +271,7 @@ func step(dt: float) -> void:
 		# A leg long enough to warp is planned at warp speed even before the
 		# spool, so the plan (and the hop's target) does not flip with it.
 		var hop_leg := warp_allowed and warp_lead == null and d > SpaceNav.WARP_MIN_LEG + warp_drop
-		route.update(tree, flat, g, WARP_SPEED_PLAN if warp_state != Warp.IDLE or hop_leg else maxf(plan_speed, 30.0), dt)
+		route.update(ship, flat, g, WARP_SPEED_PLAN if warp_state != Warp.IDLE or hop_leg else maxf(plan_speed, 30.0), dt)
 		if route.has_waypoint():
 			var w := route.waypoint()
 			rel = Vector3(w.x - pos.x, 0.0, w.z - pos.z)
@@ -421,7 +420,7 @@ func _load_waypoint(w: Waypoint) -> void:
 ## [param p] (flat, world) at height [param y], moved out to the planning
 ## circle of any body whose hard sphere holds it (circles cut at that height).
 func _outside_bodies(p: Vector3, y: float) -> Vector3:
-	for o in SpaceNav.obstacles(ship.get_tree()):
+	for o in SpaceNav.obstacles(ship):
 		var node := o["node"] as Node3D
 		if not is_instance_valid(node):
 			continue
@@ -439,7 +438,7 @@ func _outside_bodies(p: Vector3, y: float) -> Vector3:
 ## the spheres cut at the ship's height (goal: at its height).
 func _body_push(pos: Vector3, goal: Vector3) -> Vector3:
 	var push := Vector3.ZERO
-	for o in SpaceNav.obstacles(ship.get_tree()):
+	for o in SpaceNav.obstacles(ship):
 		var node := o["node"] as Node3D
 		if not is_instance_valid(node):
 			continue
@@ -463,7 +462,7 @@ func _body_push(pos: Vector3, goal: Vector3) -> Vector3:
 ## sphere (sideways, onto the circle it cuts at the ship's height) and drops
 ## the inward part of the velocity (relative to the body).
 func _push_out(pos: Vector3) -> Vector3:
-	for o in SpaceNav.obstacles(ship.get_tree()):
+	for o in SpaceNav.obstacles(ship):
 		var node := o["node"] as Node3D
 		if not is_instance_valid(node):
 			continue
@@ -510,7 +509,7 @@ func _warp_step(dt: float, target: Vector3, _via: bool) -> bool:
 				return false
 			warp_end = end
 			warp_dir = (end - flat).normalized()
-			warp_altitude = SpaceNav.segment_lane_altitude(ship.get_tree(), flat, end, _warp_dest)
+			warp_altitude = SpaceNav.segment_lane_altitude(ship, flat, end, _warp_dest)
 			warp_timer = SpaceNav.WARP_SPOOL
 			_set_warp(Warp.SPOOL)
 			return false
@@ -524,7 +523,7 @@ func _warp_step(dt: float, target: Vector3, _via: bool) -> bool:
 				return false
 			warp_end = end
 			warp_dir = (end - flat).normalized()
-			warp_altitude = SpaceNav.segment_lane_altitude(ship.get_tree(), flat, end, _warp_dest)
+			warp_altitude = SpaceNav.segment_lane_altitude(ship, flat, end, _warp_dest)
 			warp_timer -= dt
 			# Level: at the lane height (or holding height) and no longer climbing.
 			var level := (absf(pos.y - cruise_y) < 4.0 and absf(climb_rate) < 4.0) or not cruise_active
@@ -551,7 +550,7 @@ func _warp_step(dt: float, target: Vector3, _via: bool) -> bool:
 			warp_dir = to.normalized()
 			# A belt band ahead the hop is not high enough for: climb if
 			# already there, else drop out before it.
-			var need := SpaceNav.segment_lane_altitude(ship.get_tree(), flat, flat + warp_dir * left, _warp_dest)
+			var need := SpaceNav.segment_lane_altitude(ship, flat, flat + warp_dir * left, _warp_dest)
 			if need > warp_altitude + 0.5:
 				if absf(pos.y) >= need - 2.0:
 					warp_altitude = need
@@ -658,18 +657,18 @@ func _warp_end_for(from: Vector3, target: Vector3) -> Vector3:
 		return Vector3.INF
 	var dir := to / length
 	var reach := length - warp_drop
-	var dest := SpaceNav.rock_band_at(ship.get_tree(), target)
+	var dest := SpaceNav.rock_band_at(ship, target)
 	if dest:
 		var cut := SpaceNav.band_entry(dest, from, dir)
 		if cut < INF:
 			reach = minf(reach, cut)
 			_warp_dest = dest
-	for o in SpaceNav.obstacles(ship.get_tree()):
+	for o in SpaceNav.obstacles(ship):
 		var node := o["node"] as Node3D
 		if is_instance_valid(node) and SpaceNav.flat_distance(from, node.global_position) \
 				< SpaceNav.slice_radius(o["plan"], ship.position.y - node.global_position.y):
 			return Vector3.INF
-	for z in SpaceNav.no_warp_zones(ship.get_tree()):
+	for z in SpaceNav.no_warp_zones(ship):
 		var c: Vector3 = z["center"]
 		var r: float = z["radius"]
 		var cf := Vector3(c.x, 0.0, c.z)
@@ -691,7 +690,7 @@ func _warp_end_for(from: Vector3, target: Vector3) -> Vector3:
 ## after the detour, see [method _warp_end_for]).
 func _warp_blocked(flat: Vector3, stride: float) -> bool:
 	var ahead := flat + warp_dir * (stride * 2.0 + 50.0)
-	for o in SpaceNav.obstacles(ship.get_tree()):
+	for o in SpaceNav.obstacles(ship):
 		var node := o["node"] as Node3D
 		if not is_instance_valid(node):
 			continue

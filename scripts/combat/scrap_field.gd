@@ -43,9 +43,9 @@ func setup(scrap: int, life: float, field_radius: float, label: String) -> void:
 	name = StringName(("Scrap_%s" % label).validate_node_name().replace(" ", ""))
 
 
-static func all(tree: SceneTree) -> Array[ScrapField]:
+static func all(ctx: Node) -> Array[ScrapField]:
 	var out: Array[ScrapField] = []
-	for n in tree.get_nodes_in_group(GROUP):
+	for n in SystemWorld.nodes_in(ctx, GROUP):
 		if n is ScrapField and not n.is_queued_for_deletion():
 			out.append(n as ScrapField)
 	return out

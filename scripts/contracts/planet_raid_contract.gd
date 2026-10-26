@@ -42,8 +42,8 @@ static func rules() -> PlanetRaidRules:
 
 
 ## Planet or moon named [param body_name] in the system, or null.
-static func find_planet(tree: SceneTree, body_name: String) -> PlanetBody:
-	var sys := SolarSystem.of(tree)
+static func find_planet(ctx: Node, body_name: String) -> PlanetBody:
+	var sys := SolarSystem.of(ctx)
 	if sys == null:
 		return null
 	for p in sys.planets:
@@ -85,7 +85,7 @@ static func load_records(d: Dictionary) -> void:
 static func danger_for(body: PlanetBody) -> int:
 	if body == null or not is_instance_valid(body) or not body.is_inside_tree():
 		return 1
-	var sys := SolarSystem.of(body.get_tree())
+	var sys := SolarSystem.of(body)
 	var home := sys.home_station.global_position if sys and is_instance_valid(sys.home_station) else Vector3.ZERO
 	return rules().danger_of(body, home)
 

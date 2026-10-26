@@ -54,8 +54,8 @@ var total_income: int = 0
 var stockouts: int = 0
 
 
-static func find(tree: SceneTree) -> Outfitter:
-	return Building.first_active_service(tree, GROUP) as Outfitter
+static func find(ctx: Node) -> Outfitter:
+	return Building.first_active_service(ctx, GROUP) as Outfitter
 
 
 func setup(owner_building: Building) -> void:
@@ -68,7 +68,7 @@ func _ready() -> void:
 
 ## The Factory this shop sells from, or null.
 func factory() -> Factory:
-	return Factory.find(get_tree()) if is_inside_tree() else null
+	return Factory.find(self) if is_inside_tree() else null
 
 
 # --- Stock ----------------------------------------------------------------------

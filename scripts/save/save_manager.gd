@@ -12,15 +12,16 @@ extends Node
 ##
 ## Autosave: every [member autosave_interval] real seconds of unpaused play,
 ## and when going back to the main menu, quitting, or closing the window.
-## A new game runs the scenes/system.tscn start as before; loading builds
-## the same scene and applies the save before its first sim step.
+## A new game runs the scenes/game.tscn start (home system in its
+## SubViewport, the HUD on top); loading builds the same scene and applies
+## the save before its first sim step.
 
 signal saved(slot: String)
 
 const SAVE_DIR := "user://saves"
 const EXT := ".save"
 const VERSION := GameSnapshot.VERSION
-const SYSTEM_SCENE := "res://scenes/system.tscn"
+const GAME_SCENE := "res://scenes/game.tscn"
 const MENU_SCENE := "res://scenes/main_menu.tscn"
 ## First bytes of every save file.
 const MAGIC := "SCSAVE\n"
@@ -41,10 +42,11 @@ func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(SAVE_DIR)
 
 
-## A system scene is running (also when it was started on its own, e.g.
-## from the editor: it then gets a new slot on its first save).
+## A game with a home system is running (also when scenes/game.tscn was
+## started on its own, e.g. from the editor: it then gets a new slot on its
+## first save).
 func in_game() -> bool:
-	return SolarSystem.of(get_tree()) != null
+	return SolarSystem.of(SystemWorld.home(get_tree())) != null
 
 
 func _process(delta: float) -> void:
@@ -292,7 +294,7 @@ func _leave_scene() -> void:
 
 func _enter_game(data: Dictionary) -> void:
 	var tree := get_tree()
-	var scene := (load(SYSTEM_SCENE) as PackedScene).instantiate()
+	var scene := (load(GAME_SCENE) as PackedScene).instantiate()
 	tree.root.add_child(scene)
 	tree.current_scene = scene
 	if not data.is_empty():

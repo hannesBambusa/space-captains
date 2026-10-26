@@ -33,7 +33,7 @@ func handles(type: Contract.Type) -> bool:
 func pick(brain: CaptainBrain, contracts: Array[Contract]) -> Evaluation:
 	var all := contracts.duplicate()
 	if brain.ship and brain.ship.is_inside_tree():
-		all.append_array(SalvageContract.free_contracts(brain.ship.get_tree()))
+		all.append_array(SalvageContract.free_contracts(brain.ship))
 	return super.pick(brain, all)
 
 

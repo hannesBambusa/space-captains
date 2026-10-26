@@ -24,13 +24,14 @@ const RECALL_INTERVAL := 5.0
 var alarms: Dictionary = {}
 
 
-static func of(tree: SceneTree) -> ColonyAlarm:
-	return tree.get_first_node_in_group(GROUP) as ColonyAlarm if tree else null
+static func of(n: Node) -> ColonyAlarm:
+	var w := CombatWorld.of(n)
+	return w.alarm if w and w.alarm and w.alarm.is_in_group(GROUP) else null
 
 
 ## [param site] was hit by [param attacker]: raise or extend its alarm.
-static func raise(tree: SceneTree, site: Node3D, site_name: String, attacker: Node3D) -> void:
-	var a := of(tree)
+static func raise(ctx: Node, site: Node3D, site_name: String, attacker: Node3D) -> void:
+	var a := of(ctx)
 	if a == null or not is_instance_valid(site) or not is_instance_valid(attacker):
 		return
 	if not attacker.has_method(&"get_faction") or int(attacker.call(&"get_faction")) == Combat.Faction.PLAYER:
@@ -94,7 +95,7 @@ func _call(e: Dictionary) -> void:
 		return
 	var attacker := (e["attacker"] as WeakRef).get_ref() as Node3D
 	var names: PackedStringArray = []
-	for n in get_tree().get_nodes_in_group(Ship.GROUP):
+	for n in SystemWorld.nodes_in(self, Ship.GROUP):
 		var s := n as Ship
 		var mb := s.brain as MercenaryBrain if s else null
 		if mb == null or s.dead:

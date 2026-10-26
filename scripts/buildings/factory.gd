@@ -92,8 +92,8 @@ var total_built: int = 0
 var _glow: Array[Dictionary] = []
 
 
-static func find(tree: SceneTree) -> Factory:
-	return Building.first_active_service(tree, GROUP) as Factory
+static func find(ctx: Node) -> Factory:
+	return Building.first_active_service(ctx, GROUP) as Factory
 
 
 static func ore_cost(m: ShipModule) -> PackedInt32Array:
@@ -514,7 +514,7 @@ func _pick_job() -> ShipModule:
 ## Role -> best rank among living captains of that role.
 func _hired_roles() -> Dictionary:
 	var out := {}
-	var manager := BuildingManager.of(get_tree()) if is_inside_tree() else null
+	var manager := BuildingManager.of(self) if is_inside_tree() else null
 	if manager == null:
 		return out
 	for b in manager.buildings:

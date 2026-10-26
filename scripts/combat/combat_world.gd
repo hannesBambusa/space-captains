@@ -36,17 +36,19 @@ var scrap_root: Node3D
 var shields: Array[StationShield] = []
 
 
-static func of(tree: SceneTree) -> CombatWorld:
-	return tree.get_first_node_in_group(GROUP) as CombatWorld if tree else null
+## The combat world of [param n]'s system (see [method SystemWorld.of]).
+static func of(n: Node) -> CombatWorld:
+	var w := SystemWorld.of(n)
+	return w.combat if w else null
 
 
-static func projectiles_of(tree: SceneTree) -> ProjectilePool:
-	var w := of(tree)
+static func projectiles_of(n: Node) -> ProjectilePool:
+	var w := of(n)
 	return w.projectiles if w else null
 
 
-static func fx_of(tree: SceneTree) -> CombatFx:
-	var w := of(tree)
+static func fx_of(n: Node) -> CombatFx:
+	var w := of(n)
 	return w.fx if w else null
 
 

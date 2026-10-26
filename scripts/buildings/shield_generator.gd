@@ -31,7 +31,7 @@ func _init() -> void:
 
 
 func _on_setup() -> void:
-	var mgr := BuildingManager.of(building.get_tree())
+	var mgr := BuildingManager.of(building)
 	shield = StationShield.new()
 	shield.setup(self, mgr)
 	var frame := building.get_parent()

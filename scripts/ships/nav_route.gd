@@ -59,9 +59,9 @@ func clear() -> void:
 	_timer = 0.0
 
 
-## Replans when due. [param from] / [param goal] flat world points,
+## Replans when due ([param ctx]: the ship, for its system). [param from] / [param goal] flat world points,
 ## [param speed] the speed the ship will cover the leg at.
-func update(tree: SceneTree, from: Vector3, goal: Vector3, speed: float, dt: float) -> void:
+func update(ctx: Node, from: Vector3, goal: Vector3, speed: float, dt: float) -> void:
 	_timer -= dt
 	if _timer > 0.0 and has_waypoint():
 		var w := waypoint()
@@ -70,12 +70,12 @@ func update(tree: SceneTree, from: Vector3, goal: Vector3, speed: float, dt: flo
 	elif _timer > 0.0:
 		return
 	_timer = REPLAN_INTERVAL * randf_range(0.85, 1.15)
-	plan(tree, from, goal, speed)
+	plan(ctx, from, goal, speed)
 
 
-func plan(tree: SceneTree, from: Vector3, goal: Vector3, speed: float) -> void:
+func plan(ctx: Node, from: Vector3, goal: Vector3, speed: float) -> void:
 	replans += 1
-	var obs := SpaceNav.obstacles(tree)
+	var obs := SpaceNav.obstacles(ctx)
 	var target := goal
 	var chosen: Dictionary = {}
 	var skip: Array[Node3D] = []

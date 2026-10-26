@@ -540,7 +540,7 @@ func assess_threat() -> float:
 	if ship.durability.seconds_since_hit() < 4.0:
 		t += 0.55
 	var pos := ship.global_position
-	var hostiles := Combat.hostiles_near(ship.get_tree(), pos, THREAT_RADIUS, ship.faction)
+	var hostiles := Combat.hostiles_near(ship, pos, THREAT_RADIUS, ship.faction)
 	for h in hostiles:
 		var d := SpaceNav.flat_distance(pos, h.global_position)
 		t += 0.1 + 0.35 * (1.0 - d / THREAT_RADIUS)
@@ -618,7 +618,7 @@ func _nearest_guardian() -> Ship:
 
 func _friendly_guns_near(pos: Vector3, radius: float) -> Array[Ship]:
 	var out: Array[Ship] = []
-	for n in ship.get_tree().get_nodes_in_group(Ship.GROUP):
+	for n in SystemWorld.nodes_in(ship, Ship.GROUP):
 		var s := n as Ship
 		if s == ship or s.dead or s.faction != ship.faction or s.weapon == null or not s.is_targetable():
 			continue

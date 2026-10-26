@@ -115,8 +115,10 @@ var _bays: Dictionary = {}
 var _infos: Dictionary = {}
 
 
-static func of(tree: SceneTree) -> BuildingManager:
-	return tree.get_first_node_in_group(GROUP) as BuildingManager if tree else null
+## The manager of [param n]'s system (see [method SystemWorld.of]).
+static func of(n: Node) -> BuildingManager:
+	var w := SystemWorld.of(n)
+	return w.buildings if w else null
 
 
 func _ready() -> void:

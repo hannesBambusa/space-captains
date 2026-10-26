@@ -17,7 +17,7 @@ func _ready() -> void:
 	light_cull_mask = 2
 	shadow_caster_mask = 2
 	sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
-	var cam := RTSCamera.of(get_tree())
+	var cam := RTSCamera.of(self)
 	if cam and cam.has_signal("view_changed"):
 		cam.view_changed.connect(_on_view_changed)
 

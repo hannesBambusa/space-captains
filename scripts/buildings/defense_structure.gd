@@ -115,7 +115,7 @@ func take_hit(amount: float, attacker: Node3D, _at: Vector3) -> void:
 	durability.apply(amount, attacker)
 	if repair.repairing:
 		repair.end_session()
-	ColonyAlarm.raise(get_tree(), self, get_display_name(), attacker)
+	ColonyAlarm.raise(self, self, get_display_name(), attacker)
 	_on_damaged(amount, attacker)
 	changed.emit()
 	if durability.is_dead():
@@ -130,7 +130,7 @@ func destroy(killer: Node3D = null) -> void:
 	dead = true
 	repair.end_session()
 	var pos := global_position
-	var world := CombatWorld.of(get_tree())
+	var world := CombatWorld.of(self)
 	if world:
 		world.fx.explode(pos, explosion_size)
 		world.spawn_scrap(Vector3(pos.x, building.global_position.y, pos.z), scrap_amount, world.ship_scrap_life, 30.0, "%s wreck" % get_display_name())
@@ -141,7 +141,7 @@ func destroy(killer: Node3D = null) -> void:
 	changed.emit()
 	if world:
 		world.notify_destroyed(self, killer)
-	var mgr := BuildingManager.of(get_tree())
+	var mgr := BuildingManager.of(self)
 	if mgr:
 		mgr.remove_building(building)
 	else:

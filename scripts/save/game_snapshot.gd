@@ -3,6 +3,9 @@ extends RefCounted
 ## The whole game as one Dictionary ([method capture]) and back
 ## ([method apply_globals] before the system scene is built, then
 ## [method apply_scene] on the fresh scene, before its first sim step).
+## Split in two: the globals (autoloads, the tutorial: [method capture_globals])
+## and one live system ([method capture_system] / [method apply_system]),
+## both in the same flat Dictionary; only home is saved for now.
 ##
 ## Saved: the sim clock, economy, event log, every captain (all fields,
 ## traits, rank, wallet, career stats, decision log), every building
@@ -43,17 +46,41 @@ extends RefCounted
 const VERSION := 3
 
 
+## The whole game: the globals and the home system.
 static func capture(tree: SceneTree) -> Dictionary:
-	var sys := SolarSystem.of(tree)
-	var mgr := BuildingManager.of(tree)
-	var world := CombatWorld.of(tree)
+	var d := capture_globals(tree)
+	var home := SystemWorld.home(tree)
+	if home:
+		d.merge(capture_system(home), true)
+	# Last: saving hands out ids.
+	d["ids_next"] = SaveIds.next
+	return d
+
+
+## Autoload state and the tutorial (everything outside the systems).
+static func capture_globals(tree: SceneTree) -> Dictionary:
 	var paused := -1
 	var pm := tree.root.get_node_or_null(^"PauseMenu")
 	if pm and pm.has_method(&"real_paused") and bool(pm.call(&"is_open")):
 		paused = 1 if bool(pm.call(&"real_paused")) else 0
 	var d := {"version": VERSION, "sim": SimClock.save_state(paused), "economy": Economy.save_state(), "events": EventLog.save_state(),
 			"rng": {"salvage": SaveUtil.rng_state(SalvageContract.rng), "career": SaveUtil.rng_state(Career.rng)}}
-	d["captains"] = _save_captains(tree, mgr)
+	d["research"] = Research.save_state()
+	d["planets"] = PlanetRaidContract.save_records()
+	var tut := Tutorial.of(tree)
+	d["tutorial"] = tut.save_state() if tut else {}
+	return d
+
+
+## One live system: captains, buildings, clusters, dens, scrap, ships and
+## their contracts, fleets, the raid and threat directors, claims, zones,
+## the camera.
+static func capture_system(w: SystemWorld) -> Dictionary:
+	var sys := w.sys
+	var mgr := w.buildings
+	var world := w.combat
+	var d := {}
+	d["captains"] = _save_captains(w, mgr)
 	d["buildings"] = mgr.save_state() if mgr else {}
 	var dens := []
 	if sys:
@@ -68,19 +95,14 @@ static func capture(tree: SceneTree) -> Dictionary:
 			scrap.append(f.save_state())
 	d["scrap"] = scrap
 	var trip_contracts: Array[Contract] = []
-	d["ships"] = ShipCodec.save_all(tree, trip_contracts)
+	d["ships"] = ShipCodec.save_all(w, trip_contracts)
 	d["contracts"] = ContractCodec.save_all(trip_contracts)
-	d["fleets"] = _save_fleets(tree)
+	d["fleets"] = _save_fleets(w)
 	d["raids"] = world.raids.save_state() if world and world.raids else {}
 	d["threats"] = world.threats.save_state() if world and world.threats else {}
 	d["claims"] = world.claims.save_state() if world and world.claims else {}
 	d["zones"] = world.zones.save_state() if world and world.zones else {}
-	d["research"] = Research.save_state()
-	d["planets"] = PlanetRaidContract.save_records()
-	d["camera"] = _save_camera(tree)
-	var tut := Tutorial.of(tree)
-	d["tutorial"] = tut.save_state() if tut else {}
-	d["ids_next"] = SaveIds.next
+	d["camera"] = _save_camera(w)
 	return d
 
 
@@ -110,7 +132,7 @@ static func _restore_clusters(sys: SolarSystem, cd: Dictionary) -> void:
 
 ## Short facts for the load list.
 static func summary(tree: SceneTree) -> Dictionary:
-	var mgr := BuildingManager.of(tree)
+	var mgr := BuildingManager.of(SystemWorld.home(tree))
 	var n := 0
 	if mgr:
 		for b in mgr.buildings:
@@ -121,7 +143,7 @@ static func summary(tree: SceneTree) -> Dictionary:
 	return {"sim_time": SimClock.time, "credits": Economy.credits, "captains": n}
 
 
-static func _save_captains(tree: SceneTree, mgr: BuildingManager) -> Array:
+static func _save_captains(w: SystemWorld, mgr: BuildingManager) -> Array:
 	var all: Array[Captain] = []
 	var add := func(c: Captain) -> void:
 		if c and not all.has(c):
@@ -142,7 +164,7 @@ static func _save_captains(tree: SceneTree, mgr: BuildingManager) -> Array:
 			if y:
 				for o in y.owed:
 					add.call(o["captain"])
-	for n in tree.get_nodes_in_group(Ship.GROUP):
+	for n in SystemWorld.nodes_in(w, Ship.GROUP):
 		var s := n as Ship
 		if s and not s.dead:
 			add.call(s.captain)
@@ -152,9 +174,9 @@ static func _save_captains(tree: SceneTree, mgr: BuildingManager) -> Array:
 	return out
 
 
-static func _save_fleets(tree: SceneTree) -> Array:
+static func _save_fleets(w: SystemWorld) -> Array:
 	var fleets: Array[MercFleet] = []
-	for n in tree.get_nodes_in_group(Ship.GROUP):
+	for n in SystemWorld.nodes_in(w, Ship.GROUP):
 		var s := n as Ship
 		var mb := s.brain as MercenaryBrain if s else null
 		if mb and mb.fleet and not fleets.has(mb.fleet) and mb.fleet.state != MercFleet.State.DONE:
@@ -165,8 +187,8 @@ static func _save_fleets(tree: SceneTree) -> Array:
 	return out
 
 
-static func _save_camera(tree: SceneTree) -> Dictionary:
-	var cam := RTSCamera.of(tree)
+static func _save_camera(w: SystemWorld) -> Dictionary:
+	var cam := w.camera
 	if cam == null:
 		return {}
 	var follow := cam.get_follow_target()
@@ -191,16 +213,26 @@ static func apply_globals(d: Dictionary) -> void:
 	SaveUtil.set_rng(Career.rng, rng.get("career", {}))
 
 
-## Everything in the scene. The scene is in the tree and built; nothing has
-## stepped yet.
+## Everything in the scene: the tutorial, then the home system. The scene
+## is in the tree and built; nothing has stepped yet.
 static func apply_scene(tree: SceneTree, d: Dictionary) -> void:
-	var refs := SaveRefs.new()
-	var sys := SolarSystem.of(tree)
-	var mgr := BuildingManager.of(tree)
-	var world := CombatWorld.of(tree)
 	var tut := Tutorial.of(tree)
 	if tut:
 		tut.load_state(d.get("tutorial", {}))
+	var home := SystemWorld.home(tree)
+	if home:
+		apply_system(home, d)
+		if Research.legacy_pending:
+			Research.grant_legacy(home)
+
+
+## One system's part of [param d] (see [method capture_system]) into the
+## freshly built system [param w].
+static func apply_system(w: SystemWorld, d: Dictionary) -> void:
+	var refs := SaveRefs.new()
+	var sys := w.sys
+	var mgr := w.buildings
+	var world := w.combat
 	for cd: Dictionary in d.get("captains", []):
 		refs.add(int(cd["id"]), Captain.from_save(cd))
 	if mgr:
@@ -240,7 +272,7 @@ static func apply_scene(tree: SceneTree, d: Dictionary) -> void:
 			refs.add(int(fd["id"]), ScrapField.restore(world, fd))
 	var ships := []
 	for sd: Dictionary in d.get("ships", []):
-		var s := ShipCodec.create(tree, sd, refs)
+		var s := ShipCodec.create(w, sd, refs)
 		if s:
 			ships.append([s, sd])
 	if mgr:
@@ -250,7 +282,7 @@ static func apply_scene(tree: SceneTree, d: Dictionary) -> void:
 				b.load_services(bd, refs)
 	for den: ScavengerDen in den_data:
 		den.restore_ships(den_data[den], refs)
-	ContractCodec.restore_all(d.get("contracts", {}), refs, belts)
+	ContractCodec.restore_all(d.get("contracts", {}), refs, belts, w)
 	for pair in ships:
 		ShipCodec.finish(pair[0] as Ship, pair[1] as Dictionary, refs)
 	for fd: Dictionary in d.get("fleets", []):
@@ -259,14 +291,12 @@ static func apply_scene(tree: SceneTree, d: Dictionary) -> void:
 		world.claims.restore_links(refs)
 	if world and world.raids:
 		world.raids.load_state(d.get("raids", {}), refs)
-	if Research.legacy_pending:
-		Research.grant_legacy(tree)
-	_restore_camera.call_deferred(tree, d.get("camera", {}))
+	_restore_camera.call_deferred(w, d.get("camera", {}))
 
 
 ## Deferred: after the system has set the camera up (it defers that too).
-static func _restore_camera(tree: SceneTree, c: Dictionary) -> void:
-	var cam := RTSCamera.of(tree)
+static func _restore_camera(w: SystemWorld, c: Dictionary) -> void:
+	var cam := w.camera if is_instance_valid(w) else null
 	if cam == null or c.is_empty():
 		return
 	cam.set_yaw(float(c.get("yaw", cam.default_yaw_deg)), true)

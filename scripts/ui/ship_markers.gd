@@ -261,7 +261,7 @@ func select_and_follow(target: Node3D) -> void:
 
 
 func _process(delta: float) -> void:
-	var cam := get_viewport().get_camera_3d()
+	var cam := SystemWorld.camera_3d(self)
 	_count = 0
 	_badges.clear()
 	_arrows.clear()
@@ -282,7 +282,7 @@ func _process(delta: float) -> void:
 	var home := _home_position()
 	_zoomed_out = dist > drop_line_zoom
 	var screen := vp.grow(20.0)
-	for n in get_tree().get_nodes_in_group(Ship.GROUP):
+	for n in SystemWorld.nodes_in(self, Ship.GROUP):
 		var s := n as Ship
 		if s == null or s.dead or not s.is_inside_tree():
 			continue
@@ -316,7 +316,7 @@ func _process(delta: float) -> void:
 				continue
 			var e := _next_entry()
 			_fill_den(e, d, cam, sp, d == selected or d == followed)
-		for n in get_tree().get_nodes_in_group(DenArrivalSite.GROUP):
+		for n in SystemWorld.nodes_in(self, DenArrivalSite.GROUP):
 			var site := n as DenArrivalSite
 			if site == null or not site.is_inside_tree() or cam.is_position_behind(site.global_position):
 				continue

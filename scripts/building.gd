@@ -191,8 +191,8 @@ func get_service() -> Node:
 
 ## First service node in [param group] whose building is active (the
 ## Factory, Outfitter, Salvage Yard, Science Lab finders), or null.
-static func first_active_service(tree: SceneTree, group: String) -> Node:
-	for n in tree.get_nodes_in_group(group):
+static func first_active_service(ctx: Node, group: String) -> Node:
+	for n in SystemWorld.nodes_in(ctx, group):
 		var b: Variant = n.get(&"building")
 		if is_instance_valid(b) and (b as Building).is_active():
 			return n
@@ -638,7 +638,7 @@ func restore_ship(ship: Ship, docked: bool) -> void:
 		add_child(ship)
 		ship.snap_to_slot()
 	else:
-		SpaceNav.space_root(get_tree()).add_child(ship)
+		SpaceNav.space_root(self).add_child(ship)
 		ship.mover.avoid_enabled = true
 	if not ships.has(ship):
 		ships.append(ship)

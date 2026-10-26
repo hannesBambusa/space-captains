@@ -149,7 +149,7 @@ static func target_need(target: Node3D) -> float:
 	if d:
 		need = (d.hull + d.shields) / REF_EHP
 	if target.is_inside_tree():
-		var near := Combat.hostiles_near(target.get_tree(), target.global_position, ESCORT_RADIUS, Combat.Faction.PLAYER)
+		var near := Combat.hostiles_near(target, target.global_position, ESCORT_RADIUS, Combat.Faction.PLAYER)
 		need += ESCORT_NEED * float(maxi(near.size() - 1, 0))
 	return need
 
@@ -180,16 +180,16 @@ static func assess(contract: BountyContract, asker: Ship = null) -> Dictionary:
 	var need := target_need(contract.target)
 	var goal := need * FLEET_POWER_SHARE
 	var cap := cap_for(contract)
-	var tree: SceneTree = null
+	var ctx: Node = null
 	if asker and asker.is_inside_tree():
-		tree = asker.get_tree()
+		ctx = asker
 	elif Combat.is_live(contract.target) and contract.target.is_inside_tree():
-		tree = contract.target.get_tree()
+		ctx = contract.target
 	var free: Array[float] = []
 	var hired_sum := 0.0
 	var hired := 0
-	if tree:
-		for n in tree.get_nodes_in_group(Ship.GROUP):
+	if ctx:
+		for n in SystemWorld.nodes_in(ctx, Ship.GROUP):
 			var s := n as Ship
 			var mb := s.brain as MercenaryBrain if s else null
 			if mb == null or s.dead:
@@ -256,7 +256,7 @@ static func call_fleet(bounty: BountyContract, caller: Ship, size: int = 0) -> M
 	f.leader_name = caller.get_display_name()
 	EventLog.post("%s calls a fleet for %s (%d ships wanted)" % [caller.get_display_name(), bounty.get_target_name(), f.wanted],
 			EventLog.Kind.COMBAT, caller)
-	f.invite(caller.get_tree())
+	f.invite(caller)
 	return f
 
 
@@ -288,12 +288,12 @@ func _add_member(ship: Ship) -> void:
 			"rank": ship.captain.rank if ship.captain else 0, "left_early": false, "lost": false}
 
 
-## Asks the idle and patrolling mercs, once each.
-func invite(tree: SceneTree) -> void:
-	if tree == null or not is_recruiting():
+## Asks the idle and patrolling mercs (in [param ctx]'s system), once each.
+func invite(ctx: Node) -> void:
+	if ctx == null or not ctx.is_inside_tree() or not is_recruiting():
 		return
 	var candidates: Array[MercenaryBrain] = []
-	for n in tree.get_nodes_in_group(Ship.GROUP):
+	for n in SystemWorld.nodes_in(ctx, Ship.GROUP):
 		var s := n as Ship
 		var mb := s.brain as MercenaryBrain if s else null
 		if mb == null or s.dead or members.has(s) or has_declined(s) or not mb.can_answer_fleet():
@@ -344,7 +344,7 @@ func update() -> void:
 		State.FORMING:
 			if now >= _next_invite:
 				_next_invite = now + INVITE_INTERVAL
-				invite(leader.get_tree() if is_instance_valid(leader) else null)
+				invite(leader if is_instance_valid(leader) else null)
 			var strong := strong_enough()
 			var all_in := members.size() >= 2 and (members.size() >= wanted or strong)
 			if all_in:
@@ -555,8 +555,7 @@ func _set_state(s: State) -> void:
 
 ## Where the fleet forms up: off the Home Station toward the target.
 func rally_point() -> Vector3:
-	var tree := leader.get_tree() if is_instance_valid(leader) and leader.is_inside_tree() else null
-	var sys := SolarSystem.of(tree)
+	var sys := SolarSystem.of(leader) if is_instance_valid(leader) else null
 	if sys == null or sys.home_station == null or not Combat.is_live(contract.target):
 		return leader.global_position if is_instance_valid(leader) else Vector3.ZERO
 	var home := sys.home_station.global_position

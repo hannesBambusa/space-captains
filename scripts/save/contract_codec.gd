@@ -67,11 +67,12 @@ static func save_contract(c: Contract, listed: bool) -> Dictionary:
 
 ## Builds, links and lists every saved contract. Needs the ships, dens,
 ## scrap fields and clusters registered in [param refs] (clusters by name in
-## [param belts], old belt names included).
-static func restore_all(d: Dictionary, refs: SaveRefs, belts: Dictionary) -> void:
+## [param belts], old belt names included). [param ctx]: a node in the
+## contracts' system (planet raids find their planet there).
+static func restore_all(d: Dictionary, refs: SaveRefs, belts: Dictionary, ctx: Node = null) -> void:
 	var made: Array[Array] = []
 	for s: Dictionary in d.get("contracts", []):
-		var c := _make(s, refs, belts)
+		var c := _make(s, refs, belts, ctx)
 		if c:
 			refs.add(int(s["sid"]), c)
 			made.append([c, s])
@@ -89,7 +90,7 @@ static func restore_all(d: Dictionary, refs: SaveRefs, belts: Dictionary) -> voi
 	SalvageContract._next_free_id = mini(SalvageContract._next_free_id, int(d.get("free_next", -1)))
 
 
-static func _make(s: Dictionary, refs: SaveRefs, belts: Dictionary) -> Contract:
+static func _make(s: Dictionary, refs: SaveRefs, belts: Dictionary, ctx: Node) -> Contract:
 	var target := refs.node3d(int(s.get("target", 0)))
 	var c: Contract
 	match int(s["type"]):
@@ -129,8 +130,7 @@ static func _make(s: Dictionary, refs: SaveRefs, belts: Dictionary) -> Contract:
 			ec.trips_completed = int(ed.get("trips_completed", 0))
 			c = ec
 		Contract.Type.PLANET_RAID:
-			var tree := Engine.get_main_loop() as SceneTree
-			var body := PlanetRaidContract.find_planet(tree, String(s.get("planet", ""))) if tree else null
+			var body := PlanetRaidContract.find_planet(ctx, String(s.get("planet", ""))) if ctx else null
 			if body == null:
 				return null
 			var rc := PlanetRaidContract.new(body, int(s["reward"]))

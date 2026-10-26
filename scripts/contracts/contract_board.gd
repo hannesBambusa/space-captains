@@ -128,7 +128,7 @@ func bounty_escrow_total() -> int:
 
 ## Credits held in defence zone kill budgets (DefenseZones).
 func zone_escrow_total() -> int:
-	var zones := DefenseZones.of(get_tree())
+	var zones := DefenseZones.of(SystemWorld.home(get_tree()))
 	return zones.budget_total() if zones else 0
 
 
@@ -532,7 +532,7 @@ func _finish_delivery(contract: LoadContract, ship: Node, pay: int, mat: int, or
 ## lets the Factory make it early, or discounts it when already tooled.
 ## Returns the module name ("" without a Factory).
 func _find_rare_part(ship: Ship) -> String:
-	var o := Factory.find(ship.get_tree())
+	var o := Factory.find(ship)
 	if o == null:
 		return ""
 	var pool: Array[ShipModule] = []

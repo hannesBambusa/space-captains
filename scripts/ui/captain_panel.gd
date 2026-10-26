@@ -510,7 +510,7 @@ func _on_request() -> void:
 
 ## "Ore Hold Mk II, paid 400 cr, waiting for titanium"; hidden without an order.
 func _refresh_order(cap: Captain) -> void:
-	var f := Factory.find(get_tree())
+	var f := Factory.find(self)
 	var o := f.order_of(cap) if f else {}
 	_order.visible = not o.is_empty()
 	_order_title.visible = not o.is_empty()

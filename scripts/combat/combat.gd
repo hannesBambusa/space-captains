@@ -47,11 +47,11 @@ static func hostile(a: int, b: int) -> bool:
 
 ## Live, targetable combatants hostile to [param faction] within
 ## [param radius] of [param pos] (on the plane), nearest first.
-static func hostiles_near(tree: SceneTree, pos: Vector3, radius: float, faction: int) -> Array[Node3D]:
+static func hostiles_near(ctx: Node, pos: Vector3, radius: float, faction: int) -> Array[Node3D]:
 	var found: Array[Node3D] = []
 	var dists: Array[float] = []
 	var r2 := radius * radius
-	for n in tree.get_nodes_in_group(GROUP):
+	for n in SystemWorld.nodes_in(ctx, GROUP):
 		var c := n as Node3D
 		if c == null or not hostile(int(c.call(&"get_faction")), faction) or not is_live_target(c):
 			continue
@@ -80,6 +80,6 @@ static func nearest_of(nodes: Array, pos: Vector3) -> Node3D:
 	return best
 
 
-static func nearest_hostile(tree: SceneTree, pos: Vector3, radius: float, faction: int) -> Node3D:
-	var list := hostiles_near(tree, pos, radius, faction)
+static func nearest_hostile(ctx: Node, pos: Vector3, radius: float, faction: int) -> Node3D:
+	var list := hostiles_near(ctx, pos, radius, faction)
 	return list[0] if not list.is_empty() else null

@@ -193,7 +193,7 @@ func _refresh_info() -> void:
 	_loot.add_theme_color_override("font_color", Economy.ORE_COLORS[loot].lerp(Color.WHITE, 0.35))
 	_loot.tooltip_text = _loot_use(loot)
 	var units := rules.base_yield(d)
-	var f := Factory.find(get_tree())
+	var f := Factory.find(self)
 	var worth := " (~%s cr)" % UIUtil.amount(roundi(float(units) * f.market.willing_price(loot))) if f else ""
 	_yield.text = "%d %s a load%s" % [units, Economy.ore_name(loot), worth]
 	_yield.tooltip_text = "Per dropship load before cargo upgrades: %d by type, x%.2f for its size, x%.2f richness." % [
@@ -219,7 +219,7 @@ func _refresh_info() -> void:
 
 ## Owner, garrison, patrols and the re-claim line (phase C3).
 func _refresh_claim() -> void:
-	var pc := PlanetClaims.of(get_tree())
+	var pc := PlanetClaims.of(self)
 	var g := pc.garrison_of(planet) if pc else null
 	var claimed := g != null
 	_garrison_title.visible = claimed
@@ -249,7 +249,7 @@ func _refresh_claim() -> void:
 
 
 func _on_select_garrison() -> void:
-	var pc := PlanetClaims.of(get_tree())
+	var pc := PlanetClaims.of(self)
 	var g := pc.garrison_of(planet) if pc and planet else null
 	if g and hud and hud.selection:
 		hud.selection.select(g)
@@ -286,7 +286,7 @@ func _rebuild_contracts() -> void:
 
 
 func _dock_problem() -> String:
-	var mgr := BuildingManager.of(get_tree())
+	var mgr := BuildingManager.of(self)
 	var def := mgr.def_by_id(&"raider_dock") if mgr else null
 	if def == null or mgr.count_of(def) == 0:
 		if not Research.is_building_unlocked(&"raider_dock"):

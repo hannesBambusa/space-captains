@@ -166,7 +166,7 @@ func unlock_text(t: TechDef) -> String:
 			mods.append(m.display_name)
 	if not mods.is_empty():
 		parts.append("The Factory can make %s." % " and ".join(mods) if mods.size() <= 2 else "The Factory can make %s and %s." % [", ".join(mods.slice(0, mods.size() - 1)), mods[mods.size() - 1]])
-	var mgr := BuildingManager.of(get_tree()) if is_inside_tree() else null
+	var mgr := BuildingManager.of(SystemWorld.home(get_tree())) if is_inside_tree() else null
 	for id in t.unlock_buildings:
 		var def := mgr.def_by_id(id) if mgr else null
 		parts.append("Unlocks the %s." % (def.display_name if def else String(id).capitalize()))
@@ -179,7 +179,7 @@ func unlock_text(t: TechDef) -> String:
 # --- Funding -----------------------------------------------------------------------
 
 func lab() -> ScienceLab:
-	return ScienceLab.find(get_tree()) if is_inside_tree() else null
+	return ScienceLab.find(self) if is_inside_tree() else null
 
 
 ## Why [param t] cannot be funded now, or "".
@@ -456,17 +456,18 @@ func grant(t: TechDef) -> void:
 ## An older save without research: it keeps what it could use before. Every
 ## module tech up to the Factory's tooling tier is done, and the techs of
 ## every module a captain has fitted, holds in the warehouse or ordered.
-## Building techs (the Raider Dock) are not granted.
-func grant_legacy(tree: SceneTree) -> void:
+## Building techs (the Raider Dock) are not granted. [param ctx]: a node in
+## the home system.
+func grant_legacy(ctx: Node) -> void:
 	legacy_pending = false
-	var f := Factory.find(tree)
+	var f := Factory.find(ctx)
 	var tier := f.tooling_tier if f else 1
 	var cat := catalog()
 	for t in cat.techs:
 		if t and not t.hidden and not t.unlock_modules.is_empty() and t.tier <= tier:
 			grant(t)
 	var owned: Array[StringName] = []
-	for n in tree.get_nodes_in_group(Ship.GROUP):
+	for n in SystemWorld.nodes_in(ctx, Ship.GROUP):
 		var s := n as Ship
 		if s and s.loadout:
 			for m in s.loadout.modules():

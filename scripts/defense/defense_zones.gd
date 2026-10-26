@@ -47,8 +47,9 @@ var _next_uid: int = 1
 var _scan_at: float = 0.0
 
 
-static func of(tree: SceneTree) -> DefenseZones:
-	return tree.get_first_node_in_group(GROUP) as DefenseZones if tree else null
+static func of(n: Node) -> DefenseZones:
+	var w := CombatWorld.of(n)
+	return w.zones if w and w.zones and w.zones.is_in_group(GROUP) else null
 
 
 func _ready() -> void:
@@ -143,7 +144,7 @@ func threats_near(pos: Vector3, reach: float = ENGAGE_REACH) -> Array[Node3D]:
 func place_problem(world_pos: Vector3) -> String:
 	if zones.size() >= MAX_ZONES:
 		return "All %d defence zones are placed (remove one first)" % MAX_ZONES
-	var sys := SolarSystem.of(get_tree())
+	var sys := SolarSystem.of(self)
 	if sys and sys.get_extent() > 0.0 and SpaceNav.flat_length(world_pos) > sys.get_extent():
 		return "Outside the system"
 	return ""
@@ -151,7 +152,7 @@ func place_problem(world_pos: Vector3) -> String:
 
 ## Would a zone at [param world_pos] move with the station?
 func anchors_at(world_pos: Vector3) -> bool:
-	var mgr := BuildingManager.of(get_tree())
+	var mgr := BuildingManager.of(self)
 	return mgr != null and mgr.frame != null and SpaceNav.flat_distance(world_pos, mgr.frame.global_position) <= ANCHOR_REACH
 
 
@@ -161,7 +162,7 @@ func anchors_at(world_pos: Vector3) -> bool:
 func anchor_body_at(world_pos: Vector3) -> PlanetBody:
 	if anchors_at(world_pos):
 		return null
-	var sys := SolarSystem.of(get_tree())
+	var sys := SolarSystem.of(self)
 	if sys == null:
 		return null
 	var best: PlanetBody = null
@@ -282,8 +283,8 @@ func _make(label: String, anchored: bool) -> DefenseZone:
 ## Puts [param z] in its parent: the Structures frame (anchored, [param pos]
 ## frame-local unless [param world]) or the space root (world position).
 func _attach(z: DefenseZone, pos: Vector3, world: bool) -> void:
-	var mgr := BuildingManager.of(get_tree())
-	var body := PlanetRaidContract.find_planet(get_tree(), z.anchor_body) if not z.anchored and not z.anchor_body.is_empty() else null
+	var mgr := BuildingManager.of(self)
+	var body := PlanetRaidContract.find_planet(self, z.anchor_body) if not z.anchored and not z.anchor_body.is_empty() else null
 	if z.anchored and mgr and mgr.frame:
 		mgr.frame.add_child(z)
 		var local := mgr.frame.to_local(pos) if world else pos
@@ -296,7 +297,7 @@ func _attach(z: DefenseZone, pos: Vector3, world: bool) -> void:
 	else:
 		z.anchor_body = ""
 		z.anchored = false
-		SpaceNav.space_root(get_tree()).add_child(z)
+		SpaceNav.space_root(self).add_child(z)
 		z.global_position = pos
 	zones.append(z)
 

@@ -1,0 +1,40 @@
+[gd_scene load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://scripts/view_manager.gd" id="1_vm"]
+[ext_resource type="Script" path="res://scripts/system_view.gd" id="2_view"]
+[ext_resource type="PackedScene" path="res://scenes/system.tscn" id="3_system"]
+[ext_resource type="Script" path="res://scripts/screenshot_mode.gd" id="4_shot"]
+[ext_resource type="Script" path="res://scripts/selection_controller.gd" id="5_sel"]
+[ext_resource type="Script" path="res://scripts/placement_controller.gd" id="6_place"]
+[ext_resource type="Script" path="res://scripts/defense/zone_placement.gd" id="7_zplace"]
+[ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="8_hud"]
+
+[node name="Game" type="Node"]
+script = ExtResource("1_vm")
+
+[node name="SystemView" type="SubViewportContainer" parent="."]
+mouse_filter = 2
+script = ExtResource("2_view")
+
+[node name="HomeHost" type="SubViewport" parent="SystemView"]
+own_world_3d = true
+handle_input_locally = true
+audio_listener_enable_3d = true
+size = Vector2i(1920, 1080)
+render_target_update_mode = 4
+
+[node name="System" parent="SystemView/HomeHost" instance=ExtResource("3_system")]
+
+[node name="ScreenshotMode" type="Node" parent="."]
+script = ExtResource("4_shot")
+
+[node name="Selection" type="Node3D" parent="."]
+script = ExtResource("5_sel")
+
+[node name="Placement" type="Node3D" parent="."]
+script = ExtResource("6_place")
+
+[node name="ZonePlacement" type="Node3D" parent="."]
+script = ExtResource("7_zplace")
+
+[node name="HUD" parent="." instance=ExtResource("8_hud")]

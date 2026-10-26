@@ -3,8 +3,11 @@ extends Resource
 ## A jump gate linking this system to another one in the cluster.
 
 @export var name: String = "Gate"
-## System name the gate leads to (cluster map, later).
+## System name the gate leads to. Generated network: filled at run time
+## (Sector, ClusterNetwork), the home gates on every new game and load.
 @export var target_system: String = ""
+## Name of the gate a ship comes out of in [member target_system].
+@export var target_gate: String = ""
 @export var orbit_radius: float = 26000.0
 @export_range(0.0, 360.0, 0.1, "degrees") var orbit_angle_deg: float = 0.0
 ## Seconds per orbit at 1x. 0 = fixed in place.

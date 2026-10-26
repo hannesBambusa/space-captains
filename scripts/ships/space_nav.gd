@@ -54,10 +54,9 @@ const REF_SPEED := 150.0
 ## top of the straight flight, sim seconds (travel_estimate).
 const TRIP_MANEUVER_S := 12.0
 
-## Cached obstacle list: Array of {node: Node3D, radius: float (hard),
-## plan: float (planning radius)}.
-static var _obstacles: Array[Dictionary] = []
-static var _obstacle_source: SolarSystem
+## Cached obstacle lists per system (SolarSystem instance id -> Array of
+## {node: Node3D, radius: float (hard), plan: float (planning radius)}).
+static var _obstacles: Dictionary = {}
 
 
 ## Distance between [param a] and [param b] on the plane (x, z).
@@ -123,9 +122,9 @@ static func distance_to_belt(belt: AsteroidCluster, world_pos: Vector3) -> float
 	return belt.distance_to(world_pos)
 
 
-## The system's clusters (empty outside a SolarSystem).
-static func belts(tree: SceneTree) -> Array[AsteroidCluster]:
-	var sys := SolarSystem.of(tree)
+## The clusters of [param ctx]'s system (empty outside a SolarSystem).
+static func belts(ctx: Node) -> Array[AsteroidCluster]:
+	var sys := SolarSystem.of(ctx)
 	if sys:
 		return sys.belts
 	var none: Array[AsteroidCluster] = []
@@ -138,14 +137,14 @@ static func belts(tree: SceneTree) -> Array[AsteroidCluster]:
 ## (the straight line toward [param goal], and the current motion
 ## [param vel]). 0 = clear. Ships whose way misses every cluster fly level.
 ## [param climb_tan] = tangent of the steepest climb, sets how early to start.
-static func belt_lane_altitude(tree: SceneTree, pos: Vector3, vel: Vector3, goal: Vector3, climb_tan: float) -> float:
+static func belt_lane_altitude(ctx: Node, pos: Vector3, vel: Vector3, goal: Vector3, climb_tan: float) -> float:
 	var need := 0.0
 	var p := Vector2(pos.x, pos.z)
 	var v := Vector2(vel.x, vel.z)
 	var speed := v.length()
 	var to_goal := Vector2(goal.x - pos.x, goal.z - pos.z)
 	var gd := to_goal.length()
-	for b in belts(tree):
+	for b in belts(ctx):
 		if b.def == null:
 			continue
 		var alt := b.lane_altitude()
@@ -163,8 +162,8 @@ static func belt_lane_altitude(tree: SceneTree, pos: Vector3, vel: Vector3, goal
 
 ## The cluster whose footprint (plus the largest rock) holds [param pos]
 ## on the plane, or null.
-static func rock_band_at(tree: SceneTree, pos: Vector3) -> AsteroidCluster:
-	for b in belts(tree):
+static func rock_band_at(ctx: Node, pos: Vector3) -> AsteroidCluster:
+	for b in belts(ctx):
 		if b.def and b.distance_to(pos) <= b.def.max_scale + ROCK_BAND_SLACK:
 			return b
 	return null
@@ -178,10 +177,13 @@ static func _segment_meets_disc(a: Vector2, b: Vector2, c: Vector2, radius: floa
 	return (a + ab * t - c).length() <= radius
 
 
-## The world-space node undocked ships live under (created on first use).
-static func space_root(tree: SceneTree) -> Node3D:
-	var sys := SolarSystem.of(tree)
-	var parent: Node = sys if sys else tree.current_scene
+## The world-space node undocked ships live under in [param ctx]'s system
+## (created on first use).
+static func space_root(ctx: Node) -> Node3D:
+	var sys := SolarSystem.of(ctx)
+	var parent: Node = sys if sys else SystemWorld.of(ctx)
+	if parent == null:
+		parent = ctx.get_tree().current_scene
 	var root := parent.get_node_or_null(SPACE_ROOT_NAME) as Node3D
 	if root == null:
 		root = Node3D.new()
@@ -191,30 +193,39 @@ static func space_root(tree: SceneTree) -> Node3D:
 
 
 ## Bodies ships steer around: star, planets (with rings), moons, the home
-## station hub. Built once per SolarSystem.
-static func obstacles(tree: SceneTree) -> Array[Dictionary]:
-	var sys := SolarSystem.of(tree)
-	if sys == _obstacle_source and (sys == null or not _obstacles.is_empty()):
-		return _obstacles
-	_obstacle_source = sys
-	_obstacles = []
+## station hub, in [param ctx]'s system. Built once per SolarSystem.
+static func obstacles(ctx: Node) -> Array[Dictionary]:
+	var sys := SolarSystem.of(ctx)
 	if sys == null:
-		return _obstacles
+		var none: Array[Dictionary] = []
+		return none
+	var key := sys.get_instance_id()
+	var cached: Array[Dictionary] = []
+	if _obstacles.has(key):
+		cached = _obstacles[key]
+		if not cached.is_empty():
+			return cached
+	else:
+		# A new system: forget the ones that are gone.
+		for k: int in _obstacles.keys():
+			if not is_instance_id_valid(k):
+				_obstacles.erase(k)
+		_obstacles[key] = cached
 	if sys.star:
-		_add_obstacle(sys.star, sys.star.radius * 1.25 + SHIP_MARGIN)
+		_add_obstacle(cached, sys.star, sys.star.radius * 1.25 + SHIP_MARGIN)
 	for p in sys.planets:
-		_add_obstacle(p, body_reach(p.def) + SHIP_MARGIN)
+		_add_obstacle(cached, p, body_reach(p.def) + SHIP_MARGIN)
 		for c in p.get_children():
 			if c is PlanetBody:
-				_add_obstacle(c as PlanetBody, body_reach((c as PlanetBody).def) + SHIP_MARGIN)
+				_add_obstacle(cached, c as PlanetBody, body_reach((c as PlanetBody).def) + SHIP_MARGIN)
 	if sys.home_station:
-		_obstacles.append({"node": sys.home_station, "radius": STATION_HARD_RADIUS, "plan": STATION_PLAN_RADIUS})
-	return _obstacles
+		cached.append({"node": sys.home_station, "radius": STATION_HARD_RADIUS, "plan": STATION_PLAN_RADIUS})
+	return cached
 
 
-static func _add_obstacle(node: Node3D, hard: float) -> void:
+static func _add_obstacle(list: Array[Dictionary], node: Node3D, hard: float) -> void:
 	var pad := clampf(hard * PLAN_PAD_SHARE, PLAN_PAD.x, PLAN_PAD.y) + PLAN_PAD_SPEED * world_velocity(node).length()
-	_obstacles.append({"node": node, "radius": hard, "plan": hard + pad})
+	list.append({"node": node, "radius": hard, "plan": hard + pad})
 
 
 ## Visible reach of a planet or moon from its centre: the surface, the
@@ -250,9 +261,9 @@ static func predict_position(node: Node3D, ahead: float) -> Vector3:
 ## none (a warp never crosses rocks at their height). [param skip]: the
 ## hop's destination cluster (the hop drops out at its edge, see
 ## [method band_entry]).
-static func segment_lane_altitude(tree: SceneTree, a: Vector3, b: Vector3, skip: AsteroidCluster = null) -> float:
+static func segment_lane_altitude(ctx: Node, a: Vector3, b: Vector3, skip: AsteroidCluster = null) -> float:
 	var need := 0.0
-	for belt in belts(tree):
+	for belt in belts(ctx):
 		if belt.def == null or belt == skip:
 			continue
 		var c := Vector2(belt.global_position.x, belt.global_position.z)
@@ -285,17 +296,18 @@ static func band_entry(belt: AsteroidCluster, from: Vector3, dir: Vector3) -> fl
 
 
 ## Places no warp starts or ends: [{center: Vector3, radius: float}] (the
-## Home Station complex and shield bubble, every structure).
-static func no_warp_zones(tree: SceneTree) -> Array[Dictionary]:
+## Home Station complex and shield bubble, every structure), in
+## [param ctx]'s system.
+static func no_warp_zones(ctx: Node) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
-	var sys := SolarSystem.of(tree)
+	var sys := SolarSystem.of(ctx)
 	if sys and sys.home_station:
 		var r := NO_WARP_STATION
-		var bubble := StationShield.find(tree)
+		var bubble := StationShield.find(ctx)
 		if bubble:
 			r = maxf(r, bubble.radius + 200.0)
 		out.append({"center": sys.home_station.global_position, "radius": r})
-	var mgr := BuildingManager.of(tree)
+	var mgr := BuildingManager.of(ctx)
 	if mgr:
 		for b in mgr.buildings:
 			if is_instance_valid(b):
@@ -326,9 +338,9 @@ static func travel_text(t: Vector2) -> String:
 
 
 ## "at Talon Reach", "near home", "near Verda": where [param pos] is, for
-## event lines.
-static func place_name(tree: SceneTree, pos: Vector3) -> String:
-	var sys := SolarSystem.of(tree)
+## event lines ([param ctx]: any node in the system).
+static func place_name(ctx: Node, pos: Vector3) -> String:
+	var sys := SolarSystem.of(ctx)
 	if sys == null:
 		return ""
 	if sys.home_station and flat_distance(pos, sys.home_station.global_position) < 3500.0:

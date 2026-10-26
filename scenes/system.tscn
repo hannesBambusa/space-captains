@@ -1,17 +1,13 @@
-[gd_scene load_steps=34 format=3]
+[gd_scene load_steps=30 format=3]
 
 [ext_resource type="Shader" path="res://shaders/space_sky.gdshader" id="1_sky"]
+[ext_resource type="Script" path="res://scripts/system_world.gd" id="0_world"]
 [ext_resource type="Script" path="res://scripts/solar_system.gd" id="2_system"]
 [ext_resource type="Resource" path="res://data/systems/home_system.tres" id="3_def"]
 [ext_resource type="Script" path="res://scripts/space_dust.gd" id="4_dust"]
 [ext_resource type="PackedScene" path="res://scenes/rts_camera.tscn" id="5_cam"]
-[ext_resource type="Script" path="res://scripts/screenshot_mode.gd" id="6_shot"]
 [ext_resource type="Script" path="res://scripts/building_manager.gd" id="7_bm"]
 [ext_resource type="Resource" path="res://data/buildings/mining_outpost.tres" id="8_outpost"]
-[ext_resource type="Script" path="res://scripts/selection_controller.gd" id="9_sel"]
-[ext_resource type="Script" path="res://scripts/placement_controller.gd" id="10_place"]
-[ext_resource type="Script" path="res://scripts/defense/zone_placement.gd" id="40_zplace"]
-[ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="11_hud"]
 [ext_resource type="Script" path="res://scripts/contracts/contract_markers.gd" id="13_markers"]
 [ext_resource type="Resource" path="res://data/buildings/mercenary_outpost.tres" id="15_merc"]
 [ext_resource type="Script" path="res://scripts/combat/combat_world.gd" id="16_combat"]
@@ -61,6 +57,7 @@ adjustment_contrast = 1.06
 adjustment_saturation = 1.1
 
 [node name="System" type="Node3D"]
+script = ExtResource("0_world")
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("env")
@@ -85,9 +82,6 @@ pitch_curve = 2.6
 fit_distance = 112000.0
 bounds_radius = 52000.0
 
-[node name="ScreenshotMode" type="Node" parent="."]
-script = ExtResource("6_shot")
-
 [node name="Buildings" type="Node" parent="."]
 script = ExtResource("7_bm")
 building_defs = Array[Resource]([ExtResource("8_outpost"), ExtResource("15_merc"), ExtResource("18_outf"), ExtResource("19_salv"), ExtResource("33_rdock"), ExtResource("32_lab"), ExtResource("30_turr"), ExtResource("31_shld")])
@@ -96,17 +90,6 @@ factory_def = ExtResource("22_fact")
 [node name="Combat" type="Node3D" parent="."]
 script = ExtResource("16_combat")
 
-[node name="Selection" type="Node3D" parent="."]
-script = ExtResource("9_sel")
-
-[node name="Placement" type="Node3D" parent="."]
-script = ExtResource("10_place")
-
-[node name="ZonePlacement" type="Node3D" parent="."]
-script = ExtResource("40_zplace")
-
 [node name="ContractMarkers" type="Node3D" parent="."]
 script = ExtResource("13_markers")
-
-[node name="HUD" parent="." instance=ExtResource("11_hud")]
 

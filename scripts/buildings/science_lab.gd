@@ -11,8 +11,8 @@ const GROUP := "science_labs"
 var building: Building
 
 
-static func find(tree: SceneTree) -> ScienceLab:
-	return Building.first_active_service(tree, GROUP) as ScienceLab
+static func find(ctx: Node) -> ScienceLab:
+	return Building.first_active_service(ctx, GROUP) as ScienceLab
 
 
 func setup(owner_building: Building) -> void:
@@ -30,7 +30,7 @@ func _process(delta: float) -> void:
 
 
 func sim_step(dt: float) -> void:
-	if dt <= 0.0 or building == null or not building.is_active() or ScienceLab.find(get_tree()) != self:
+	if dt <= 0.0 or building == null or not building.is_active() or ScienceLab.find(self) != self:
 		return
 	Research.sim_step(dt)
 

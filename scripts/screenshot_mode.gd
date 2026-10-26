@@ -7,7 +7,9 @@ extends Node
 ##   --time=<seconds>             advance sim time before the shot
 ##   --frames=<n>                 frames to render before the shot (default [member wait_frames])
 ##   --novsync                    disable vsync so the printed frame times are uncapped
-## Prints FPS, CPU process time and GPU frame time averaged over the last frames.
+## Prints FPS, CPU process time and GPU frame time (of the system's
+## SubViewport) averaged over the last frames. Saves the window (system and
+## HUD). Lives at the top of scenes/game.tscn, beside the HUD.
 
 @export var wait_frames: int = 90
 @export var measure_frames: int = 60
@@ -46,8 +48,8 @@ func _ready() -> void:
 	var clock := get_node_or_null(^"/root/SimClock")
 	if clock and advance != 0.0:
 		clock.call("advance", advance)
-	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
-	var cam := RTSCamera.of(get_tree())
+	RenderingServer.viewport_set_measure_render_time(_render_rid(), true)
+	var cam := RTSCamera.of(self)
 	if cam:
 		cam.set("edge_pan_enabled", false)
 	_apply_view.call_deferred(cam_spec, focus_name)
@@ -56,7 +58,7 @@ func _ready() -> void:
 func _apply_view(cam_spec: String, focus_name: String) -> void:
 	# Let the system builder configure the camera first (it defers too).
 	await get_tree().process_frame
-	var cam := RTSCamera.of(get_tree())
+	var cam := RTSCamera.of(self)
 	if cam == null:
 		return
 	var parts := cam_spec.split(",") if not cam_spec.is_empty() else PackedStringArray()
@@ -64,7 +66,8 @@ func _apply_view(cam_spec: String, focus_name: String) -> void:
 		push_warning("ScreenshotMode: --cam needs x,z,distance,yaw_deg, got '%s'" % cam_spec)
 		parts = PackedStringArray()
 	if not focus_name.is_empty():
-		var target := get_tree().current_scene.find_child(focus_name, true, false) as Node3D
+		var w := SystemWorld.of(self)
+		var target := w.find_child(focus_name, true, false) as Node3D if w else null
 		if target == null:
 			push_warning("ScreenshotMode: --focus node '%s' not found" % focus_name)
 		elif cam.has_method("focus_on"):
@@ -78,10 +81,16 @@ func _apply_view(cam_spec: String, focus_name: String) -> void:
 		cam.call("set_view", parts[0].to_float(), parts[1].to_float(), parts[2].to_float(), parts[3].to_float())
 
 
+## The viewed system's viewport (the 3D render), else this one.
+func _render_rid() -> RID:
+	var w := SystemWorld.of(self)
+	return w.get_viewport().get_viewport_rid() if w else get_viewport().get_viewport_rid()
+
+
 func _process(delta: float) -> void:
 	_frames += 1
 	if _frames > wait_frames - measure_frames:
-		var vp := get_viewport().get_viewport_rid()
+		var vp := _render_rid()
 		var now := Time.get_ticks_usec()
 		_sum_delta += float(now - _last_usec) / 1000000.0 if _last_usec > 0 else delta
 		_sum_process += Performance.get_monitor(Performance.TIME_PROCESS)

@@ -127,7 +127,7 @@ func _apply_hit(i: int) -> void:
 	at.y = _pos[i].y
 	target.call(&"take_hit", _damage[i], attacker, at)
 	hits_applied += 1
-	var fx := CombatWorld.fx_of(get_tree())
+	var fx := CombatWorld.fx_of(self)
 	if fx:
 		fx.spark(at, _colors[i])
 
@@ -146,7 +146,7 @@ func _hit_shield(i: int, shields: Array[StationShield], s: float) -> bool:
 		var at := a.lerp(b, t)
 		sh.absorb(_damage[i] if _hits[i] else 0.0, _attackers[i].get_ref() as Node3D, at)
 		shield_hits += 1
-		var fx := CombatWorld.fx_of(get_tree())
+		var fx := CombatWorld.fx_of(self)
 		if fx:
 			fx.spark(at, _colors[i])
 		return true

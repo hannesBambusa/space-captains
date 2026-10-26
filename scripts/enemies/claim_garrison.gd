@@ -259,8 +259,8 @@ func _guns(dt: float) -> void:
 	var near: Array[Node3D] = []
 	if retarget:
 		_gun_timer = RETARGET
-		near = Combat.hostiles_near(get_tree(), global_position, faction_def.garrison_turret_range + HIT_RADIUS, faction)
-	var pool := CombatWorld.projectiles_of(get_tree())
+		near = Combat.hostiles_near(self, global_position, faction_def.garrison_turret_range + HIT_RADIUS, faction)
+	var pool := CombatWorld.projectiles_of(self)
 	for ti in _turrets.size():
 		var t := _turrets[ti]
 		var node := t["node"] as Node3D

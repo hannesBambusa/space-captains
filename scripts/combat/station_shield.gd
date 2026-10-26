@@ -78,10 +78,10 @@ var _was_raised := false
 
 
 ## The live bubble of the player's station, or null.
-static func find(tree: SceneTree) -> StationShield:
-	if tree == null:
+static func find(ctx: Node) -> StationShield:
+	if ctx == null:
 		return null
-	for n in tree.get_nodes_in_group(GROUP):
+	for n in SystemWorld.nodes_in(ctx, GROUP):
 		var s := n as StationShield
 		if s and s.is_alive():
 			return s
@@ -89,8 +89,8 @@ static func find(tree: SceneTree) -> StationShield:
 
 
 ## The bubble if it shields [param p] from a shooter at [param from], else null.
-static func shielding(tree: SceneTree, p: Vector3, from: Vector3) -> StationShield:
-	var s := find(tree)
+static func shielding(ctx: Node, p: Vector3, from: Vector3) -> StationShield:
+	var s := find(ctx)
 	return s if s and s.protects(p, from) else null
 
 
@@ -128,14 +128,14 @@ func _ready() -> void:
 	refit()
 	radius = _target_radius
 	position = _target_center
-	var world := CombatWorld.of(get_tree())
+	var world := CombatWorld.of(self)
 	if world:
 		world.register_shield(self)
 	_apply_shape()
 
 
 func _exit_tree() -> void:
-	var world := CombatWorld.of(get_tree())
+	var world := CombatWorld.of(self)
 	if world:
 		world.unregister_shield(self)
 
@@ -280,7 +280,7 @@ func absorb(amount: float, attacker: Node3D, at: Vector3) -> void:
 	hits_taken += 1
 	damage_taken += amount
 	hp = maxf(hp - amount, 0.0)
-	ColonyAlarm.raise(get_tree(), self, "the station shield", attacker)
+	ColonyAlarm.raise(self, self, "the station shield", attacker)
 	if is_instance_valid(attacker) and attacker is ScavengerShip:
 		var f := (attacker as ScavengerShip).faction_def
 		var who := f.raiders_label() if f else "Raiders"

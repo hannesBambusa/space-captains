@@ -56,7 +56,7 @@ func job_begin(trip: CaptainBrain.Trip) -> bool:
 	var dir := toward.normalized().rotated(Vector3.UP, TAU * float(slot) / float(SLOT_COUNT) + _rng.randf_range(-0.15, 0.15))
 	var cut := f.global_position + dir * f.radius * _rng.randf_range(0.4, 0.55)
 	var hover := cut + dir * STANDOFF
-	var band := SpaceNav.rock_band_at(get_tree(), hover)
+	var band := SpaceNav.rock_band_at(self, hover)
 	if band and absf(cut.y) < band.rock_layer_height() + 6.0:
 		hover.y = lane_sign() * band.lane_altitude()
 	trip.meta["cut"] = cut

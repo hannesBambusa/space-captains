@@ -77,7 +77,8 @@ static func _focus_target(c: Contract, owner_hud: HUD) -> Node3D:
 	if c is PlanetRaidContract:
 		return c.target
 	if owner_hud and owner_hud.is_inside_tree():
-		var markers := owner_hud.get_tree().get_first_node_in_group(ContractMarkers.GROUP) as ContractMarkers
+		var w := SystemWorld.of(owner_hud)
+		var markers := w.contract_markers if w else null
 		var m := markers.get_marker(c) if markers else null
 		if m:
 			return m

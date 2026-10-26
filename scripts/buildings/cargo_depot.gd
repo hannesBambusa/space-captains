@@ -241,9 +241,9 @@ func pending() -> PackedInt32Array:
 
 
 ## Pending ore over every depot (see [method pending]).
-static func pending_all(tree: SceneTree) -> PackedInt32Array:
+static func pending_all(ctx: Node) -> PackedInt32Array:
 	var out := Economy.zero_ore()
-	for n in tree.get_nodes_in_group(GROUP):
+	for n in SystemWorld.nodes_in(ctx, GROUP):
 		var d := n as CargoDepot
 		if d and is_instance_valid(d.building) and d.building.is_active():
 			var p := d.pending()
@@ -353,7 +353,7 @@ func summary_text() -> String:
 
 
 func _spawn_shuttle() -> void:
-	var mgr := BuildingManager.of(get_tree())
+	var mgr := BuildingManager.of(self)
 	if mgr == null or mgr.frame == null:
 		return
 	_spawned += 1

@@ -275,10 +275,7 @@ static func tech_tip(t: TechDef) -> String:
 		var m := ModuleCatalog.shared().find(id)
 		if m:
 			lines.append("%s: %s" % [m.display_name, m.effect_text()])
-	var mgr: BuildingManager = null
-	var tree := Engine.get_main_loop() as SceneTree
-	if tree:
-		mgr = BuildingManager.of(tree)
+	var mgr := BuildingManager.of(SystemWorld.home(Engine.get_main_loop() as SceneTree))
 	for id in t.unlock_buildings:
 		var def := mgr.def_by_id(id) if mgr else null
 		lines.append("Unlocks the %s%s" % [def.display_name if def else String(id).capitalize(), " (in service in a later update)" if def and not def.in_service else ""])

@@ -232,7 +232,7 @@ func setup(owner_hud: HUD) -> void:
 	ContractBoard.contract_posted.connect(func(_c: Contract) -> void: _rebuild_contracts())
 	ContractBoard.contract_removed.connect(func(_c: Contract) -> void: _rebuild_contracts())
 	ContractBoard.contract_changed.connect(func(_c: Contract) -> void: _refresh_contracts())
-	var world := CombatWorld.of(get_tree())
+	var world := CombatWorld.of(self)
 	if world:
 		world.combatant_spawned.connect(func(_n: Node3D) -> void: _threats_dirty = true)
 		world.combatant_destroyed.connect(func(_n: Node3D, _k: Node3D) -> void: _threats_dirty = true)
@@ -299,7 +299,7 @@ func _refresh_planet_rows() -> void:
 	var sys := hud.solar_system if hud else null
 	if sys == null:
 		return
-	var claims := PlanetClaims.of(get_tree())
+	var claims := PlanetClaims.of(self)
 	for p in sys.planets:
 		for b in [p] + p.get_children().filter(func(n: Node) -> bool: return n is PlanetBody):
 			var body := b as PlanetBody
@@ -392,7 +392,7 @@ func _rebuild_threats() -> void:
 			by_faction[d.faction_def] = [] as Array[ScavengerDen]
 			groups.append(d.faction_def)
 		(by_faction[d.faction_def] as Array[ScavengerDen]).append(d)
-	var world := CombatWorld.of(get_tree())
+	var world := CombatWorld.of(self)
 	var threats := world.threats if world else null
 	var site: DenArrivalSite = threats.site if threats and is_instance_valid(threats.site) else null
 	if site and not by_faction.has(site.faction_def):
@@ -488,7 +488,7 @@ func _add_site_row(site: DenArrivalSite, f: FactionDef) -> void:
 func _update_outlook() -> void:
 	if not is_instance_valid(_outlook):
 		return
-	var world := CombatWorld.of(get_tree())
+	var world := CombatWorld.of(self)
 	var text := world.threats.outlook_text() if world and world.threats else ""
 	_outlook.text = "   " + text
 	_outlook.visible = not text.is_empty()
@@ -534,7 +534,7 @@ func _rebuild_scrap() -> void:
 	if _scrap == null:
 		return
 	_clear_rows(_scrap, _scrap_rows)
-	var world := CombatWorld.of(get_tree())
+	var world := CombatWorld.of(self)
 	var fields: Array[ScrapField] = []
 	if world:
 		fields = world.get_scrap_fields()

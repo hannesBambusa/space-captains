@@ -303,7 +303,7 @@ func _withdraw_step() -> bool:
 		return false
 	if ship.nearest_hostile(1200.0) != null:
 		return false
-	WarpFx.flash(ship.get_tree(), ship.global_position, 30.0)
+	WarpFx.flash(ship, ship.global_position, 30.0)
 	ship.leave_map()
 	return true
 
@@ -413,14 +413,13 @@ func _is_prey(s: Ship) -> bool:
 func _pick_prey() -> Ship:
 	if is_guarding():
 		return _guard_prey()
-	var tree := ship.get_tree()
 	var pos := ship.global_position
 	var den := ship.den if is_instance_valid(ship.den) else null
 	# The cluster in the base's reach right now (they drift past).
 	var turf: AsteroidCluster = den.belt if den else null
 	var best: Ship = null
 	var best_score := INF
-	for n in tree.get_nodes_in_group(Ship.GROUP):
+	for n in SystemWorld.nodes_in(ship, Ship.GROUP):
 		var m := n as Ship
 		if m == null or not m.is_targetable() or not _is_prey(m):
 			continue
@@ -432,7 +431,7 @@ func _pick_prey() -> Ship:
 					and (armed or turf.distance_to(m.global_position) < 1500.0)
 		if d > ship.stats.sensor_range and not on_turf:
 			continue
-		if StationShield.shielding(tree, m.global_position, pos):
+		if StationShield.shielding(ship, m.global_position, pos):
 			continue
 		var score := d
 		if m is MinerShip and (m as MinerShip).is_loaded():
@@ -454,17 +453,16 @@ func _pick_prey() -> Ship:
 ## Guarding: the player ship nearest this one inside the guard radius
 ## (any kind but cargo shuttles and pods), or null.
 func _guard_prey() -> Ship:
-	var tree := ship.get_tree()
 	var c := guard.global_position
 	var best: Ship = null
 	var best_d := INF
-	for n in tree.get_nodes_in_group(Ship.GROUP):
+	for n in SystemWorld.nodes_in(ship, Ship.GROUP):
 		var m := n as Ship
 		if m == null or m.faction != Combat.Faction.PLAYER or not m.is_targetable() or m is CargoShuttle or m is EscapePod:
 			continue
 		if m.global_position.distance_to(c) > guard_radius:
 			continue
-		if StationShield.shielding(tree, m.global_position, ship.global_position):
+		if StationShield.shielding(ship, m.global_position, ship.global_position):
 			continue
 		var d := ship.global_position.distance_to(m.global_position) - (400.0 if m == target else 0.0)
 		if d < best_d:
@@ -475,7 +473,7 @@ func _guard_prey() -> Ship:
 
 func _guns_near(pos: Vector3, radius: float) -> int:
 	var n := 0
-	for o in ship.get_tree().get_nodes_in_group(Ship.GROUP):
+	for o in SystemWorld.nodes_in(ship, Ship.GROUP):
 		var s := o as Ship
 		if s and s.faction == Combat.Faction.PLAYER and s.weapon and s.is_targetable() and SpaceNav.flat_distance(pos, s.global_position) < radius:
 			n += 1
@@ -487,9 +485,8 @@ func _guns_near(pos: Vector3, radius: float) -> int:
 ## then a shuttle or ship near home (STRUCTURES: any structure's hull
 ## instead). Null = fly on to the objective / loot.
 func _raid_pick() -> Node3D:
-	var tree := ship.get_tree()
 	var pos := ship.global_position
-	var sys := SolarSystem.of(tree)
+	var sys := SolarSystem.of(ship)
 	var home := sys.home_station.global_position if sys and sys.home_station else pos
 	if SpaceNav.flat_distance(pos, home) > RAID_ENGAGE_RADIUS * 2.0:
 		# A shuttle out in space can be caught on the way in.
@@ -497,11 +494,11 @@ func _raid_pick() -> Node3D:
 		if far is CargoShuttle and pos.distance_to(far.global_position) < RAID_ENGAGE_RADIUS:
 			return _through_shield(far)
 		return null
-	var bubble := StationShield.find(tree)
+	var bubble := StationShield.find(ship)
 	if bubble and bubble.is_up() and not bubble.contains(pos):
 		return bubble
 	# Nearest first (hostiles_near sorts by distance).
-	var near := Combat.hostiles_near(tree, pos, RAID_ENGAGE_RADIUS, ship.faction)
+	var near := Combat.hostiles_near(ship, pos, RAID_ENGAGE_RADIUS, ship.faction)
 	for h in near:
 		if h is DefenseTurret:
 			return h
@@ -524,7 +521,7 @@ func _raid_pick() -> Node3D:
 
 ## [param t], or the shield bubble when it stands between us and [param t].
 func _through_shield(t: Node3D) -> Node3D:
-	var bubble := StationShield.shielding(ship.get_tree(), t.global_position, ship.global_position)
+	var bubble := StationShield.shielding(ship, t.global_position, ship.global_position)
 	return bubble if bubble else t
 
 
@@ -728,14 +725,14 @@ func _raid_goal() -> Node3D:
 
 
 func _pick_raid_building() -> Building:
-	var mgr := BuildingManager.of(ship.get_tree())
+	var mgr := BuildingManager.of(ship)
 	if mgr == null:
 		return null
 	return Combat.nearest_of(mgr.buildings, ship.global_position) as Building
 
 
 func _home_position() -> Vector3:
-	var sys := SolarSystem.of(ship.get_tree())
+	var sys := SolarSystem.of(ship)
 	return sys.home_station.global_position if sys and sys.home_station else Vector3.ZERO
 
 

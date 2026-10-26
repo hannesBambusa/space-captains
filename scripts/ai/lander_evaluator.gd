@@ -37,7 +37,7 @@ static func load_value(rc: PlanetRaidContract, ship: Ship) -> float:
 	if rc == null or not is_instance_valid(rc.planet):
 		return 0.0
 	var units := float(PlanetRaidContract.rules().base_yield(rc.planet.def)) * (ship.stats.cargo if ship and ship.stats else 1.0)
-	var f := Factory.find(ship.get_tree()) if ship and ship.is_inside_tree() else null
+	var f := Factory.find(ship) if ship and ship.is_inside_tree() else null
 	var price := f.market.willing_price(rc.loot) if f else FALLBACK_PRICE[clampi(rc.loot, 0, FALLBACK_PRICE.size() - 1)]
 	return units * price
 

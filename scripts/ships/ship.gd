@@ -371,7 +371,7 @@ func _update_warp_policy() -> void:
 
 func _on_warp_changed(_m: ShipMover, state: ShipMover.Warp) -> void:
 	if state == ShipMover.Warp.WARP or (state == ShipMover.Warp.IDLE and _streak and _streak.visible):
-		WarpFx.flash(get_tree(), global_position, 18.0 + hit_radius * 2.0)
+		WarpFx.flash(self, global_position, 18.0 + hit_radius * 2.0)
 	status_changed.emit(self)
 
 
@@ -438,7 +438,7 @@ func get_dodge() -> float:
 ## The nearest live hostile to this ship within [param radius] (on the
 ## plane), or null (Combat.nearest_hostile).
 func nearest_hostile(radius: float) -> Node3D:
-	return Combat.nearest_hostile(get_tree(), global_position, radius, faction)
+	return Combat.nearest_hostile(self, global_position, radius, faction)
 
 
 func take_hit(amount: float, attacker: Node3D, _at: Vector3) -> void:
@@ -467,7 +467,7 @@ func destroy(killer: Node3D = null) -> void:
 		return
 	dead = true
 	var pos := global_position
-	var world := CombatWorld.of(get_tree())
+	var world := CombatWorld.of(self)
 	if world:
 		world.fx.explode(pos, 9.0)
 		if _leaves_scrap():
@@ -559,7 +559,7 @@ func _can_visit() -> bool:
 func _visit_services() -> bool:
 	if Career.consider(self):
 		return true
-	var o := Outfitter.find(get_tree())
+	var o := Outfitter.find(self)
 	if o:
 		o.visit(self)
 	return false
@@ -737,13 +737,12 @@ func _update_altitude(dt: float) -> void:
 	var parent := get_parent() as Node3D
 	var pos := global_position
 	var goal := parent.to_global(mover.goal_pos) if parent else mover.goal_pos
-	var tree := get_tree()
 	# The goal's own height (the station complex on its planet's inclined
 	# orbit, a den above the plane). Goals in a cluster (miners take their
 	# rock's height only beside it): from outside, its lane height on the
 	# side its orbit has lifted it to (the arc and a warp hop end there);
 	# inside, the plane (the lane rule below holds the height).
-	var goal_band := SpaceNav.rock_band_at(tree, goal)
+	var goal_band := SpaceNav.rock_band_at(self, goal)
 	var base := goal.y
 	if goal_band:
 		base = 0.0
@@ -800,11 +799,11 @@ func _update_altitude(dt: float) -> void:
 		# In the fight: its heights win over the belt lanes.
 		mover.cruise_y = cruise
 		return
-	var need := SpaceNav.belt_lane_altitude(tree, pos, get_world_velocity(), goal, tan(deg_to_rad(mover.climb_angle_deg)))
+	var need := SpaceNav.belt_lane_altitude(self, pos, get_world_velocity(), goal, tan(deg_to_rad(mover.climb_angle_deg)))
 	if need <= 0.0:
 		mover.cruise_y = cruise
 		return
-	var band := SpaceNav.rock_band_at(tree, pos)
+	var band := SpaceNav.rock_band_at(self, pos)
 	if band == null and absf(cruise) >= need:
 		# The cruise arc already clears the band ahead.
 		mover.cruise_y = cruise
@@ -844,7 +843,7 @@ func _track_leg(pos: Vector3, goal: Vector3, dt: float) -> void:
 		gv = p.global_basis * gv + SpaceNav.world_velocity(p)
 	if not _leg.active or _leg.goal_jumped(goal, gv, dt):
 		var leg_len := SpaceNav.flat_distance(pos, goal)
-		var sys := SolarSystem.of(get_tree())
+		var sys := SolarSystem.of(self)
 		var st := sys.home_station.global_position if sys and sys.home_station else Vector3.INF
 		_leg.begin(pos, goal, CruiseLeg.plan_offset(leg_len, cruise_band(), _cruise_roll, CruiseLeg.highway_sign(pos, goal, st)))
 
@@ -887,7 +886,7 @@ func _update_separation() -> void:
 		var p := global_position
 		var parent := get_parent()
 		var key := separation_key()
-		for n in get_tree().get_nodes_in_group(GROUP):
+		for n in SystemWorld.nodes_in(self, GROUP):
 			if n == self or n.get_parent() != parent:
 				continue
 			if key != 0 and (n as Ship).separation_key() == key:
@@ -950,7 +949,7 @@ func place_in_space(pos: Vector3, yaw: float, vel: Vector3) -> void:
 
 
 func enter_space() -> void:
-	mover.change_frame(SpaceNav.space_root(get_tree()), true)
+	mover.change_frame(SpaceNav.space_root(self), true)
 
 
 func enter_home_frame() -> void:
@@ -1071,7 +1070,7 @@ func _on_destroyed(killer: Node3D) -> void:
 				", escape gear +%d%%" % roundi(stats.eject_bonus * 100.0) if stats and stats.eject_bonus > 0.0 else "", ", Survivor +10%" if captain.has_trait(CaptainTraits.SURVIVOR) else ""]
 		captain.flight_log.note(CaptainLog.Kind.LOSS, CaptainLog.Outcome.DID if ejected else CaptainLog.Outcome.FAILED,
 				("Ejected from the destroyed ship%s" if ejected else "Lost with the ship%s") % by,
-				("The pod made it out: " if ejected else "No way out: ") + odds, "Destroyed at %s" % SpaceNav.place_name(get_tree(), global_position))
+				("The pod made it out: " if ejected else "No way out: ") + odds, "Destroyed at %s" % SpaceNav.place_name(self, global_position))
 		if ejected:
 			EventLog.post("%s ejected from a destroyed ship%s" % [captain.captain_name, by], EventLog.Kind.LOSS, null, global_position)
 			_launch_pod()
@@ -1088,7 +1087,7 @@ func _launch_pod() -> void:
 	captain.add_history("Ejected from a destroyed %s" % ROLE_NAMES[role].to_lower())
 	var pod := EscapePod.new()
 	pod.setup_pod(captain, home if is_instance_valid(home) else null)
-	var root := SpaceNav.space_root(get_tree())
+	var root := SpaceNav.space_root(self)
 	root.add_child(pod)
 	# Same height: a pod launched in a belt lane starts clear of the rocks.
 	pod.global_position = global_position
@@ -1098,7 +1097,7 @@ func _launch_pod() -> void:
 ## Wingmates (same home, or close by) take a loss to raiders personally.
 func _spread_grudge(by: FactionDef) -> void:
 	var pos := global_position
-	for n in get_tree().get_nodes_in_group(GROUP):
+	for n in SystemWorld.nodes_in(self, GROUP):
 		var s := n as Ship
 		if s == null or s == self or s.dead or s.faction != Combat.Faction.PLAYER or s.captain == null or s is EscapePod:
 			continue

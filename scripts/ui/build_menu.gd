@@ -124,7 +124,7 @@ func setup(owner_hud: HUD) -> void:
 	if hud.zone_placement:
 		hud.zone_placement.armed_changed.connect(_on_zone_armed)
 		hud.zone_placement.validity_changed.connect(_on_zone_validity)
-		var zones := DefenseZones.of(get_tree())
+		var zones := DefenseZones.of(self)
 		if zones:
 			zones.zones_changed.connect(_refresh)
 	Economy.changed.connect(func(_c: int, _m: int) -> void: _refresh())
@@ -259,7 +259,7 @@ func _refresh() -> void:
 		# Keyboard users and screen readers still get the plain text.
 		t.tooltip_text = ""
 	if _zone_button:
-		var zones := DefenseZones.of(get_tree())
+		var zones := DefenseZones.of(self)
 		var n := zones.count() if zones else 0
 		var zarmed := hud.zone_placement.is_armed()
 		_zone_button.disabled = n >= DefenseZones.MAX_ZONES and not zarmed
@@ -274,7 +274,7 @@ func _refresh() -> void:
 ## Everything the info card shows for [param t].
 func _info_for(t: BuildTile) -> Dictionary:
 	if t == _zone_button:
-		var zones := DefenseZones.of(get_tree())
+		var zones := DefenseZones.of(self)
 		var n := zones.count() if zones else 0
 		return {
 			"title": "Defence zone", "group": "DEFENCE",

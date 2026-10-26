@@ -132,7 +132,7 @@ func setup(owner_hud: HUD) -> void:
 	hud = owner_hud
 	if hud.selection:
 		hud.selection.selection_changed.connect(func(t: Node3D) -> void: show_zone(t as DefenseZone))
-	var zones := DefenseZones.of(get_tree())
+	var zones := DefenseZones.of(self)
 	if zones:
 		zones.zone_changed.connect(func(z: DefenseZone) -> void:
 			if z == zone:
@@ -168,7 +168,7 @@ func refresh() -> void:
 	if sys and sys.home_station:
 		_distance.text = "%.1f km" % (SpaceNav.flat_distance(z.global_position, sys.home_station.global_position) / 1000.0)
 	var patrolling := 0
-	for n in get_tree().get_nodes_in_group(Ship.GROUP):
+	for n in SystemWorld.nodes_in(self, Ship.GROUP):
 		var s := n as Ship
 		var mb := s.brain as MercenaryBrain if s else null
 		if mb and not s.dead and mb.patrol_zone() == z:
@@ -201,35 +201,35 @@ func refresh() -> void:
 
 
 func _step_radius(dir: int) -> void:
-	var zones := DefenseZones.of(get_tree())
+	var zones := DefenseZones.of(self)
 	if zones and zone:
 		var step := DefenseZones.RADIUS_STEP * (5.0 if Input.is_key_pressed(KEY_SHIFT) else 1.0)
 		zones.set_radius(zone, zone.radius + dir * step)
 
 
 func _step_bounty(dir: int) -> void:
-	var zones := DefenseZones.of(get_tree())
+	var zones := DefenseZones.of(self)
 	if zones and zone:
 		var step := DefenseZones.BOUNTY_STEP * (5 if Input.is_key_pressed(KEY_SHIFT) else 1)
 		zones.set_kill_bounty(zone, zone.kill_bounty + dir * step)
 
 
 func _add_budget(credits: int) -> void:
-	var zones := DefenseZones.of(get_tree())
+	var zones := DefenseZones.of(self)
 	if zones and zone:
 		zones.add_budget(zone, credits)
 		refresh()
 
 
 func _take_back_all() -> void:
-	var zones := DefenseZones.of(get_tree())
+	var zones := DefenseZones.of(self)
 	if zones and zone:
 		zones.withdraw_budget(zone, zone.budget)
 		refresh()
 
 
 func _on_remove() -> void:
-	var zones := DefenseZones.of(get_tree())
+	var zones := DefenseZones.of(self)
 	if zones and zone:
 		var z := zone
 		if hud and hud.selection:

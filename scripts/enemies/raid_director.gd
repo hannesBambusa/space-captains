@@ -85,7 +85,7 @@ func sim_step(_dt: float) -> void:
 	if SimClock.time < _next_raid:
 		return
 	_next_raid = SimClock.time + interval() + _rng.randf_range(-raid_jitter, raid_jitter)
-	var mgr := BuildingManager.of(get_tree())
+	var mgr := BuildingManager.of(self)
 	if mgr == null or mgr.buildings.is_empty():
 		return
 	var den := pick_den()
@@ -139,9 +139,9 @@ func seconds_to_next() -> float:
 func pick_den() -> ScavengerDen:
 	var by_faction: Dictionary = {}
 	var order: Array[FactionDef] = []
-	var sys := SolarSystem.of(get_tree())
+	var sys := SolarSystem.of(self)
 	var grace := sys.system_def.arrival_raid_grace if sys and sys.system_def else 0.0
-	for n in get_tree().get_nodes_in_group(ScavengerDen.GROUP):
+	for n in SystemWorld.nodes_in(self, ScavengerDen.GROUP):
 		var d := n as ScavengerDen
 		if d == null or not d.is_alive() or not d.is_raid_base() or SimClock.time - d.arrived_at < grace:
 			continue
@@ -178,7 +178,7 @@ func pick_den() -> ScavengerDen:
 ## [member station_after_raids] raids (Syndicate 2), turrets 1 for the
 ## Syndicate only. Disabled structures are skipped.
 func pick_objective(den: ScavengerDen) -> Dictionary:
-	var mgr := BuildingManager.of(get_tree())
+	var mgr := BuildingManager.of(self)
 	var none := {"aim": Aim.NEAREST, "target": null}
 	if mgr == null:
 		return none
@@ -341,7 +341,7 @@ func load_state(d: Dictionary, refs: SaveRefs = null) -> void:
 	var p: Dictionary = d.get("pending", {})
 	if p.is_empty():
 		return
-	var sys := SolarSystem.of(get_tree())
+	var sys := SolarSystem.of(self)
 	if sys:
 		for den in sys.dens:
 			if is_instance_valid(den) and den.def and den.def.name == String(p.get("den", "")):
@@ -353,7 +353,7 @@ func load_state(d: Dictionary, refs: SaveRefs = null) -> void:
 	pending_at = float(p.get("at", SimClock.time))
 	var tid := int(p.get("target", 0))
 	if tid == -1:
-		var mgr := BuildingManager.of(get_tree())
+		var mgr := BuildingManager.of(self)
 		pending_target = mgr.station_hull if mgr else null
 	elif tid != 0 and refs:
 		pending_target = refs.node3d(tid)

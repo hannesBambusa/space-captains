@@ -185,7 +185,7 @@ func show_target(t: Node3D) -> void:
 		_header.text = "SCRAP FIELD"
 		var sf := t as ScrapField
 		_info.text = "Wreckage drifting apart. Salvagers from a Salvage Yard strip it on their own: %d scrap is about %d loads, which the yard reprocesses into ore (mostly iron, some titanium, a little crystal) and sells to you. It stops fading while salvagers work it or a contract is open. Danger here: %d of 5." % [
-				sf.amount, ceili(float(sf.amount) / SalvageContract.LOAD_SCRAP), SalvageContract.danger_at(get_tree(), sf.global_position)]
+				sf.amount, ceili(float(sf.amount) / SalvageContract.LOAD_SCRAP), SalvageContract.danger_at(self, sf.global_position)]
 	_title.text = String(t.call(&"get_display_name"))
 	_title.add_theme_color_override("font_color", (fac.color.lerp(Color.WHITE, 0.25) if fac else Color(1.0, 0.6, 0.5)) if hostile else Color(0.95, 0.9, 0.78))
 	_fleet_timer = 0.0
@@ -273,7 +273,7 @@ func _fleet_text() -> String:
 	# Why those who looked at it said no.
 	var tname := probe.get_target_name()
 	var reasons := {}
-	for n in get_tree().get_nodes_in_group(Ship.GROUP):
+	for n in SystemWorld.nodes_in(self, Ship.GROUP):
 		var s := n as Ship
 		var mb := s.brain as MercenaryBrain if s else null
 		if mb and not s.dead and mb.last_refusal_target == tname and not mb.last_refusal.is_empty():
