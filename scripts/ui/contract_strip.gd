@@ -3,7 +3,8 @@ extends VBoxContainer
 ## Bottom-left list of posted contracts, above the event feed, floating over
 ## space like the pilot list: one outlined row per contract (type icon,
 ## target, reward or budget, takers or the bounty's fleet, "paused, station
-## can't pay"). Click = camera flies to the contract's beacon and its target
+## can't pay", or the contract's warning such as "No escort: 2 miners
+## waiting"). Click = camera flies to the contract's beacon and its target
 ## is selected (as ContractRow); hovering a row shows its cancel button
 ## (tooltip says what happens to a bounty's escrow). At most
 ## [member max_rows] rows; "+N more" opens the CONTRACTS tab. The HUD
@@ -66,18 +67,23 @@ class ContractLine:
 		d["target"] = c.get_target_name()
 		d["reward"] = c.get_reward_text()
 		var n := c.takers.size()
-		var team := (c as BountyContract).get_team_text() if c is BountyContract else ""
+		var team := c.get_activity_text()
 		d["takers"] = team if not team.is_empty() else ("%d on it" % n if n > 0 else c.get_status_name().to_lower())
 		d["busy"] = n > 0
 		d["paused"] = c.is_paused()
+		d["warn"] = c.get_warning_text()
 		d["hover"] = hover
 		if d != _d:
 			_d = d
 			var tip := "%s\n%s\nPaid out: %s cr" % [c.get_title(), c.get_reward_text(), Economy.format_amount(c.credits_paid)]
 			if c is BountyContract:
 				tip += "\nReserved: %s cr" % Economy.format_amount((c as BountyContract).escrow)
+			elif c is ExploreContract:
+				tip += "\nReserved: %s cr" % Economy.format_amount((c as ExploreContract).escrow)
 			if c.is_paused():
 				tip += "\nPaused: the station can't pay one %s cr payment, captains won't take it until credits come in" % Economy.format_amount(c.reward)
+			if not String(d["warn"]).is_empty():
+				tip += "\n%s. %s." % [d["warn"], c.get_warning_hint()]
 			tooltip_text = tip + "\nClick: show it    Hover: cancel"
 			cancel.tooltip_text = ContractBoard.cancel_text(c)
 			queue_redraw()
@@ -90,7 +96,8 @@ class ContractLine:
 		var base := mid + 4.5
 		if hover:
 			draw_rect(Rect2(0, 0, w, size.y), Color(H.HOLO, 0.08))
-		var paused := bool(_d["paused"])
+		var warn := String(_d["warn"])
+		var paused := bool(_d["paused"]) or not warn.is_empty()
 		var col := H.WARN if paused else (H.ACCENT_SOFT if bool(_d["busy"]) else H.TEXT_DIM)
 		draw_rect(Rect2(0, 3, 2, size.y - 6), Color(col, 0.9))
 		var ic := H.icon(StringName(_d["icon"]))
@@ -101,8 +108,10 @@ class ContractLine:
 		var f_name := H.font("SemiBold")
 		var f_num := H.mono("Medium")
 		var f_dim := H.font("Medium")
-		var status := String(_d["takers"]) + ("  ·  paused, station can't pay" if paused else "")
-		var sw := minf(f_dim.get_string_size(status, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x, 170.0)
+		var status := String(_d["takers"]) + ("  ·  paused, station can't pay" if bool(_d["paused"]) else "")
+		if not warn.is_empty():
+			status = warn
+		var sw := minf(f_dim.get_string_size(status, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x, 210.0 if not warn.is_empty() else 170.0)
 		var reward := String(_d["reward"])
 		var rw := f_num.get_string_size(reward, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
 		var name_w := right - x - sw - rw - 20.0
@@ -173,6 +182,8 @@ static func type_icon(c: Contract) -> StringName:
 		return &"scrap"
 	if c is PlanetRaidContract:
 		return &"planet"
+	if c is ExploreContract:
+		return &"role_explorer"
 	return &"tab_contracts"
 
 
@@ -180,9 +191,9 @@ func open(c: Contract) -> void:
 	if hud == null:
 		return
 	var t := ContractRow._focus_target(c, hud)
-	if hud.camera and is_instance_valid(t):
-		hud.camera.focus_on(t)
-	if hud.selection and is_instance_valid(c.target) and (c.target is AsteroidCluster or c.target is PlanetBody or c.target is Ship or c.target is ScavengerDen or c.target is ScrapField):
+	if is_instance_valid(t):
+		hud.focus(t)
+	if hud.selection and is_instance_valid(c.target) and (c.target is AsteroidCluster or c.target is PlanetBody or c.target is Ship or c.target is ScavengerDen or c.target is ScrapField or c.target is JumpGate):
 		hud.selection.select(c.target)
 
 
@@ -227,4 +238,4 @@ func _refresh() -> void:
 			l.refresh()
 	var held := ContractBoard.escrow_total()
 	_escrow.text = ("RESERVED %s CR" % UIUtil.amount(held)) if held > 0 else ""
-	_escrow.tooltip_text = "Reserved for bounties and zone budgets (held by the contract board)"
+	_escrow.tooltip_text = "Reserved for bounties, explore contracts and zone budgets (held by the contract board)"

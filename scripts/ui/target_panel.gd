@@ -7,7 +7,7 @@ extends PanelContainer
 ## (blocked, with the reason, when they do not cover it). Under the form a
 ## fleet estimate (MercFleet.assess: "Needs about 5 mercenaries, 3
 ## available", "Too dangerous for the current fleet") and why the
-## mercenaries who looked at it refused. Scrap fields: scrap amount and time left, the salvage
+## mercenaries who looked at it refused (one line each, with the numbers). Scrap fields: scrap amount and time left, the salvage
 ## contracts on it and the "Post salvage contract" form (a per-load bonus on
 ## top of the yard's pay; salvagers also work fields without one). Cargo
 ## shuttles: owner, what they carry where ("Cargo shuttle, Mining Outpost 1:
@@ -184,8 +184,8 @@ func show_target(t: Node3D) -> void:
 	elif t is ScrapField:
 		_header.text = "SCRAP FIELD"
 		var sf := t as ScrapField
-		_info.text = "Wreckage drifting apart. Salvagers from a Salvage Yard strip it on their own: %d scrap is about %d loads, which the yard reprocesses into ore (mostly iron, some titanium, a little crystal) and sells to you. It stops fading while salvagers work it or a contract is open. Danger here: %d of 5." % [
-				sf.amount, ceili(float(sf.amount) / SalvageContract.LOAD_SCRAP), SalvageContract.danger_at(self, sf.global_position)]
+		_info.text = "Wreckage drifting apart. Salvagers from a Salvage Yard strip it on their own: %d scrap is about %d loads, which the yard reprocesses into ore (mostly iron, some titanium, a little crystal) and sells to you. It stops fading while salvagers work it or a contract is open. %s. Danger here: %d of 5." % [
+				sf.amount, ceili(float(sf.amount) / SalvageContract.LOAD_SCRAP), sf.anchor_text(), SalvageContract.danger_at(self, sf.global_position)]
 	_title.text = String(t.call(&"get_display_name"))
 	_title.add_theme_color_override("font_color", (fac.color.lerp(Color.WHITE, 0.25) if fac else Color(1.0, 0.6, 0.5)) if hostile else Color(0.95, 0.9, 0.78))
 	_fleet_timer = 0.0
@@ -254,7 +254,8 @@ func _refresh() -> void:
 			(c as ContractRow).refresh()
 
 
-## Fleet estimate for the target and the mercenaries' latest refusals of it.
+## Fleet estimate for the target and each mercenary's latest refusal of it,
+## with the numbers.
 func _fleet_text() -> String:
 	var bounty: BountyContract = null
 	for c in ContractBoard.get_for_target(target):
@@ -272,17 +273,16 @@ func _fleet_text() -> String:
 		lines.append("Mercenaries: %s." % String(a["text"]))
 	# Why those who looked at it said no.
 	var tname := probe.get_target_name()
-	var reasons := {}
+	var refusing: PackedStringArray = []
 	for n in SystemWorld.nodes_in(self, Ship.GROUP):
 		var s := n as Ship
 		var mb := s.brain as MercenaryBrain if s else null
-		if mb and not s.dead and mb.last_refusal_target == tname and not mb.last_refusal.is_empty():
-			reasons[mb.last_refusal] = int(reasons.get(mb.last_refusal, 0)) + 1
-	if not reasons.is_empty():
-		var parts: PackedStringArray = []
-		for r: String in reasons:
-			parts.append("%d: %s" % [int(reasons[r]), r.to_lower()])
-		lines.append("Refusing it: %s." % "; ".join(parts))
+		var line := mb.refusal_line_for(tname) if mb and not s.dead else ""
+		if not line.is_empty():
+			refusing.append("%s: %s" % [s.get_display_name(), line])
+	if not refusing.is_empty():
+		lines.append("Refusing it:")
+		lines.append_array(refusing)
 	return "\n".join(lines)
 
 

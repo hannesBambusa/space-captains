@@ -14,11 +14,22 @@ extends PanelContainer
 ## With a Science Lab built, a RESEARCH box shows the projects at work and
 ## the lead one's progress (tooltip: every funded project; click: select the
 ## lab). The credits tooltip also shows what is reserved for research.
+## The system name on the left is a menu: the systems the view may switch
+## to (ViewManager.viewable_ids; the HUD fills it as it opens).
+## A click on the credits opens the ledger (L).
 
 ## Emitted by the HOME button (the HUD flies the camera to the station).
 signal home_pressed
+## Emitted by the MAP button (the HUD opens the cluster map).
+signal map_pressed
+## Emitted by a click on the credits (the HUD opens the ledger).
+signal ledger_pressed
 ## Emitted by a click on the research box (the HUD selects the Science Lab).
 signal research_pressed
+## The system menu is about to open (the HUD fills it, [method set_system_list]).
+signal system_menu_opening
+## A system was picked in the system menu.
+signal system_picked(id: StringName)
 
 ## Seconds a delta stays visible before it fades.
 @export var flash_hold: float = 1.6
@@ -39,7 +50,8 @@ var _goods_cells: Array[HBoxContainer] = []
 var _goods_labels: Array[Label] = []
 var _demand_timer := 0.0
 var _time: Label
-var _system: Label
+var _system: MenuButton
+var _system_ids: Array[StringName] = []
 var _speed_icon: TextureRect
 var _speed: Label
 var _speed_pips: PipMeter
@@ -69,8 +81,21 @@ func _ready() -> void:
 	sys_box.custom_minimum_size.x = 300.0
 	h.add_child(sys_box)
 	sys_box.add_child(HudStyle.icon_rect(&"tab_system", 18.0, HudStyle.HOLO))
-	_system = UIUtil.label("", &"BigValueLabel")
+	_system = MenuButton.new()
+	_system.name = "SystemMenu"
+	_system.flat = true
+	_system.focus_mode = Control.FOCUS_NONE
+	_system.add_theme_font_size_override("font_size", 18)
+	_system.add_theme_constant_override("h_separation", 0)
 	_system.add_theme_font_override("font", HudStyle.font("Bold", true, false, 2))
+	_system.add_theme_color_override("font_color", HudStyle.TEXT_BRIGHT)
+	_system.add_theme_color_override("font_hover_color", HudStyle.ACCENT)
+	_system.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_system.tooltip_text = "View another system (H: back home)"
+	_system.about_to_popup.connect(func() -> void: system_menu_opening.emit())
+	_system.get_popup().id_pressed.connect(func(i: int) -> void:
+		if i >= 0 and i < _system_ids.size():
+			system_picked.emit(_system_ids[i]))
 	sys_box.add_child(_system)
 	var sl := UIUtil.label("SYSTEM", &"SubHeaderLabel")
 	sys_box.add_child(sl)
@@ -82,12 +107,26 @@ func _ready() -> void:
 	home.pressed.connect(func() -> void: home_pressed.emit())
 	sys_box.add_child(UIUtil.spacer(6.0))
 	sys_box.add_child(home)
+	var map := UIUtil.button("MAP", &"ChipButton")
+	map.icon = HudStyle.icon(&"tab_system")
+	map.custom_minimum_size.y = 24.0
+	map.tooltip_text = "Cluster map: the gate network you know (M)"
+	map.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	map.pressed.connect(func() -> void: map_pressed.emit())
+	sys_box.add_child(UIUtil.spacer(4.0))
+	sys_box.add_child(map)
 	h.add_child(UIUtil.spacer())
 	# Centre: resources.
 	var res := HBoxContainer.new()
 	res.add_theme_constant_override("separation", 4)
 	h.add_child(res)
 	_credits = _add_resource(res, &"credits", HudStyle.CREDITS, "CREDITS")
+	_credits.mouse_filter = Control.MOUSE_FILTER_STOP
+	_credits.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_credits.gui_input.connect(func(e: InputEvent) -> void:
+		var mb := e as InputEventMouseButton
+		if mb and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+			ledger_pressed.emit())
 	_credits_delta = _add_delta(res, PipMeter.BAD)
 	_income_delta = _add_delta(res, PipMeter.GOOD)
 	for i in Economy.BASE_COUNT:
@@ -188,7 +227,22 @@ func _ready() -> void:
 
 ## The system name on the left (set by the HUD once the system is built).
 func set_system_name(text: String) -> void:
-	_system.text = text.to_upper()
+	_system.text = text.to_upper() + "  \u25BE"
+
+
+## The system menu: [param items] = [{id, name, note, current}].
+func set_system_list(items: Array) -> void:
+	var pop := _system.get_popup()
+	pop.clear()
+	_system_ids.clear()
+	for it: Dictionary in items:
+		var label := String(it.get("name", "?"))
+		var note := String(it.get("note", ""))
+		if not note.is_empty():
+			label += "   " + note
+		pop.add_radio_check_item(label, _system_ids.size())
+		pop.set_item_checked(pop.get_item_count() - 1, bool(it.get("current", false)))
+		_system_ids.append(StringName(it.get("id", "")))
 
 
 func _process(delta: float) -> void:
@@ -339,11 +393,15 @@ func _update_demand() -> void:
 	var zones := ContractBoard.zone_escrow_total()
 	_credits.tooltip_text = "Credits %s. Reserved for bounties: %s cr (held by the contract board, paid out on the kill; the rest comes back)." % [
 			UIUtil.amount(Economy.credits), UIUtil.amount(reserved - zones)] if reserved > 0 else "Credits %s. Nothing reserved for bounties." % UIUtil.amount(Economy.credits)
+	var explore := ContractBoard.explore_escrow_total()
+	if explore > 0:
+		_credits.tooltip_text += " Explore contracts: %s cr of it (paid once when the explorer brings the survey home)." % UIUtil.amount(explore)
 	if zones > 0:
 		_credits.tooltip_text += " Defence zone budgets: %s cr (paid per raider killed inside, the rest comes back when a zone is removed)." % UIUtil.amount(zones)
 	var research := Research.escrow_total()
 	if research > 0:
 		_credits.tooltip_text += " Reserved for research: %s cr (used up when a project is done, back if you cancel)." % UIUtil.amount(research)
+	_credits.tooltip_text += "\nClick or L: the ledger (credits in and out)."
 	var f := Factory.find(self)
 	for i in _ore_demand.size():
 		var pips := _ore_demand[i]

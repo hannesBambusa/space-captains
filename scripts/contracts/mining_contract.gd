@@ -78,3 +78,26 @@ func get_site_position(from: Vector3 = Vector3.ZERO) -> Vector3:
 
 func get_danger() -> int:
 	return belt.danger if is_instance_valid(belt) else 1
+
+
+## Escorted contract: miners on it waiting in the berth with no escort
+## assigned (CaptainBrain WAITING_ESCORT).
+func escort_waiting_count() -> int:
+	var ec := ContractBoard.escort_for_mining(self)
+	if ec == null:
+		return 0
+	var n := 0
+	for t in takers:
+		var s := t as Ship
+		if is_instance_valid(s) and not s.dead and s.brain and s.brain.state == CaptainBrain.State.WAITING_ESCORT and ec.escorts_of(s).is_empty():
+			n += 1
+	return n
+
+
+func get_warning_text() -> String:
+	var n := escort_waiting_count()
+	return "" if n == 0 else "No escort: %d miner%s waiting" % [n, "" if n == 1 else "s"]
+
+
+func get_warning_hint() -> String:
+	return "Hire mercenaries or raise escort pay" if escort_waiting_count() > 0 else ""

@@ -300,7 +300,7 @@ func hire_block_reason() -> String:
 func hire(personality: int = -1) -> Ship:
 	if not hire_block_reason().is_empty():
 		return null
-	if not Economy.spend(def.hire_cost_credits):
+	if not Economy.spend(def.hire_cost_credits, PackedInt32Array(), Ledger.HIRES, "Hire at %s" % display_name):
 		return null
 	if captain_rng == null:
 		captain_rng = RandomNumberGenerator.new()
@@ -386,11 +386,11 @@ func buy_replacement(captain: Captain, player_pays: bool) -> Ship:
 	if not replacement_block_reason(captain, player_pays).is_empty():
 		return null
 	if player_pays:
-		if not Economy.spend(def.ship_cost):
+		if not Economy.spend(def.ship_cost, PackedInt32Array(), Ledger.SHIPS, "New ship at %s" % display_name):
 			return null
 	else:
 		captain.wallet -= def.ship_cost
-		Economy.add_income(roundi(def.ship_cost * SHIP_SALE_SHARE), "Ship sales")
+		Economy.add_income(roundi(def.ship_cost * SHIP_SALE_SHARE), Ledger.SHIP_SALES, "Ship sold at %s" % display_name)
 	captain.add_history("New %s from %s" % ["ship paid by the station" if player_pays else "ship bought", display_name])
 	var ship := adopt(captain)
 	EventLog.post("%s is flying again (%s)" % [captain.captain_name, "station paid" if player_pays else "bought a ship for %s cr" % Fmt.amount(def.ship_cost)],
@@ -490,6 +490,11 @@ func _free_berth() -> int:
 		var used := false
 		for s in ships:
 			if is_instance_valid(s) and s.slot_index == i:
+				used = true
+				break
+		# A ship away as data (GateTransit) keeps its berth.
+		for c in captains:
+			if c and c.away_slot == i and not is_instance_valid(c.ship):
 				used = true
 				break
 		if not used:
@@ -630,7 +635,7 @@ func load_services(d: Dictionary, refs: SaveRefs) -> void:
 
 ## Puts a loaded ship back: in its berth ([param docked]) or under the space
 ## root. The ship must be set up (setup_ship, loadout) and not in the tree.
-func restore_ship(ship: Ship, docked: bool) -> void:
+func restore_ship(ship: Ship, docked: bool, space: Node3D = null) -> void:
 	if docked:
 		var berth := berth_transform(ship.slot_index)
 		ship.position = berth.origin
@@ -638,7 +643,8 @@ func restore_ship(ship: Ship, docked: bool) -> void:
 		add_child(ship)
 		ship.snap_to_slot()
 	else:
-		SpaceNav.space_root(self).add_child(ship)
+		# [param space]: another system's space (a ship coming out of a gate there).
+		(space if space else SpaceNav.space_root(self)).add_child(ship)
 		ship.mover.avoid_enabled = true
 	if not ships.has(ship):
 		ships.append(ship)

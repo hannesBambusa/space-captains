@@ -13,7 +13,7 @@ signal count_changed(total: int, in_combat: int)
 enum Sort { ROLE, STATUS, HULL, WALLET, RANK }
 
 const SORT_NAMES: PackedStringArray = ["Role", "Status", "Hull", "Wallet", "Rank"]
-const ROLE_ORDER: PackedStringArray = ["Miner", "Mercenary", "Salvager", "Lander"]
+const ROLE_ORDER: PackedStringArray = ["Miner", "Mercenary", "Salvager", "Lander", "Explorer"]
 const H := preload("res://scripts/ui/theme/hud_style.gd")
 
 @export var refresh_interval: float = 0.25
@@ -369,7 +369,8 @@ func _count_only(all: Array[Dictionary] = []) -> void:
 			fighting += 1
 		if ship.hull_fraction() < 0.5:
 			damaged += 1
-		if st in [CaptainBrain.State.DOCKED, CaptainBrain.State.RESTING, CaptainBrain.State.REPAIRING, CaptainBrain.State.IDLE, CaptainBrain.State.EVALUATING]:
+		if st in [CaptainBrain.State.DOCKED, CaptainBrain.State.RESTING, CaptainBrain.State.REPAIRING, CaptainBrain.State.IDLE, CaptainBrain.State.EVALUATING] \
+				or (st == CaptainBrain.State.WAITING_ESCORT and ship.is_docked()):
 			docked += 1
 		else:
 			working += 1
@@ -393,10 +394,10 @@ func _on_card_clicked(card: PilotCard) -> void:
 func _on_card_double(card: PilotCard) -> void:
 	if hud == null or not is_instance_valid(card.target):
 		return
+	# Focus first: it may switch the view to the ship's system (which clears the selection).
+	hud.focus(card.target)
 	if hud.selection:
 		hud.selection.select(card.target)
-	if hud.camera:
-		hud.camera.focus_on(card.target)
 	_sync_selected()
 
 

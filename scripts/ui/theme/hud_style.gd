@@ -41,10 +41,11 @@ const ROLE_COLORS := {
 	"Mercenary": Color(0.55, 0.6, 1.0),
 	"Salvager": Color(0.66, 0.86, 0.32),
 	"Lander": Color(0.8, 0.56, 1.0),
+	"Explorer": Color(0.36, 0.86, 0.95),
 }
-const ROLE_ICONS := {"Miner": &"role_miner", "Mercenary": &"role_mercenary", "Salvager": &"role_salvager", "Lander": &"role_lander"}
+const ROLE_ICONS := {"Miner": &"role_miner", "Mercenary": &"role_mercenary", "Salvager": &"role_salvager", "Lander": &"role_lander", "Explorer": &"role_explorer"}
 ## Short role names for chips and badges.
-const ROLE_SHORT := {"Miner": "Miners", "Mercenary": "Mercs", "Salvager": "Salvagers", "Lander": "Landers"}
+const ROLE_SHORT := {"Miner": "Miners", "Mercenary": "Mercs", "Salvager": "Salvagers", "Lander": "Landers", "Explorer": "Explorers"}
 
 const FONT_DIR := "res://assets/ui/fonts/"
 const ICON_DIR := "res://assets/ui/icons/"

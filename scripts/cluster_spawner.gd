@@ -20,9 +20,9 @@ const POINT_MARGIN := 2500.0
 const CLUSTER_GAP := 4000.0
 ## Preferred orbit radius per ore (IRON, TITANIUM, CRYSTAL), metres.
 const ORE_RANGES := {
-	AsteroidBelt.OreType.IRON: Vector2(5000.0, 16500.0),
-	AsteroidBelt.OreType.TITANIUM: Vector2(12000.0, 31000.0),
-	AsteroidBelt.OreType.CRYSTAL: Vector2(24000.0, 44000.0),
+	AsteroidBelt.OreType.IRON: Vector2(9500.0, 20000.0),
+	AsteroidBelt.OreType.TITANIUM: Vector2(16000.0, 33000.0),
+	AsteroidBelt.OreType.CRYSTAL: Vector2(27000.0, 44000.0),
 }
 const ORE_WORD := ["rock", "iron", "titanium", "crystal"]
 
@@ -34,10 +34,15 @@ var name_index: int = 0
 ## Clusters surveyed so far (seeds and fallback names).
 var spawned: int = 0
 var rng := RandomNumberGenerator.new()
+## False outside home: nothing new is surveyed.
+var enabled := true
 
 
 func setup(owner_system: SolarSystem) -> void:
 	system = owner_system
+	# Remote systems keep their generated clusters (no mining there yet).
+	var w := SystemWorld.of(owner_system)
+	enabled = w == null or w.is_home
 	rng.randomize()
 	system.cluster_added.connect(_on_cluster_added)
 	for b in system.belts:
@@ -54,7 +59,7 @@ func _process(delta: float) -> void:
 
 
 func sim_step(_dt: float) -> void:
-	if system == null or system.system_def == null:
+	if not enabled or system == null or system.system_def == null:
 		return
 	var sdef := system.system_def
 	if active_count() + due.size() < sdef.cluster_min:

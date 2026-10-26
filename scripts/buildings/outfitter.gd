@@ -146,6 +146,42 @@ func choose_for(ship: Ship, in_stock_only: bool = false) -> ShipModule:
 	return best
 
 
+## Why [param ship] is not buying a module, in plain words for the captain
+## panel ("No Outfitter built", "Saving up: 45 / 120 cr for Ore Hold Mk I"),
+## or "" when the next visit buys one or nothing more fits.
+static func shop_status(ship: Ship) -> String:
+	if not is_instance_valid(ship) or ship.captain == null or ship.loadout == null or ship is EscapePod:
+		return ""
+	var o := find(ship)
+	if o == null:
+		return "No Outfitter built"
+	var f := o.factory()
+	if f == null:
+		return "No Factory"
+	var cap := ship.captain
+	var order := f.order_of(cap)
+	if not order.is_empty():
+		return "Waiting for %s from the Factory" % (order["module"] as ShipModule).display_name
+	var want := o.choose_for(ship)
+	if want:
+		return "" if f.free_stock_for(want, cap) > 0 else "Factory has no %s in stock" % want.display_name
+	var cheapest: ShipModule = null
+	var blocked: ShipModule = null
+	for m in ModuleCatalog.shared().for_role(cap.role):
+		if not ship.loadout.can_fit(m):
+			continue
+		if not o.block_reason(cap, m).is_empty():
+			if blocked == null or m.tier < blocked.tier:
+				blocked = m
+		elif cheapest == null or o.price_of(m) < o.price_of(cheapest):
+			cheapest = m
+	if cheapest:
+		return "Saving up: %s / %s cr for %s" % [Fmt.amount(cap.wallet), Fmt.amount(o.price_of(cheapest) + RESERVE[cap.personality]), cheapest.display_name]
+	if blocked:
+		return "%s: %s" % [blocked.display_name, o.block_reason(cap, blocked)]
+	return ""
+
+
 ## A docked captain looks in. Buys at most one module. Returns it or null.
 ## An open backorder comes first; out of stock goes by personality.
 func visit(ship: Ship) -> ShipModule:
@@ -231,7 +267,7 @@ func sell(ship: Ship, m: ShipModule, context: String = "") -> ShipModule:
 	ship.loadout.set_module(m.slot, fitted)
 	ship.refit()
 	var income := roundi(float(price) * sale_share)
-	Economy.add_income(income, "Outfitter")
+	Economy.add_income(income, Ledger.OUTFITTER, "Module sales")
 	total_sales += price
 	total_income += income
 	var sale := {"time": SimClock.time, "captain": cap.captain_name, "module": m.display_name, "tier": m.tier, "price": price, "income": income}

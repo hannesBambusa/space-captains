@@ -10,7 +10,7 @@ extends Button
 
 enum State { READY, UNAFFORDABLE, LOCKED, PLACING }
 
-const SIZE := Vector2(100.0, 118.0)
+const SIZE := Vector2(90.0, 118.0)
 const ICON_PX := 62.0
 const H := preload("res://scripts/ui/theme/hud_style.gd")
 
@@ -162,7 +162,7 @@ func _draw_costs(at: Vector2, w: float, dim: bool) -> void:
 		var tw := _f_cost.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
 		parts.append({"w": tw, "text": t, "icon": c["icon"], "short": c["short"], "color": c.get("color", H.TEXT)})
 		total += tw + 12.0
-	total += 4.0 * float(parts.size() - 1)
+	total += 2.0 * float(parts.size() - 1)
 	var x := (w - total) * 0.5
 	for p in parts:
 		var ic := H.icon(StringName(p["icon"]))
@@ -172,7 +172,7 @@ func _draw_costs(at: Vector2, w: float, dim: bool) -> void:
 		if ic:
 			draw_texture_rect(ic, Rect2(x, at.y - 10, 10, 10), false, col)
 		draw_string(_f_cost, Vector2(x + 12, at.y), String(p["text"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, col.lerp(Color.WHITE, 0.2) if not bool(p["short"]) else H.BAD)
-		x += float(p["w"]) + 16.0
+		x += float(p["w"]) + 14.0
 
 
 ## A neat stand-in while the rendered icon is missing: a chamfered plate

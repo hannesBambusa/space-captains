@@ -7,7 +7,9 @@ extends RefCounted
 ## links them in a second pass ([method restore_all]), after the ships, dens
 ## and scrap fields exist. A bounty keeps its escrow (the credits reserved
 ## for it); a bounty from a save made before escrow reserves its reward from
-## the loaded credits (what they cover).
+## the loaded credits (what they cover). Explore contracts (P3) keep their
+## gate by name, their escrow, explorer and progress; one held off the
+## board for an explorer still out (ContractBoard.held) comes back held.
 
 const BASE_FIELDS: PackedStringArray = ["id", "reward", "status", "max_takers", "created_time", "credits_paid", "times_taken"]
 
@@ -21,13 +23,19 @@ static func save_all(extra: Array[Contract]) -> Dictionary:
 	for c in extra:
 		if c and not all.has(c):
 			all.append(c)
+	for c in ContractBoard.held:
+		if c and not all.has(c):
+			all.append(c)
 	for c in SalvageContract._free.values():
 		var sc := c as SalvageContract
 		if sc and not sc.takers.is_empty() and not all.has(sc):
 			all.append(sc)
 	var list := []
 	for c in all:
-		list.append(save_contract(c, ContractBoard.contracts.has(c)))
+		var d := save_contract(c, ContractBoard.contracts.has(c))
+		if ContractBoard.held.has(c):
+			d["held"] = true
+		list.append(d)
 	return {"next_id": ContractBoard.next_id(), "free_next": SalvageContract._next_free_id, "contracts": list}
 
 
@@ -62,6 +70,11 @@ static func save_contract(c: Contract, listed: bool) -> Dictionary:
 	elif c is SalvageContract:
 		var sc := c as SalvageContract
 		d["salvage"] = SaveUtil.props(sc, ["loads_delivered", "loads_in_flight", "materials_delivered", "rare_chance", "free"])
+	elif c is ExploreContract:
+		var ec := c as ExploreContract
+		d["explore"] = SaveUtil.props(ec, ["gate_name", "exit_gate", "escrow", "explorer_id", "explorer_name", "phase", "waypoint", "waypoints"])
+		d["explore"]["from"] = String(ec.from_system)
+		d["target"] = 0
 	return d
 
 
@@ -82,7 +95,9 @@ static func restore_all(d: Dictionary, refs: SaveRefs, belts: Dictionary, ctx: N
 	for pair in made:
 		var c := pair[0] as Contract
 		var s := pair[1] as Dictionary
-		var listed := bool(s.get("listed", false)) and not c.is_finished() and is_instance_valid(c.target)
+		var listed := bool(s.get("listed", false)) and not c.is_finished() and (is_instance_valid(c.target) or c is ExploreContract)
+		if bool(s.get("held", false)):
+			ContractBoard.hold(c)
 		if c is SalvageContract and (c as SalvageContract).free:
 			SalvageContract.restore_free((c as SalvageContract).field, c as SalvageContract)
 			continue
@@ -117,7 +132,7 @@ static func _make(s: Dictionary, refs: SaveRefs, belts: Dictionary, ctx: Node) -
 			elif bool(s.get("listed", false)) and int(s.get("status", 0)) < Contract.Status.COMPLETED:
 				# Saved before escrow: reserve it now from the loaded credits.
 				var held := mini(int(s["reward"]), maxi(Economy.credits, 0))
-				if held > 0 and Economy.spend(held):
+				if held > 0 and Economy.spend(held, PackedInt32Array(), Ledger.ESCROW, "Reserved: %s (old save)" % bc.get_title()):
 					bc.escrow = held
 			c = bc
 		Contract.Type.ESCORT:
@@ -136,6 +151,16 @@ static func _make(s: Dictionary, refs: SaveRefs, belts: Dictionary, ctx: Node) -
 			var rc := PlanetRaidContract.new(body, int(s["reward"]))
 			SaveUtil.apply_props(rc, s.get("raid", {}))
 			c = rc
+		Contract.Type.EXPLORE:
+			var xd: Dictionary = s.get("explore", {})
+			var ec := ExploreContract.new(StringName(xd.get("from", "home")), String(xd.get("gate_name", "")), int(s["reward"]), String(xd.get("exit_gate", "")))
+			if ec.target_system.is_empty():
+				return null
+			var props := xd.duplicate()
+			props.erase("from")
+			SaveUtil.apply_props(ec, props)
+			ec.refresh_target()
+			c = ec
 		Contract.Type.SALVAGE:
 			var field := target as ScrapField
 			if field == null:

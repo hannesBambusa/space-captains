@@ -263,7 +263,7 @@ func _update_beam() -> void:
 
 ## Rocks on [param belt] being drilled (or headed for) right now.
 static func claims_on(belt: AsteroidCluster) -> int:
-	var prefix := "%s:" % belt.name
+	var prefix := "%d:" % belt.get_instance_id()
 	var n := 0
 	for k: String in _claims:
 		if k.begins_with(prefix):
@@ -272,7 +272,8 @@ static func claims_on(belt: AsteroidCluster) -> int:
 
 
 static func _key(belt: AsteroidCluster, idx: int) -> String:
-	return "%s:%d" % [belt.name, idx]
+	# By instance: cluster names may repeat across live systems.
+	return "%d:%d" % [belt.get_instance_id(), idx]
 
 
 func _claim(belt: AsteroidCluster, idx: int) -> void:

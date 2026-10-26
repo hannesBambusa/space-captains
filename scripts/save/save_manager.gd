@@ -310,6 +310,8 @@ func _reset_globals() -> void:
 	Economy.reset()
 	Research.reset()
 	EventLog.reset()
+	# A new network seed: a load puts the saved one back (apply_globals).
+	Sector.reset()
 	MinerShip._claims.clear()
 	SalvagerShip._slots.clear()
 	CargoShuttle._pads.clear()

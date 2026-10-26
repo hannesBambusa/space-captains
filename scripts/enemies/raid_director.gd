@@ -32,15 +32,15 @@ signal raid_started(den: ScavengerDen, size: int)
 enum Aim { NEAREST, STRUCTURE, SHUTTLES, STATION }
 
 @export var enabled: bool = true
-@export var first_raid_time: float = 300.0
+@export var first_raid_time: float = 480.0
 ## Seconds between raids at pressure 0 (x) and 1 (y).
-@export var interval_range: Vector2 = Vector2(330.0, 170.0)
+@export var interval_range: Vector2 = Vector2(600.0, 360.0)
 @export var raid_jitter: float = 40.0
 ## Warning lead before a raid launches, sim seconds.
 @export var warning_time: float = 30.0
 @export var base_wave: int = 1
 ## One raider more per this much sim time.
-@export var growth_time: float = 720.0
+@export var growth_time: float = 1080.0
 ## One raider more per this many captains plus structures past [member colony_base].
 @export var colony_step: int = 6
 @export var colony_base: int = 4
@@ -176,8 +176,11 @@ func pick_den() -> ScavengerDen:
 ## an outpost that runs them 1.5 (Corsairs and Scavengers like cargo: x2
 ## while one is loaded in flight; never the Syndicate), the station 1 after
 ## [member station_after_raids] raids (Syndicate 2), turrets 1 for the
-## Syndicate only. Disabled structures are skipped.
-func pick_objective(den: ScavengerDen) -> Dictionary:
+## Syndicate only. Disabled structures are skipped. [param rng]: the roll
+## (default the director's own; gate raids bring theirs, GateRaidSource).
+func pick_objective(den: ScavengerDen, rng: RandomNumberGenerator = null) -> Dictionary:
+	if rng == null:
+		rng = _rng
 	var mgr := BuildingManager.of(self)
 	var none := {"aim": Aim.NEAREST, "target": null}
 	if mgr == null:
@@ -205,7 +208,7 @@ func pick_objective(den: ScavengerDen) -> Dictionary:
 	var total := 0.0
 	for o in options:
 		total += float(o["w"])
-	var roll := _rng.randf() * total
+	var roll := rng.randf() * total
 	for o in options:
 		roll -= float(o["w"])
 		if roll <= 0.0:
@@ -289,7 +292,7 @@ func _send(den: ScavengerDen, size: int, aim: Aim, target: Node3D) -> Array[Scav
 		out.append_array(group)
 	if out.is_empty():
 		return out
-	var objective := _objective_node(aim, target)
+	var objective := objective_node(aim, target)
 	for s in out:
 		if s.ai:
 			s.ai.set_raid_objective(objective)
@@ -302,7 +305,7 @@ func _send(den: ScavengerDen, size: int, aim: Aim, target: Node3D) -> Array[Scav
 
 ## The node the raiders go for: the building, a loaded (else any) shuttle of
 ## it in flight (else the building), the station hull.
-func _objective_node(aim: Aim, target: Node3D) -> Node3D:
+func objective_node(aim: Aim, target: Node3D) -> Node3D:
 	if aim == Aim.SHUTTLES and target is Building:
 		var depot := (target as Building).get_cargo_depot()
 		var best: CargoShuttle = null

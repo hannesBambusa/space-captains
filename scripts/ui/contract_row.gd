@@ -40,13 +40,16 @@ func refresh() -> void:
 	if subtitle_has_reward():
 		parts.append(contract.get_reward_text())
 	var n := contract.takers.size()
-	var team := (contract as BountyContract).get_team_text() if contract is BountyContract else ""
+	var team := contract.get_activity_text()
 	if not team.is_empty():
 		parts.append(team)
 	else:
 		parts.append("%d on it" % n if n > 0 else contract.get_status_name().to_lower())
 	if n > 0 and contract.is_paused():
 		parts.append("paused, station can't pay")
+	var warn := contract.get_warning_text()
+	if not warn.is_empty():
+		parts.append(warn)
 	var prog := contract.get_progress_text()
 	if not prog.is_empty() and not subtitle_has_reward():
 		parts.append(prog)
@@ -54,8 +57,12 @@ func refresh() -> void:
 	tooltip_text = "%s\n%s\nPosted at %s\nPaid out: %s cr" % [contract.get_title(), contract.get_reward_text(), _clock(contract.created_time), Economy.format_amount(contract.credits_paid)]
 	if contract is BountyContract:
 		tooltip_text += "\nReserved: %s cr" % Economy.format_amount((contract as BountyContract).escrow)
+	elif contract is ExploreContract:
+		tooltip_text += "\nReserved: %s cr" % Economy.format_amount((contract as ExploreContract).escrow)
 	if contract.is_paused():
 		tooltip_text += "\nPaused: the station can't pay one %s cr payment, captains won't take it until credits come in" % Economy.format_amount(contract.reward)
+	if not warn.is_empty():
+		tooltip_text += "\n%s. %s." % [warn, contract.get_warning_hint()]
 	_cancel.tooltip_text = ContractBoard.cancel_text(contract)
 
 
@@ -66,15 +73,15 @@ func subtitle_has_reward() -> bool:
 func _on_pressed() -> void:
 	if hud == null:
 		return
-	if hud.camera and is_instance_valid(target):
-		hud.camera.focus_on(target)
-	if hud.selection and is_instance_valid(contract.target) and (contract.target is AsteroidCluster or contract.target is PlanetBody or contract.target is Ship or contract.target is ScavengerDen or contract.target is ScrapField):
+	if is_instance_valid(target):
+		hud.focus(target)
+	if hud.selection and is_instance_valid(contract.target) and (contract.target is AsteroidCluster or contract.target is PlanetBody or contract.target is Ship or contract.target is ScavengerDen or contract.target is ScrapField or contract.target is JumpGate):
 		hud.selection.select(contract.target)
 
 
 ## The contract's beacon when there is one, else its target.
 static func _focus_target(c: Contract, owner_hud: HUD) -> Node3D:
-	if c is PlanetRaidContract:
+	if c is PlanetRaidContract or c is ExploreContract:
 		return c.target
 	if owner_hud and owner_hud.is_inside_tree():
 		var w := SystemWorld.of(owner_hud)

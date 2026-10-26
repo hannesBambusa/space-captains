@@ -10,7 +10,9 @@ extends Node
 ## than SystemDef.arrival_min_gap after the previous arrival.
 ## Threat time runs with the sim clock, faster (SystemDef.cleared_speedup)
 ## while every arrived base is destroyed, so clearing the map brings the
-## next base a little sooner, never later.
+## next base a little sooner, never later. With SystemDef.crowd_bases or
+## more bases standing it runs at SystemDef.crowd_slowdown and the min gap
+## grows by SystemDef.crowd_gap_mult, so a crowded map fills up slower.
 ## An arrival is announced SystemDef.arrival_warning_time ahead: a "Long-range
 ## scans" event line and toast, and a DenArrivalSite (hologram, "Arriving"
 ## countdown on the map and overview). Then SolarSystem.arrive_den builds
@@ -62,7 +64,10 @@ func sim_step(_dt: float) -> void:
 	if sys == null or dt <= 0.0:
 		return
 	var sd := sys.system_def
-	threat_time += dt * (1.0 + sd.cleared_speedup if _all_cleared(sys) else 1.0)
+	var alive := _alive_bases(sys)
+	var crowded := alive >= sd.crowd_bases
+	var rate := 1.0 + sd.cleared_speedup if alive == 0 else (sd.crowd_slowdown if crowded else 1.0)
+	threat_time += dt * rate
 	if pending:
 		if SimClock.time >= pending_at:
 			_arrive(sys)
@@ -75,7 +80,7 @@ func sim_step(_dt: float) -> void:
 		if _due(next, lead + next.claim_lead):
 			_claim_first(sys, next)
 		return
-	if SimClock.time + lead - last_arrival < sd.arrival_min_gap:
+	if SimClock.time + lead - last_arrival < sd.arrival_min_gap * (sd.crowd_gap_mult if crowded else 1.0):
 		return
 	if claimed_for.has(next.name) and SimClock.time < float(claimed_for[next.name]) + next.claim_lead * 0.5:
 		return
@@ -225,10 +230,16 @@ func _make_site(sys: SolarSystem) -> void:
 
 
 func _all_cleared(sys: SolarSystem) -> bool:
+	return _alive_bases(sys) == 0
+
+
+## Raid bases standing in [param sys].
+func _alive_bases(sys: SolarSystem) -> int:
+	var n := 0
 	for den in sys.dens:
 		if is_instance_valid(den) and den.is_alive() and den.is_raid_base():
-			return false
-	return true
+			n += 1
+	return n
 
 
 func _system() -> SolarSystem:

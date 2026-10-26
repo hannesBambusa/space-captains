@@ -8,7 +8,7 @@ extends PanelContainer
 ## Click a ship dot to select and follow it, anywhere else to fly the camera
 ## there. The wheel (or the 1x button)
 ## zooms in steps (1x, 4x, 16x) around the camera. The header also cycles
-## the marker density (M) and collapses the map.
+## the marker density (N) and collapses the map.
 
 const ZOOM_LEVELS: Array[float] = [1.0, 0.25, 0.0625]
 const STAR_COLOR := Color(1.0, 0.86, 0.55)
@@ -51,7 +51,7 @@ func _ready() -> void:
 	h.add_child(UIUtil.spacer())
 	_mode_button = UIUtil.button("Markers: All", &"IconButton")
 	_mode_button.custom_minimum_size = Vector2(0.0, 22.0)
-	_mode_button.tooltip_text = "Ship markers on the map: all, hostiles plus selected, off (M)"
+	_mode_button.tooltip_text = "Ship markers on the map: all, hostiles plus selected, off (N)"
 	_mode_button.pressed.connect(func() -> void:
 		if markers:
 			markers.cycle_mode())
@@ -84,6 +84,13 @@ func setup(owner_hud: HUD, ship_markers: ShipMarkers) -> void:
 	hud = owner_hud
 	markers = ship_markers
 	markers.mode_changed.connect(func(_m: ShipMarkers.Mode) -> void: _sync_mode())
+	# Another system on screen: its orbits, and the fly-to anchor lives in one system.
+	hud.view_rebound.connect(func(_w: SystemWorld) -> void:
+		_orbit_cache.clear()
+		if is_instance_valid(_anchor):
+			_anchor.queue_free()
+		_anchor = null
+		_canvas.queue_redraw())
 	_sync_mode()
 
 
@@ -210,11 +217,11 @@ func _map_targets() -> Array[Node3D]:
 	var out: Array[Node3D] = []
 	for n in SystemWorld.nodes_in(self, Ship.GROUP):
 		var s := n as Ship
-		if s and not s.dead and s.is_inside_tree() and not ShipMarkers.is_parked(s):
+		if s and not s.dead and s.is_inside_tree() and s.is_visible_in_tree() and not ShipMarkers.is_parked(s):
 			out.append(s)
 	if hud.solar_system:
 		for d in hud.solar_system.dens:
-			if is_instance_valid(d) and not d.dead:
+			if is_instance_valid(d) and not d.dead and d.is_visible_in_tree():
 				out.append(d)
 		for n in SystemWorld.nodes_in(self, DenArrivalSite.GROUP):
 			out.append(n as Node3D)
@@ -241,6 +248,8 @@ func _draw_clusters(c: Control, sys: SolarSystem, sc: float, xf: Transform2D) ->
 		if not is_instance_valid(k):
 			_orbit_cache.erase(k)
 	for belt in sys.belts:
+		if not belt.is_visible_in_tree():
+			continue
 		c.draw_polyline(xf * _orbit_points(belt), Color(BELT_COLOR, 0.35), 1.0, true)
 		var bc := xf * Vector2(belt.global_position.x, belt.global_position.z)
 		var r := maxf(belt.rock_half_width() / sc, 4.0)
@@ -277,11 +286,15 @@ func _draw_map() -> void:
 	var origin := _to_map(Vector3.ZERO)
 	var xf := _map_xform()
 	for p in sys.planets:
+		if not p.is_visible_in_tree():
+			continue
 		# Top-down projection of the inclined orbit (a slight ellipse).
 		c.draw_polyline(xf * _orbit_points(p), ORBIT_COLOR, 1.0, true)
 	_draw_clusters(c, sys, sc, xf)
 	var claims := PlanetClaims.of(self)
 	for p in sys.planets:
+		if not p.is_visible_in_tree():
+			continue
 		var pm := _to_map(p.global_position)
 		var pr := clampf(p.def.radius / sc, 2.0, 6.0)
 		c.draw_circle(pm, pr, PLANET_COLOR.darkened(0.25))
@@ -291,8 +304,8 @@ func _draw_map() -> void:
 				var g := claims.garrison_of(b as Node3D)
 				if g:
 					c.draw_arc(_to_map((b as Node3D).global_position), pr + 2.5, 0.0, TAU, 20, Color(g.faction_def.color, 0.9), 1.5, true)
-	c.draw_circle(origin, 4.0, STAR_COLOR)
-	c.draw_circle(origin, 7.0, Color(STAR_COLOR, 0.25))
+	c.draw_circle(origin, 3.0, STAR_COLOR)
+	c.draw_circle(origin, 5.5, Color(STAR_COLOR, 0.25))
 	if is_instance_valid(sys.home_station):
 		var hm := _to_map(sys.home_station.global_position)
 		c.draw_rect(Rect2(hm - Vector2(3.5, 3.5), Vector2(7.0, 7.0)), HOME_COLOR, true)

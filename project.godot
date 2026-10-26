@@ -25,6 +25,7 @@ AudioDirector="*res://scripts/audio_director.gd"
 ContractBoard="*res://scripts/contracts/contract_board.gd"
 EventLog="*res://scripts/event_log.gd"
 Research="*res://scripts/research/research.gd"
+Sector="*res://scripts/cluster/sector.gd"
 
 [display]
 

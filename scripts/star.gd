@@ -14,10 +14,10 @@ const CORONA_CORE_FRACTION := 0.22
 ## Distance at which the light has exactly the configured energy.
 @export var light_reference_distance: float = 12000.0
 ## Brightness of the star's disc and of its corona glow.
-@export var disc_intensity: float = 3.2
-@export var corona_intensity: float = 0.35
+@export var disc_intensity: float = 3.6
+@export var corona_intensity: float = 0.45
 
-var radius: float = 1500.0
+var radius: float = 600.0
 var color: Color = Color.WHITE
 var light: OmniLight3D
 

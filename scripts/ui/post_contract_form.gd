@@ -7,7 +7,8 @@ extends VBoxContainer
 ## (reward_min, reward_max, reward_step, load_limit_options, clamp_reward).
 ## The owner fills [member fair] and adds to [member hint] after
 ## [method refresh], then calls [method set_problem]; rows of its own go in
-## before the button ([method add_row]).
+## before the button ([method add_row]). [method single_payment] turns it
+## into a one-off reward form (explore contracts: no load limit, "Reward").
 
 ## A stepper moved or the credits changed: the owner refreshes.
 signal changed
@@ -27,6 +28,7 @@ var _reward_plus: Button
 var _limit_value: Label
 var _limit_minus: Button
 var _limit_plus: Button
+var _single := false
 
 
 func _init(header: String, post_text: String, form_rules: Variant, width: float) -> void:
@@ -67,6 +69,16 @@ static func fair_verdict(pay: int, fair_pay: int) -> String:
 	return "fair"
 
 
+## One reward instead of pay per load: the load limit row goes, the pay
+## row reads [param pay_title], [method refresh] leaves the hint to the owner.
+func single_payment(pay_title: String) -> void:
+	_single = true
+	_limit_value.get_parent().visible = false
+	var title := _reward_value.get_parent().get_child(0) as Label
+	if title:
+		title.text = pay_title
+
+
 ## Adds [param c] above the post button.
 func add_row(c: Control) -> void:
 	add_child(c)
@@ -75,6 +87,8 @@ func add_row(c: Control) -> void:
 
 ## The load limit picked (0 = none).
 func load_limit() -> int:
+	if _single:
+		return 0
 	return rules.load_limit_options[load_limit_index]
 
 
@@ -88,6 +102,9 @@ func refresh() -> void:
 	_reward_value.text = "%d cr" % reward
 	_reward_minus.disabled = reward <= rules.reward_min
 	_reward_plus.disabled = reward >= rules.reward_max
+	if _single:
+		hint.text = ""
+		return
 	var limit := load_limit()
 	_limit_value.text = "No limit" if limit <= 0 else "%d loads" % limit
 	_limit_minus.disabled = load_limit_index <= 0

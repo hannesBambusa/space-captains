@@ -12,8 +12,9 @@ extends Node3D
 ## Clicking a building or a ship also makes the camera follow it; clicking a
 ## cluster's label selects the cluster, a double click follows it; clicking
 ## the clump itself selects it and leaves the camera alone. Planets and moons are selected (the planet
-## panel: loot, raids, the planet raid contract); gates and the star are
-## followed but not selected.
+## panel: loot, raids, the planet raid contract), so are jump gates (the gate
+## panel: the explore contract); the star is followed but not selected.
+## Things the fog of war hides (FogOfWar) cannot be picked.
 
 signal selection_changed(target: Node3D)
 
@@ -47,6 +48,12 @@ func _ready() -> void:
 	add_to_group(GROUP)
 	# The viewed system's (this controller sits outside the systems, game.tscn).
 	manager = BuildingManager.of(self)
+	var vm := ViewManager.of(get_tree())
+	if vm:
+		# Another system on screen: nothing there is selected, its buildings (none outside home).
+		vm.view_changed.connect(func(_w: SystemWorld) -> void:
+			deselect()
+			manager = BuildingManager.of(self))
 
 
 func _process(_delta: float) -> void:
@@ -100,6 +107,10 @@ func select(target: Node3D) -> void:
 		var pb := target as PlanetBody
 		_ring = RingUtil.make_ring(SpaceNav.body_reach(pb.def) * 1.12, RING_COLOR, 2.4, 256)
 		pb.add_child(_ring)
+	elif target is JumpGate:
+		var jg := target as JumpGate
+		_ring = RingUtil.make_ring(jg.portal_radius * 1.9, RING_COLOR, 2.0, 96)
+		jg.add_child(_ring)
 	elif target is AsteroidCluster:
 		var belt := target as AsteroidCluster
 		_ring = RingUtil.make_ring(belt.rock_half_width() * 1.12, BELT_RING_COLOR, 1.6, 256)
@@ -170,7 +181,7 @@ func pick_group(screen_pos: Vector2, group: String) -> Node3D:
 	var best_score := INF
 	for n in SystemWorld.nodes_in(self, group):
 		var t := n as Node3D
-		if t == null or t.is_queued_for_deletion() or cam.is_position_behind(t.global_position):
+		if t == null or t.is_queued_for_deletion() or not t.is_visible_in_tree() or cam.is_position_behind(t.global_position):
 			continue
 		var d := cam.global_position.distance_to(t.global_position)
 		var r_px := maxf(float(t.get_meta(&"focus_radius", 40.0)) / maxf(d, 1.0) * px_per_rad, min_pick_px)
@@ -193,6 +204,8 @@ func pick_belt(screen_pos: Vector2) -> AsteroidCluster:
 	var best: AsteroidCluster = null
 	var best_off := INF
 	for belt in sys.belts:
+		if not belt.is_visible_in_tree():
+			continue
 		var g := cam.screen_to_ground(screen_pos, belt.global_position.y)
 		if g == Vector3.INF:
 			continue
@@ -234,7 +247,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		# Planets, moons, gates, clusters: a click selects the cluster; a
 		# double click follows the body (RTSCamera).
 		var body := cam.pick_focusable(mb.position) if cam else null
-		if body is PlanetBody:
+		if body is PlanetBody or body is JumpGate:
 			select(body)
 			get_viewport().set_input_as_handled()
 			return

@@ -62,17 +62,17 @@ const LONE_WOLF_REACH := 3.4
 const LONE_WOLF_CHANCE := Vector2(0.3, 0.9)
 const LONE_WOLF_DANGER := 0.6
 ## Teamwork needed to call a fleet.
-const CALL_TEAMWORK := 3
+const CALL_TEAMWORK := 2
 ## Join chance: base plus per Teamwork point above 1, by personality
 ## (Bold, Cautious, Greedy, Lazy).
-const JOIN_BASE := 0.1
+const JOIN_BASE := 0.22
 const JOIN_PER_TEAMWORK := 0.08
 const JOIN_PERSONALITY: Array[float] = [0.0, 0.15, -0.1, -0.05]
 ## Join chance lost per km from the rally point.
 const JOIN_PER_KM := 0.04
 ## Join danger scale by how far the fleet with this ship falls short of the
 ## need (need / power), clamped to this range.
-const JOIN_COVER := Vector2(0.6, 1.5)
+const JOIN_COVER := Vector2(0.6, 1.3)
 ## Join chance added when this ship would make the fleet strong enough.
 const JOIN_COMPLETES := 0.3
 
@@ -135,6 +135,8 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 				e.terms["fleet_goal"] = float(a["goal"])
 				e.terms["fleet_available"] = int(a["available"])
 				e.terms["fleet_estimate"] = int(a["estimate"])
+				e.terms["fleet_size"] = size
+				e.terms["fleet_cap"] = MercFleet.cap_for(bounty)
 				if bool(a["too_strong"]):
 					fleet_block = FLEET_TOO_WEAK
 				elif not bool(a["enough"]):
@@ -149,6 +151,7 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 	e.utility = pay - dist - dang + loyal + noise
 	e.terms["loyal"] = loyal
 	e.terms["noise"] = noise
+	_note_wants(e, pay, float(contract.reward), prof.accept_threshold)
 	if too_strong:
 		e.reason = TOO_STRONG
 	elif not fleet_block.is_empty():
@@ -160,7 +163,12 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 	elif escort and (contract as EscortContract).ward != null and (contract as EscortContract).pick_ward() == null:
 		e.reason = NO_MINER
 	elif e.utility < prof.accept_threshold:
-		e.reason = TOO_DANGEROUS if dang >= dist and dang > pay * 0.25 else NOT_WORTH_IT
+		if dang >= dist and dang > pay * 0.25:
+			e.reason = TOO_DANGEROUS
+		elif dist > pay * 0.25:
+			e.reason = NOT_WORTH_TRIP
+		else:
+			e.reason = NOT_WORTH_IT
 	else:
 		e.accept = true
 	return e
@@ -206,7 +214,9 @@ func evaluate_fleet_join(brain: CaptainBrain, fleet: MercFleet) -> Evaluation:
 		chance += JOIN_COMPLETES
 	e.terms = {"pay": pay, "distance": dist, "danger": dang, "km": km, "join_chance": chance, "join_fleet": true, "loyal": loyal, "noise": noise,
 			"share": fleet.share_for_next(), "heads": heads, "reward": bounty.reward, "danger_level": bounty.get_danger(), "base_danger": bounty.get_danger(),
-			"grudge": grudge, "leader": fleet.leader_name, "cover": cover, "completes": completes, "warp_s": trip.x, "flight_s": trip.y, "pay_div": BOUNTY_PAY_SCALE, "time_div": MERC_TRAVEL_SCALE_S}
+			"grudge": grudge, "leader": fleet.leader_name, "cover": cover, "completes": completes, "warp_s": trip.x, "flight_s": trip.y, "pay_div": BOUNTY_PAY_SCALE, "time_div": MERC_TRAVEL_SCALE_S,
+			"covers": with_me / maxf(MercFleet.target_need(bounty.target) * MercFleet.FLEET_POWER_SHARE, 0.1)}
+	_note_wants(e, pay, fleet.share_for_next(), prof.accept_threshold)
 	if RepairBay.should_repair(brain.ship, MIN_HULL):
 		e.reason = NEEDS_REPAIRS
 	elif grudge:
@@ -219,6 +229,15 @@ func evaluate_fleet_join(brain: CaptainBrain, fleet: MercFleet) -> Evaluation:
 	else:
 		e.accept = true
 	return e
+
+
+## Credits of [param offered] (pay term [param pay]) that would reach
+## [param threshold] without the luck roll: terms "wants" (for the log).
+static func _note_wants(e: Evaluation, pay: float, offered: float, threshold: float) -> void:
+	if pay <= 0.0 or offered <= 0.0:
+		return
+	var rest := e.utility - float(e.terms.get("noise", 0.0)) - pay
+	e.terms["wants"] = maxf(threshold - rest, 0.0) * offered / pay
 
 
 static func _scavenger_target(bounty: BountyContract) -> bool:

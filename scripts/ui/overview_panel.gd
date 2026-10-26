@@ -58,9 +58,13 @@ var _scrap: VBoxContainer
 var _scrap_header: Label
 var _scrap_rows: Array[OverviewRow] = []
 var _clusters: VBoxContainer
+## [signal, callable] links to the viewed system ([method _bind_view]).
+var _view_links: Array = []
 var _clusters_header: Label
 var _cluster_rows: Array[OverviewRow] = []
 var _threats_dirty := false
+## Something was revealed in the viewed system (FogOfWar): rebuild the lists.
+var _fog_dirty := false
 var _outlook: Label
 var _refresh_timer := 0.0
 
@@ -222,8 +226,6 @@ func show_tab(t: Tab) -> void:
 
 func setup(owner_hud: HUD) -> void:
 	hud = owner_hud
-	if hud.camera:
-		hud.camera.follow_changed.connect(_sync_pressed)
 	if hud.selection:
 		hud.selection.selection_changed.connect(func(_t: Node3D) -> void: _sync_pressed(hud.camera.get_follow_target() if hud.camera else null))
 	if hud.manager:
@@ -232,18 +234,45 @@ func setup(owner_hud: HUD) -> void:
 	ContractBoard.contract_posted.connect(func(_c: Contract) -> void: _rebuild_contracts())
 	ContractBoard.contract_removed.connect(func(_c: Contract) -> void: _rebuild_contracts())
 	ContractBoard.contract_changed.connect(func(_c: Contract) -> void: _refresh_contracts())
+	hud.view_rebound.connect(func(_w: SystemWorld) -> void:
+		_bind_view()
+		_rebuild())
+	Sector.revealed.connect(func(id: StringName, _n: PackedStringArray) -> void:
+		var w := SystemWorld.of(self)
+		if w and w.system_id == id:
+			_fog_dirty = true)
+	_bind_view()
+	_rebuild()
+
+
+## Signal links to the viewed system (its camera, combat world, threat
+## director and solar system); the old system's are dropped first.
+func _bind_view() -> void:
+	for link: Array in _view_links:
+		var sig := link[0] as Signal
+		if not sig.is_null() and is_instance_valid(sig.get_object()) and sig.is_connected(link[1]):
+			sig.disconnect(link[1])
+	_view_links.clear()
+	if hud.camera:
+		_link(hud.camera.follow_changed, _sync_pressed)
 	var world := CombatWorld.of(self)
 	if world:
-		world.combatant_spawned.connect(func(_n: Node3D) -> void: _threats_dirty = true)
-		world.combatant_destroyed.connect(func(_n: Node3D, _k: Node3D) -> void: _threats_dirty = true)
-		world.scrap_changed.connect(func() -> void: _rebuild_scrap.call_deferred())
+		_link(world.combatant_spawned, func(_n: Node3D) -> void: _threats_dirty = true)
+		_link(world.combatant_destroyed, func(_n: Node3D, _k: Node3D) -> void: _threats_dirty = true)
+		_link(world.scrap_changed, func() -> void: _rebuild_scrap.call_deferred())
 		if world.threats:
-			world.threats.changed.connect(func() -> void: _threats_dirty = true)
+			_link(world.threats.changed, func() -> void: _threats_dirty = true)
+		if world.gate_raids:
+			_link(world.gate_raids.changed, func() -> void: _threats_dirty = true)
 	if hud.solar_system:
-		hud.solar_system.den_added.connect(func(_d: ScavengerDen) -> void: _threats_dirty = true)
-		hud.solar_system.cluster_added.connect(func(_b: AsteroidCluster) -> void: _rebuild_clusters.call_deferred())
-		hud.solar_system.cluster_removed.connect(func(_b: AsteroidCluster) -> void: _rebuild_clusters.call_deferred())
-	_rebuild()
+		_link(hud.solar_system.den_added, func(_d: ScavengerDen) -> void: _threats_dirty = true)
+		_link(hud.solar_system.cluster_added, func(_b: AsteroidCluster) -> void: _rebuild_clusters.call_deferred())
+		_link(hud.solar_system.cluster_removed, func(_b: AsteroidCluster) -> void: _rebuild_clusters.call_deferred())
+
+
+func _link(sig: Signal, c: Callable) -> void:
+	sig.connect(c)
+	_view_links.append([sig, c])
 
 
 func toggle() -> void:
@@ -274,6 +303,9 @@ func _process(delta: float) -> void:
 	if _refresh_timer > 0.0:
 		return
 	_refresh_timer = 0.25
+	if _fog_dirty:
+		_fog_dirty = false
+		_rebuild()
 	for r in _structure_rows:
 		if not is_instance_valid(r.target):
 			continue
@@ -314,10 +346,22 @@ func _refresh_planet_rows() -> void:
 # --- Build the list -----------------------------------------------------------
 
 func _rebuild() -> void:
-	for c in _list.get_children():
-		c.queue_free()
+	# Every section is built again (also on a view switch).
+	for box: Container in [_list, _contracts, _threats]:
+		for c in box.get_children():
+			box.remove_child(c)
+			c.queue_free()
 	rows.clear()
 	_structure_rows.clear()
+	_contract_rows.clear()
+	_threat_rows.clear()
+	_scrap_rows.clear()
+	_cluster_rows.clear()
+	_structures = null
+	_clusters = null
+	_scrap = null
+	_contracts_box = null
+	_threats_box = null
 	var sys := hud.solar_system
 	if sys == null:
 		return
@@ -329,15 +373,17 @@ func _rebuild() -> void:
 		var temp := int(sys.system_def.star_temperature) if sys.system_def else 0
 		_add_row(_list, sys.star, sys.system_def.system_name if sys.system_def else "Star", "%d K" % temp)
 
-	_section(_list, "PLANETS", sys.planets.size(), &"planet")
-	for p in sys.planets:
+	# Remote systems list only what explorers revealed (FogOfWar).
+	var planets := sys.planets.filter(func(p: PlanetBody) -> bool: return FogOfWar.is_revealed(p))
+	_section(_list, "PLANETS", planets.size(), &"planet")
+	for p: PlanetBody in planets:
 		_add_row(_list, p, p.def.name, PLANET_TYPES[p.def.type])
 		for c in p.get_children():
 			if c is PlanetBody:
 				var m := c as PlanetBody
 				_add_row(_list, m, m.def.name, MOON_TYPES[m.def.type], 1)
 
-	_clusters_header = _section(_list, "ASTEROID CLUSTERS", sys.belts.size(), &"belt")
+	_clusters_header = _section(_list, "ASTEROID CLUSTERS", _shown_belts(sys).size(), &"belt")
 	_clusters = VBoxContainer.new()
 	_clusters.add_theme_constant_override("separation", 1)
 	_list.add_child(_clusters)
@@ -349,10 +395,13 @@ func _rebuild() -> void:
 	_list.add_child(_structures)
 	_rebuild_structures()
 
-	if not sys.gates.is_empty():
-		_section(_list, "JUMP GATES", sys.gates.size(), &"gate")
-		for g in sys.gates:
-			_add_row(_list, g, g.def.name, "to %s" % g.def.target_system)
+	var gates := sys.gates.filter(func(g: JumpGate) -> bool: return FogOfWar.is_revealed(g))
+	if not gates.is_empty():
+		_section(_list, "JUMP GATES", gates.size(), &"gate")
+		for g: JumpGate in gates:
+			var to: StringName = Sector.network.gate_target(SystemWorld.of(g).system_id, g.def.name).get("system", &"") if Sector.network and SystemWorld.of(g) else &""
+			var note := Sector.danger_text(to) if not to.is_empty() and to != ClusterNetwork.HOME_ID else ""
+			_add_row(_list, g, g.def.name, "to %s%s" % [g.def.target_system, ", " + note if not note.is_empty() else ""])
 
 	_scrap_header = _section(_list, "SCRAP FIELDS", 0, &"scrap")
 	_scrap = VBoxContainer.new()
@@ -386,7 +435,7 @@ func _rebuild_threats() -> void:
 	var groups: Array[FactionDef] = []
 	var by_faction: Dictionary = {}
 	for d in dens:
-		if not is_instance_valid(d):
+		if not is_instance_valid(d) or not FogOfWar.is_revealed(d):
 			continue
 		if not by_faction.has(d.faction_def):
 			by_faction[d.faction_def] = [] as Array[ScavengerDen]
@@ -414,19 +463,25 @@ func _rebuild_threats() -> void:
 			_add_site_row(site, f)
 			arriving = ", 1 arriving"
 		(head.get_node(^"Count") as Label).text = "%d/%d bases, %d ships%s" % [live, group.size(), out, arriving]
+	var gate_rows := _add_gate_raid_rows(world.gate_raids if world else null)
+	count += gate_rows
 	if _threats_header:
 		_threats_header.text = str(count)
 	var live_bases := 0
 	var raiders := 0
 	for d in dens:
-		if is_instance_valid(d) and d.is_alive():
+		if is_instance_valid(d) and d.is_alive() and FogOfWar.is_revealed(d):
 			live_bases += 1
 			for sc in d.raiders:
 				if is_instance_valid(sc) and not sc.dead:
 					raiders += 1
+	if world and world.gate_raids:
+		for gd in world.gate_raids.dens:
+			if is_instance_valid(gd):
+				raiders += gd.live_raiders().size()
 	_set_count(Tab.THREATS, str(live_bases), raiders > 0)
 	_tab_buttons[Tab.THREATS].tooltip_text = "Threats: %d hostile bases, %d ships out%s" % [live_bases, count, (", %d raiding" % raiders) if raiders > 0 else ""]
-	if count == 0 and groups.is_empty():
+	if count == 0 and groups.is_empty() and not (world and world.gate_raids and world.gate_raids.is_warned()):
 		var none := UIUtil.label("No hostile bases detected.", &"DimLabel")
 		none.name = "None"
 		_threats_box.add_child(none)
@@ -436,6 +491,47 @@ func _rebuild_threats() -> void:
 	_update_outlook()
 	_sync_pressed(hud.camera.get_follow_target() if hud.camera else null)
 	_fit_height.call_deferred()
+
+
+## Gate raids (GateRaidSource): a raid forming that the player was warned
+## of (its home gate row, with the countdown) and the raids in progress
+## with their ships. Returns the ships listed.
+func _add_gate_raid_rows(g: GateRaidSource) -> int:
+	if g == null or (not g.is_warned() and g.dens.is_empty()):
+		return 0
+	var h := HBoxContainer.new()
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(UIUtil.spacer(8.0))
+	h.add_child(HudStyle.icon_rect(&"tab_threats", 10.0, HudStyle.BAD))
+	h.add_child(UIUtil.label("THROUGH THE GATES", &"DimLabel"))
+	_threats_box.add_child(h)
+	var n := 0
+	if g.is_warned():
+		var gate := g.home_gate(String(g.pending["gate"]))
+		var row := _add_row(_threats_box, gate, "Raid forming in %s" % GateRaidSource._system_name(StringName(g.pending["source"])), _gate_warn_subtitle(g))
+		row.title_label.add_theme_color_override("font_color", HudStyle.BAD.lerp(Color.WHITE, 0.25))
+		row.tooltip_text = g.warning_text() + "\nYour scouts saw them gather. Select the gate to see where they come out."
+		_threat_rows.append(row)
+	for d in g.dens:
+		if not is_instance_valid(d):
+			continue
+		var f := d.faction_def
+		var row := _add_row(_threats_box, d.gate, d.get_display_name(), d.get_status_text())
+		row.title_label.add_theme_color_override("font_color", f.color.lerp(Color.WHITE, 0.3))
+		row.set_meta(&"gate_raid", d)
+		_threat_rows.append(row)
+		for sc in d.live_raiders():
+			if not sc.is_visible_in_tree():
+				continue
+			var sr := _add_row(_threats_box, sc, sc.callsign + " (raider)", sc.get_status_text().to_lower(), 1)
+			sr.title_label.add_theme_color_override("font_color", f.color.lerp(Color.WHITE, 0.4))
+			_threat_rows.append(sr)
+			n += 1
+	return n
+
+
+func _gate_warn_subtitle(g: GateRaidSource) -> String:
+	return "through %s %s" % [String(g.pending.get("gate", "")), g.eta_text()]
 
 
 ## A small coloured faction line above its bases in the threats list.
@@ -497,7 +593,8 @@ func _update_outlook() -> void:
 func _live_ships(d: ScavengerDen) -> Array[ScavengerShip]:
 	var out: Array[ScavengerShip] = []
 	for sc in d.spawns + d.raiders:
-		if is_instance_valid(sc) and not sc.dead:
+		# In a remote system only the ones a player's ship can see (FogOfWar).
+		if is_instance_valid(sc) and not sc.dead and sc.is_visible_in_tree():
 			out.append(sc)
 	return out
 
@@ -510,6 +607,18 @@ func _refresh_threats() -> void:
 			continue
 		if r.target is DenArrivalSite:
 			r.set_subtitle((r.target as DenArrivalSite).get_status_text().to_lower())
+		elif r.target is JumpGate:
+			var world := CombatWorld.of(self)
+			if r.has_meta(&"gate_raid"):
+				var gd: Variant = r.get_meta(&"gate_raid")
+				if is_instance_valid(gd):
+					r.set_subtitle((gd as GateRaidDen).get_status_text())
+				else:
+					_threats_dirty = true
+			elif world and world.gate_raids and world.gate_raids.is_warned():
+				r.set_subtitle(_gate_warn_subtitle(world.gate_raids))
+			else:
+				_threats_dirty = true
 		elif r.target is ScavengerDen:
 			var d := r.target as ScavengerDen
 			r.set_subtitle(_den_subtitle(d))
@@ -580,6 +689,8 @@ func _rebuild_structures() -> void:
 		_structures.remove_child(c)
 		c.queue_free()
 	var sys := hud.solar_system
+	if sys == null:
+		return
 	if sys.home_station:
 		var host := sys.home_station.get_parent() as PlanetBody
 		var sub := "%s orbit" % host.def.name if host else ""
@@ -589,8 +700,10 @@ func _rebuild_structures() -> void:
 			station_row.set_subtitle("%s, bays %d/%d" % [sub, hud.manager.used_bays(), BuildingManager.BAY_COUNT] if not sub.is_empty() else bays)
 			station_row.tooltip_text = bays
 		_structure_rows.append(station_row)
-	if hud.manager:
-		for b in hud.manager.buildings:
+	# The viewed system's structures: none outside home.
+	var mgr := hud.local_manager()
+	if mgr:
+		for b in mgr.buildings:
 			if not is_instance_valid(b):
 				continue
 			_structure_rows.append(_add_row(_structures, b, b.display_name, _building_subtitle(b), 1))
@@ -661,7 +774,14 @@ func _update_escrow() -> void:
 		return
 	var held := ContractBoard.escrow_total()
 	var zones := ContractBoard.zone_escrow_total()
-	_escrow_label.text = "Reserved for bounties: %s cr" % UIUtil.amount(held - zones)
+	var explore := ContractBoard.explore_escrow_total()
+	var bounties := held - zones - explore
+	if explore <= 0:
+		_escrow_label.text = "Reserved for bounties: %s cr" % UIUtil.amount(bounties)
+	elif bounties <= 0:
+		_escrow_label.text = "Reserved for explore contracts: %s cr" % UIUtil.amount(explore)
+	else:
+		_escrow_label.text = "Reserved: %s cr (bounties %s, explore %s)" % [UIUtil.amount(held - zones), UIUtil.amount(bounties), UIUtil.amount(explore)]
 	if zones > 0:
 		_escrow_label.text += ", zone budgets: %s cr" % UIUtil.amount(zones)
 	(_escrow_label.get_parent() as Control).visible = held > 0
@@ -714,12 +834,17 @@ func _rebuild_clusters() -> void:
 		return
 	_clear_rows(_clusters, _cluster_rows)
 	var sys := hud.solar_system
+	var shown := _shown_belts(sys)
 	if _clusters_header:
-		_clusters_header.text = str(sys.belts.size())
-	for b in sys.belts:
-		if is_instance_valid(b):
-			_add_belt_row(b)
+		_clusters_header.text = str(shown.size())
+	for b: AsteroidCluster in shown:
+		_add_belt_row(b)
 	_fit_height.call_deferred()
+
+
+## The clusters the fog of war lets the list show (all of them at home).
+func _shown_belts(sys: SolarSystem) -> Array:
+	return sys.belts.filter(func(b: AsteroidCluster) -> bool: return is_instance_valid(b) and FogOfWar.is_revealed(b))
 
 
 func _add_belt_row(belt: AsteroidCluster) -> void:

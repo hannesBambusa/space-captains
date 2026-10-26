@@ -40,6 +40,9 @@ var _press_pos := Vector2.INF
 func _ready() -> void:
 	add_to_group(GROUP)
 	set_process(false)
+	var vm := ViewManager.of(get_tree())
+	if vm:
+		vm.view_changed.connect(func(_w: SystemWorld) -> void: cancel())
 	var pc := get_tree().get_first_node_in_group(PlacementController.GROUP) as PlacementController
 	if pc:
 		pc.armed_changed.connect(func(d: BuildingDef) -> void:

@@ -78,6 +78,8 @@ var _fleet_title: Label
 var _repairs: Label
 var _modules_box: VBoxContainer
 var _modules_header: Label
+## Why nothing is being bought (Outfitter.shop_status), hidden when empty.
+var _modules_status: Label
 var _module_names: Array[Label] = []
 var _module_tiers: Array[Label] = []
 var _career_box: VBoxContainer
@@ -253,6 +255,11 @@ func _ready() -> void:
 	_modules_header = UIUtil.label("", &"DimLabel")
 	_modules_header.mouse_filter = Control.MOUSE_FILTER_PASS
 	mh.add_child(_modules_header)
+	_modules_status = UIUtil.label("", &"DimLabel")
+	_modules_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_modules_status.custom_minimum_size.x = panel_width - 24.0
+	_modules_status.visible = false
+	_modules_box.add_child(_modules_status)
 	var mg := GridContainer.new()
 	mg.columns = 3
 	mg.add_theme_constant_override("h_separation", 10)
@@ -358,7 +365,7 @@ func show_ship(s: Ship) -> void:
 		_attr_names[4].text = cap.get_specialty_name()
 	_modules_box.visible = not (s is EscapePod)
 	_refresh_modules()
-	_loads_title.text = ("Salvage loads" if s is SalvagerShip else ("Raid loads" if s is LanderShip else "Loads delivered")) if s is MinerShip else "Kills / escorts"
+	_loads_title.text = ("Salvage loads" if s is SalvagerShip else ("Raid loads" if s is LanderShip else "Loads delivered")) if s is MinerShip else ("Surveys / finds" if s is ExplorerShip else "Kills / escorts")
 	_escort_box.visible = s is MinerShip
 	_log_view.show_captain(cap)
 	_rebuild_escorts()
@@ -431,6 +438,8 @@ func _refresh() -> void:
 	if cap:
 		if ship is SalvagerShip:
 			_loads.text = str(cap.salvage_loads)
+		elif ship is ExplorerShip:
+			_loads.text = "%d / %d" % [cap.surveys, cap.discoveries]
 		else:
 			_loads.text = str(cap.loads_delivered) if ship is MinerShip else "%d / %d" % [cap.kills, cap.escorts_completed]
 		_earned.text = "%s cr" % UIUtil.amount(cap.credits_earned)
@@ -613,7 +622,8 @@ func _refresh_modules() -> void:
 	if not is_instance_valid(ship) or ship.loadout == null:
 		return
 	var l := ship.loadout
-	var key := "%d:" % l.unlocked_slots
+	var status := Outfitter.shop_status(ship)
+	var key := "%d:%s:" % [l.unlocked_slots, status]
 	for m in l.modules():
 		key += String(m.id) + ","
 	if key == _loadout_key:
@@ -621,6 +631,8 @@ func _refresh_modules() -> void:
 	_loadout_key = key
 	_modules_header.text = "%d / %d slots fitted" % [l.upgrades_fitted(), l.unlocked_slots]
 	_modules_header.tooltip_text = _loadout_tooltip(ship)
+	_modules_status.text = status
+	_modules_status.visible = not status.is_empty()
 	for i in ShipModule.SLOT_NAMES.size():
 		var m := l.get_module(i as ShipModule.Slot)
 		var n := _module_names[i]

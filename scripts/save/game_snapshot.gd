@@ -5,7 +5,9 @@ extends RefCounted
 ## [method apply_scene] on the fresh scene, before its first sim step).
 ## Split in two: the globals (autoloads, the tutorial: [method capture_globals])
 ## and one live system ([method capture_system] / [method apply_system]),
-## both in the same flat Dictionary; only home is saved for now.
+## both in the same flat Dictionary. Only home is saved as a system: the
+## remote ones are data in Sector ("cluster"), live ones sync into it first
+## (ViewManager.sync_states); a load always starts at home.
 ##
 ## Saved: the sim clock, economy, event log, every captain (all fields,
 ## traits, rank, wallet, career stats, decision log), every building
@@ -38,16 +40,30 @@ extends RefCounted
 ## Phase C3 (planet claims: garrisons saved with the dens plus the "claims"
 ## key, claim group ships, guard links) added keys only; older saves load
 ## with no claims until the ThreatDirector makes them, so no bump.
+## P4 (gate raids: the "gate_raids" key, the forming raid and the raids in
+## progress with their stand-in bases) added a key only, no bump.
 ## Asteroid clusters (the "clusters" key) replaced the belts without a bump:
 ## a save without it keeps the starting clusters full, and its contracts'
 ## belt names map onto them ("Cinder Belt" -> "Cinder Cluster").
 ## The tutorial step (the "tutorial" key) was added without a bump: a save
 ## without it loads with the tutorial off.
+## The gate network (the "cluster" key: seed, generator version, remote
+## system states; Sector) was added without a bump: a save without it gets
+## the fresh seed of the new-game reset and saves it from then on.
+## Exploration (P3: explore contracts and the ones held for an explorer
+## still out, an explorer's survey in its trip, revealed names and
+## discoveries under "cluster", captains' survey counts) added keys only.
+## The credit log (the "ledger" key, Economy.ledger) was added without a
+## bump: a save without it loads with an empty ledger.
 const VERSION := 3
 
 
 ## The whole game: the globals and the home system.
 static func capture(tree: SceneTree) -> Dictionary:
+	# Live remote systems write themselves into Sector first (they stay live).
+	var vm := ViewManager.of(tree)
+	if vm:
+		vm.sync_states()
 	var d := capture_globals(tree)
 	var home := SystemWorld.home(tree)
 	if home:
@@ -66,7 +82,9 @@ static func capture_globals(tree: SceneTree) -> Dictionary:
 	var d := {"version": VERSION, "sim": SimClock.save_state(paused), "economy": Economy.save_state(), "events": EventLog.save_state(),
 			"rng": {"salvage": SaveUtil.rng_state(SalvageContract.rng), "career": SaveUtil.rng_state(Career.rng)}}
 	d["research"] = Research.save_state()
+	d["ledger"] = Economy.ledger.save_state()
 	d["planets"] = PlanetRaidContract.save_records()
+	d["cluster"] = Sector.save_state()
 	var tut := Tutorial.of(tree)
 	d["tutorial"] = tut.save_state() if tut else {}
 	return d
@@ -100,6 +118,7 @@ static func capture_system(w: SystemWorld) -> Dictionary:
 	d["fleets"] = _save_fleets(w)
 	d["raids"] = world.raids.save_state() if world and world.raids else {}
 	d["threats"] = world.threats.save_state() if world and world.threats else {}
+	d["gate_raids"] = world.gate_raids.save_state() if world and world.gate_raids else {}
 	d["claims"] = world.claims.save_state() if world and world.claims else {}
 	d["zones"] = world.zones.save_state() if world and world.zones else {}
 	d["camera"] = _save_camera(w)
@@ -205,9 +224,13 @@ static func apply_globals(d: Dictionary) -> void:
 	ContractBoard.reset()
 	SimClock.load_state(d.get("sim", {}))
 	Economy.load_state(d.get("economy", {}))
+	# Old saves: an empty ledger.
+	Economy.ledger.load_state(d.get("ledger", {}))
 	EventLog.load_state(d.get("events", []))
 	Research.load_state(d.get("research", {}))
 	PlanetRaidContract.load_records(d.get("planets", {}))
+	# Before the scene builds: home's gates get their targets.
+	Sector.load_state(d.get("cluster", {}))
 	var rng: Dictionary = d.get("rng", {})
 	SaveUtil.set_rng(SalvageContract.rng, rng.get("salvage", {}))
 	SaveUtil.set_rng(Career.rng, rng.get("career", {}))
@@ -224,6 +247,9 @@ static func apply_scene(tree: SceneTree, d: Dictionary) -> void:
 		apply_system(home, d)
 		if Research.legacy_pending:
 			Research.grant_legacy(home)
+	var rs := RemoteSim.of(tree)
+	if rs:
+		rs.after_load()
 
 
 ## One system's part of [param d] (see [method capture_system]) into the
@@ -267,6 +293,9 @@ static func apply_system(w: SystemWorld, d: Dictionary) -> void:
 			# Dens the save does not know (a newer system) start fresh.
 			if not den_data.has(den):
 				den.skip_initial_spawns = false
+	if world and world.gate_raids:
+		# The gate raids' stand-in bases, before their raiders.
+		world.gate_raids.load_state(d.get("gate_raids", {}), refs)
 	if world:
 		for fd: Dictionary in d.get("scrap", []):
 			refs.add(int(fd["id"]), ScrapField.restore(world, fd))
@@ -291,6 +320,8 @@ static func apply_system(w: SystemWorld, d: Dictionary) -> void:
 		world.claims.restore_links(refs)
 	if world and world.raids:
 		world.raids.load_state(d.get("raids", {}), refs)
+	if world and world.gate_raids:
+		world.gate_raids.relink()
 	_restore_camera.call_deferred(w, d.get("camera", {}))
 
 

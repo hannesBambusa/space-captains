@@ -1,0 +1,30 @@
+[gd_resource type="Resource" script_class="BuildingDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_def.gd" id="1_bdef"]
+[ext_resource type="Script" path="res://scripts/explorer_ship.gd" id="2_expl"]
+
+[resource]
+script = ExtResource("1_bdef")
+id = &"explorer_outpost"
+display_name = "Explorer Outpost"
+short_label = "Explorer Outpost"
+description = "Hangar for long-range scouts. Explorers hired here take explore contracts on jump gates, fly through to the system beyond, survey it and bring the charts home."
+model_path = "res://assets/models/buildings/explorer_outpost.glb"
+cost_credits = 700
+cost_iron = 140
+cost_titanium = 30
+build_time = 25.0
+footprint_radius = 36.0
+max_count = 1
+structure_hull = 1600.0
+placeholder_tint = Color(0.4, 0.7, 1, 1)
+max_hires = 3
+hire_cost_credits = 300
+hire_role = "Explorer"
+hire_ship_path = "res://assets/models/ships/explorer.glb"
+hire_ship_script = ExtResource("2_expl")
+ship_cost = 500
+inner_berths = 2
+berth_spacing = 8.8
+berth_depth = 11.0
+outer_berth_side = 17.0

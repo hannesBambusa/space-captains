@@ -11,6 +11,9 @@ extends MinerShip
 ## Fields keep the height their wreck died at. One down among a belt's rocks
 ## is cut from the salvager's lane above (below) it, so the ship never sits
 ## in the turning rocks; elsewhere the salvager holds at the field's height.
+## Fields move with their frame (ScrapField.anchor): the cut and hover spots
+## are kept as offsets from the field ([method _spot]) and the hover point
+## moves at the field's frame velocity.
 ## Model: assets/models/ships/salvager.glb (set by the Salvage Yard).
 
 const WORK_TIME := 16.0
@@ -59,8 +62,10 @@ func job_begin(trip: CaptainBrain.Trip) -> bool:
 	var band := SpaceNav.rock_band_at(self, hover)
 	if band and absf(cut.y) < band.rock_layer_height() + 6.0:
 		hover.y = lane_sign() * band.lane_altitude()
-	trip.meta["cut"] = cut
-	trip.meta["hover"] = hover
+	# Offsets from the field, so the spots move with it ("rel").
+	trip.meta["cut"] = cut - f.global_position
+	trip.meta["hover"] = hover - f.global_position
+	trip.meta["rel"] = true
 	trip.meta["scrap"] = 0
 	trip.ore = -1
 	trip.work_time = WORK_TIME * (stats.drill_mult if stats else 1.0) * load_time_scale()
@@ -73,9 +78,9 @@ func job_target(trip: CaptainBrain.Trip, working: bool) -> Dictionary:
 	var sc := trip.contract as SalvageContract
 	if sc == null or not is_instance_valid(sc.field) or not trip.meta.has("hover"):
 		return {}
-	var pos: Vector3 = trip.meta["hover"]
-	var cut: Vector3 = trip.meta["cut"]
-	var out := {"pos": pos, "vel": Vector3.ZERO}
+	var pos := _spot(trip, "hover")
+	var cut := _spot(trip, "cut")
+	var out := {"pos": pos, "vel": sc.field.frame_velocity()}
 	if working or SpaceNav.flat_distance(pos, global_position) < 60.0:
 		out["face"] = Vector3(cut.x - pos.x, 0.0, cut.z - pos.z)
 	return out
@@ -110,7 +115,17 @@ func separation_key() -> int:
 	var t := brain.trip if brain else null
 	if _slot_field == 0 or t == null or not t.meta.has("hover"):
 		return 0
-	return _slot_field if SpaceNav.flat_distance(global_position, t.meta["hover"]) < WORK_ZONE else 0
+	return _slot_field if SpaceNav.flat_distance(global_position, _spot(t, "hover")) < WORK_ZONE else 0
+
+
+## World point of the trip's [param key] spot ("cut", "hover"): an offset
+## from the field ("rel"), or a world point from an older save.
+static func _spot(trip: CaptainBrain.Trip, key: String) -> Vector3:
+	var p: Vector3 = trip.meta[key]
+	var sc := trip.contract as SalvageContract
+	if trip.meta.get("rel", false) and sc and is_instance_valid(sc.field):
+		return sc.field.global_position + p
+	return p
 
 
 ## First free spot index around [param f] (wraps past SLOT_COUNT when full).
@@ -155,7 +170,7 @@ func _update_beam() -> void:
 		_beam.set_active(false)
 		return
 	var nose := global_transform * Vector3(0.0, 0.0, -nose_offset)
-	var cut: Vector3 = t.meta["cut"]
+	var cut := _spot(t, "cut")
 	# Flat: a salvager in its lane cuts a field down among the rocks.
 	var to_cut := cut - global_position
 	to_cut.y = 0.0

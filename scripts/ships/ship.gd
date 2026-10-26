@@ -48,8 +48,8 @@ extends Node3D
 ## warp ([method can_warp], from the brain: never in combat), how far short
 ## to drop out ([method warp_drop_distance]) and whose hop to follow
 ## ([method warp_lead]: fleets, escorts). While spooling the hull shakes and
-## the engines run hot; in the hop a stretched streak trails it and a flash
-## marks the entry and the exit. The lane height of any cluster on the hop
+## the engines run hot; the jump, the light trail of the hop and the drop-in
+## are [WarpVisuals]. The lane height of any cluster on the hop
 ## is held throughout; a hop with no band flies the straight 3D line from
 ## the (levelled) spool height to the arc's height at the drop-out point.
 ##
@@ -62,6 +62,12 @@ extends Node3D
 ## fighting (up to [constant AIM_PITCH_MAX_DEG], [method gun_forward]) and
 ## the guns fire along it. Fleeing under fire ([method is_fleeing]) the ship
 ## dives or climbs away from the nearest hostile's height to break the line.
+##
+## Gate trips ([method jump_to], [method start_transit]): a [GateTransit]
+## takes over from the brain (flies to the gate, into the portal, leaves
+## the world as a ShipCodec dict, comes out of the far gate) until it
+## hands the ship back at home. A captain shot down outside home does not
+## eject (no way home for a pod yet).
 
 signal status_changed(ship: Ship)
 signal damaged(ship: Ship, amount: float, attacker: Node3D)
@@ -77,9 +83,9 @@ const TOAST_REWARD := Color(1.0, 0.85, 0.4)
 const MAX_STEP := 0.1
 const MAX_SUBSTEPS := 40
 
-enum Role { MINER, MERCENARY, SCAVENGER, SALVAGER, POD, SHUTTLE, LANDER }
+enum Role { MINER, MERCENARY, SCAVENGER, SALVAGER, POD, SHUTTLE, LANDER, EXPLORER }
 
-const ROLE_NAMES: PackedStringArray = ["Miner", "Mercenary", "Scavenger", "Salvager", "Pod", "Cargo shuttle", "Lander"]
+const ROLE_NAMES: PackedStringArray = ["Miner", "Mercenary", "Scavenger", "Salvager", "Pod", "Cargo shuttle", "Lander", "Explorer"]
 ## Docked captains look in at the Outfitter this often, sim seconds.
 const IDLE_VISIT_INTERVAL := 45.0
 const TRAIT_INTERVAL := 2.0
@@ -126,6 +132,8 @@ static var flat_combat: bool = false
 var captain: Captain
 var brain: CaptainBrain
 var mover: ShipMover
+## Gate trip in progress (null = the brain flies the ship).
+var transit: GateTransit
 ## Building this ship belongs to and docks at.
 var home: Building
 ## Berth index at [member home].
@@ -170,7 +178,7 @@ var _goal_vy := 0.0
 var _goal_vy_at := -1.0
 ## 0..1, picks this ship's cruise height inside its band (stable per name).
 var _cruise_roll := 0.5
-var _streak: MeshInstance3D
+var _warp_vis: WarpVisuals
 var _run := AttackRun.new()
 ## Sim time of the last fight_step, the fight's height and target.
 var _fight_at := -1.0
@@ -193,6 +201,8 @@ func setup_ship(ship_captain: Captain, model_path: String, home_building: Buildi
 	_model_path = model_path
 	captain.ship = self
 	captain.stranded = false
+	captain.away_slot = -1
+	captain.away_in = ""
 	name = StringName(("%s_%s" % [captain.role, captain.captain_name]).validate_node_name().replace(" ", ""))
 
 
@@ -264,11 +274,17 @@ func sim_step(dt: float) -> void:
 			repairing = false
 			RepairBay.end_session(self)
 		durability.shields = durability.max_shields
-	if brain:
+	if transit:
+		# The transit flies the ship; true = it placed the ship itself (or
+		# the ship left the world through a portal).
+		if transit.step(dt) or dead or not is_inside_tree():
+			_update_aim(dt)
+			return
+	elif brain:
 		brain.update(dt)
 	if dead:
 		return
-	if captain:
+	if captain and transit == null:
 		_trait_timer -= dt
 		if _trait_timer <= 0.0:
 			_trait_timer = TRAIT_INTERVAL
@@ -298,6 +314,8 @@ func get_display_name() -> String:
 
 
 func get_status_text() -> String:
+	if transit and mover.warp_state == ShipMover.Warp.IDLE:
+		return transit.status_text()
 	var warp := warp_status_text()
 	if not warp.is_empty():
 		return warp
@@ -331,6 +349,8 @@ func is_hostile() -> bool:
 
 ## May the mover start (or follow) a warp hop now? Brains decide.
 func can_warp() -> bool:
+	if transit:
+		return transit.can_warp()
 	return brain != null and brain.can_warp()
 
 
@@ -341,11 +361,15 @@ func warp_drop_distance() -> float:
 
 ## The mover whose hops this ship follows (formation), or null.
 func warp_lead() -> ShipMover:
+	if transit:
+		return null
 	return brain.warp_lead() if brain else null
 
 
 ## Where the ship is warping to, for the status line ("" = unknown).
 func warp_destination() -> String:
+	if transit:
+		return transit.destination_name()
 	return brain.destination_name() if brain else ""
 
 
@@ -370,42 +394,14 @@ func _update_warp_policy() -> void:
 
 
 func _on_warp_changed(_m: ShipMover, state: ShipMover.Warp) -> void:
-	if state == ShipMover.Warp.WARP or (state == ShipMover.Warp.IDLE and _streak and _streak.visible):
-		WarpFx.flash(self, global_position, 18.0 + hit_radius * 2.0)
+	if _warp_vis == null and state != ShipMover.Warp.IDLE and DisplayServer.get_name() != "headless":
+		_warp_vis = WarpVisuals.new()
+		var fac := Factions.of(self)
+		_warp_vis.setup(self, _model, _glow_node, fac.light_color if fac else HudStyle.HOLO)
+		add_child(_warp_vis)
+	if _warp_vis:
+		_warp_vis.on_warp_changed(state)
 	status_changed.emit(self)
-
-
-func _update_streak() -> void:
-	var on := mover.warp_state == ShipMover.Warp.WARP
-	if not on:
-		if _streak:
-			_streak.visible = false
-		return
-	if _streak == null:
-		_streak = MeshInstance3D.new()
-		_streak.name = "WarpStreak"
-		var m := CylinderMesh.new()
-		m.top_radius = 0.6
-		m.bottom_radius = 3.2
-		m.height = 1.0
-		m.radial_segments = 10
-		m.rings = 1
-		_streak.mesh = m
-		var mat := StandardMaterial3D.new()
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-		mat.albedo_color = Color(0.55, 0.8, 1.0, 0.55)
-		_streak.material_override = mat
-		_streak.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		_streak.layers = RENDER_LAYER
-		# Lying along +Z (behind the nose), the wide end at the ship.
-		_streak.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
-		add_child(_streak)
-	var length := clampf(mover.warp_speed * 0.12, 40.0, 320.0)
-	_streak.visible = true
-	_streak.scale = Vector3(1.0 + hit_radius * 0.08, length, 1.0 + hit_radius * 0.08)
-	_streak.position = Vector3(0.0, 0.0, length * 0.5 + hit_radius * 0.6)
 
 
 # --- Combatant API (see Combat) ---------------------------------------------
@@ -471,7 +467,7 @@ func destroy(killer: Node3D = null) -> void:
 	if world:
 		world.fx.explode(pos, 9.0)
 		if _leaves_scrap():
-			world.spawn_scrap(pos, world.ship_scrap, world.ship_scrap_life, 26.0, "%s wreck" % get_display_name())
+			world.spawn_scrap(pos, world.ship_scrap, world.ship_scrap_life, 26.0, "%s wreck" % get_display_name(), self)
 	_on_destroyed(killer)
 	destroyed.emit(self, killer)
 	if world:
@@ -514,6 +510,9 @@ func _on_research_done(t: TechDef) -> void:
 
 ## Chance this ship's captain ejects when it is destroyed.
 func eject_chance() -> float:
+	var w := SystemWorld.of(self)
+	if w and not w.is_home:
+		return 0.0
 	return captain.eject_chance(stats) if captain else 0.0
 
 
@@ -851,6 +850,8 @@ func _track_leg(pos: Vector3, goal: Vector3, dt: float) -> void:
 ## May this ship fly its own cruise arc right now (travel legs), or must it
 ## fly straight at its goal (fights, formations, docking approaches)?
 func cruise_free() -> bool:
+	if transit:
+		return transit.cruise_free()
 	return brain != null and brain.cruise_free()
 
 
@@ -931,6 +932,21 @@ func get_world_velocity() -> Vector3:
 
 
 # --- Frames, docking ----------------------------------------------------------
+
+## Starts a trip through [param gate] (a JumpGate in this ship's system):
+## hired ships only. Null when the ship cannot go.
+func jump_to(gate: JumpGate) -> GateTransit:
+	if gate == null or gate.def == null:
+		return null
+	return start_transit(PackedStringArray([gate.def.name]))
+
+
+## Starts a trip through the gates named in [param hops], one per system
+## along the way, holding [param dwell] sim seconds in every system it
+## passes through (see [GateTransit]).
+func start_transit(hops: PackedStringArray, dwell: float = 0.0) -> GateTransit:
+	return GateTransit.start(self, hops, dwell)
+
 
 ## Faces [param yaw] (the mover's heading and the node's).
 func set_heading(yaw: float) -> void:
@@ -1140,7 +1156,7 @@ func on_cargo_delivered() -> void:
 
 # --- Visuals ------------------------------------------------------------------
 
-func _apply_visuals(_dt: float) -> void:
+func _apply_visuals(dt: float) -> void:
 	var t := SimClock.time
 	var w := TAU * t / bob_period + _phase
 	var parked := is_docked() and mover.path_done() and mover.velocity.length() < 0.5
@@ -1161,7 +1177,8 @@ func _apply_visuals(_dt: float) -> void:
 			_model.position.z = cos(t * 91.0) * amp
 	_glow_level = lerpf(_glow_level, clampf(want, 0.0, 1.0), 0.15)
 	_pulse_glow()
-	_update_streak()
+	if _warp_vis:
+		_warp_vis.update(dt)
 	if _toast and _toast.visible:
 		var left := _toast_until - t
 		var cam := get_viewport().get_camera_3d()
@@ -1196,9 +1213,10 @@ func _collect_glow() -> void:
 func _pulse_glow() -> void:
 	var k := 0.85 + 0.15 * sin(Time.get_ticks_msec() * 0.001 * glow_pulse_speed * TAU * 0.5 + _phase)
 	var lvl := _glow_level
+	var boost := _warp_vis.glow_boost() if _warp_vis else 1.0
 	for i in _glow_mats.size():
-		_glow_mats[i].emission_energy_multiplier = _glow_base[i] * k * lerpf(0.35, 0.9, lvl)
+		_glow_mats[i].emission_energy_multiplier = _glow_base[i] * k * lerpf(0.35, 0.9, lvl) * boost
 	if _glow_node:
-		# The flame runs along local +Z; stretch it with thrust.
-		var z := lerpf(glow_idle, glow_full, lvl) * (0.92 + 0.12 * k)
+		# The flame runs along local +Z; stretch it with thrust (and the warp drive's flare).
+		var z := lerpf(glow_idle, glow_full, lvl) * (0.92 + 0.12 * k) * lerpf(1.0, boost, 0.35)
 		_glow_node.scale = Vector3(_glow_scale.x, _glow_scale.y, _glow_scale.z * z)

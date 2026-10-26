@@ -404,7 +404,7 @@ func _is_prey(s: Ship) -> bool:
 		return fac.hunts_pods
 	if s is SalvagerShip:
 		return fac.hunts_salvagers
-	if s is MinerShip:
+	if s is MinerShip or s is ExplorerShip:
 		return fac.hunts_miners
 	return fac.hunts_armed and s.faction == Combat.Faction.PLAYER and s.weapon != null and s.role == Ship.Role.MERCENARY
 
@@ -709,7 +709,7 @@ func _raid_step(dt: float) -> void:
 		_loot_clock = 0.0
 		var amount := mini(roundi(RAID_LOOT_CREDITS * fac.raid_loot_mult), maxi(Economy.credits, 0))
 		if amount > 0:
-			Economy.spend(amount)
+			Economy.spend(amount, PackedInt32Array(), Ledger.OTHER, "Looted by raiders")
 			credits_looted += amount
 			var who := fac.raiders_label()
 			EventLog.post("%s are looting %s" % [who, _raid_target.display_name], EventLog.Kind.THREAT, _raid_target, Vector3.INF, "", fac.id)

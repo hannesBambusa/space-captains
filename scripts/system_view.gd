@@ -1,6 +1,11 @@
 class_name SystemView
 extends SubViewportContainer
-## Shows the viewed system's SubViewport full screen (scenes/game.tscn).
+## Shows one live system's SubViewport full screen (scenes/game.tscn: the
+## SystemView node holds home's HomeHost; every remote system that is live
+## gets its own container, a [SystemHost]). Only the container of the
+## viewed system is visible and renders ([method set_shown], called by the
+## [ViewManager]); hidden ones keep simulating but draw nothing, hear no
+## input and have no 3D audio listener.
 ##
 ## Sharpness: the window stretches canvas items, so a stretched container
 ## would render 3D at the base size (1920x1080) and scale it. Instead each
@@ -13,9 +18,10 @@ extends SubViewportContainer
 ##
 ## Input: the container does not forward anything by itself. Events nobody
 ## at the top level took (HUD, selection, placement) go to the viewed
-## system in [method _unhandled_input]; this node is the first child of
-## game.tscn, so it hears them last, the order the RTS camera had when it
-## sat in the same scene as the HUD.
+## system in [method _unhandled_input] (only the container holding it
+## forwards); these containers are the first children of game.tscn, so
+## they hear them last, the order the RTS camera had when it sat in the
+## same scene as the HUD.
 
 
 func _ready() -> void:
@@ -26,8 +32,7 @@ func _ready() -> void:
 	for c in get_children():
 		var vp := c as SubViewport
 		if vp:
-			_match_quality(vp)
-			vp.audio_listener_enable_3d = true
+			match_quality(vp)
 	get_viewport().size_changed.connect(_fit)
 	_fit()
 
@@ -48,7 +53,7 @@ func _fit() -> void:
 	scale = base / Vector2(px)
 
 
-func _match_quality(vp: SubViewport) -> void:
+func match_quality(vp: SubViewport) -> void:
 	var root := get_viewport()
 	vp.msaa_2d = root.msaa_2d
 	vp.msaa_3d = root.msaa_3d
@@ -69,12 +74,24 @@ func _match_quality(vp: SubViewport) -> void:
 	vp.use_hdr_2d = root.use_hdr_2d
 
 
-## The viewed system's SubViewport, or null.
+## On screen or hidden: drawn, rendering every frame and the 3D audio
+## listener, or none of it (the system keeps simulating either way).
+func set_shown(on: bool) -> void:
+	visible = on
+	for c in get_children():
+		var vp := c as SubViewport
+		if vp:
+			vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS if on else SubViewport.UPDATE_DISABLED
+			vp.audio_listener_enable_3d = on
+
+
+## The viewed system's SubViewport when it is this container's, else null.
 func viewed_viewport() -> SubViewport:
 	var vm := ViewManager.of(get_tree())
 	if vm == null or not is_instance_valid(vm.viewed):
 		return null
-	return vm.viewed.get_viewport() as SubViewport
+	var vp := vm.viewed.get_viewport() as SubViewport
+	return vp if vp and vp.get_parent() == self else null
 
 
 func _unhandled_input(event: InputEvent) -> void:

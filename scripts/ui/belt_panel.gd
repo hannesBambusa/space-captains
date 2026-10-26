@@ -5,7 +5,9 @@ extends PanelContainer
 ## from home, the contracts posted on it (with cancel), and the
 ## "Post mining contract" form: reward per load stepper, a load limit and
 ## the "Escorted" option (pay per escorted trip), which posts a linked
-## EscortContract so mercenaries fly with every miner on it.
+## EscortContract so mercenaries fly with every miner on it. Miners on an
+## escorted contract wait in the berth for an escort; while nobody escorts
+## them the panel says so ("No escort: 2 miners waiting", with a hint).
 
 const ORE_NAMES: PackedStringArray = ["Rock", "Iron", "Titanium", "Crystal"]
 
@@ -25,6 +27,7 @@ var _left: PipMeter
 var _left_text: Label
 var _contracts_header: Label
 var _contracts: VBoxContainer
+var _escort_warn: Label
 var _form: PostContractForm
 var escorted: bool = false
 var escort_pay: int = 35
@@ -99,6 +102,12 @@ func _ready() -> void:
 	_contracts = VBoxContainer.new()
 	_contracts.add_theme_constant_override("separation", 1)
 	v.add_child(_contracts)
+	_escort_warn = UIUtil.label("", &"ValueLabel")
+	_escort_warn.add_theme_color_override("font_color", HudStyle.WARN)
+	_escort_warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_escort_warn.custom_minimum_size.x = panel_width - 20.0
+	_escort_warn.visible = false
+	v.add_child(_escort_warn)
 
 	v.add_child(HSeparator.new())
 	_form = PostContractForm.new("POST MINING CONTRACT", "Post mining contract", ContractBoard.mining_rules, panel_width)
@@ -171,6 +180,7 @@ func _process(delta: float) -> void:
 		for c in _contracts.get_children():
 			if c is ContractRow:
 				(c as ContractRow).refresh()
+		_update_escort_warning()
 
 
 ## Parts that change while it is shown: what is left, danger (clusters
@@ -212,6 +222,19 @@ func _rebuild_contracts() -> void:
 	for c in list:
 		var row := ContractRow.new(c, hud, false)
 		_contracts.add_child(row)
+	_update_escort_warning()
+
+
+## "No escort: 2 miners waiting" while escorted miners here wait for nobody.
+func _update_escort_warning() -> void:
+	var lines: PackedStringArray = []
+	if belt:
+		for c in ContractBoard.get_for_target(belt):
+			var w := c.get_warning_text()
+			if not w.is_empty():
+				lines.append("%s. %s." % [w, c.get_warning_hint()])
+	_escort_warn.text = "\n".join(lines)
+	_escort_warn.visible = not lines.is_empty()
 
 
 func _refresh_form() -> void:

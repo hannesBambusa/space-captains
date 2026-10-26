@@ -72,7 +72,7 @@ func setup(owner_hud: HUD) -> void:
 	_info.name = "BuildInfo"
 	hud.get_node(^"Root").add_child.call_deferred(_info)
 	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 14)
+	h.add_theme_constant_override("separation", 10)
 	_bar.add_child(h)
 	var groups: Array[Array] = [[], [], []]
 	if hud.manager:
@@ -195,6 +195,9 @@ func _process(delta: float) -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
 	if k == null or not k.pressed or k.echo or k.ctrl_pressed or k.meta_pressed or k.alt_pressed:
+		return
+	# Hidden while another system is viewed (no station there).
+	if not is_visible_in_tree():
 		return
 	var i := k.keycode - KEY_F1
 	if i < 0 or i >= _order.size() or k.keycode > KEY_F12:

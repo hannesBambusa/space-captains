@@ -221,7 +221,7 @@ func buy(ore: int, units: int, floor_credits: int = 0) -> int:
 	if units <= 0:
 		return 0
 	var cost := price_of(ore, units)
-	if not Economy.spend(cost):
+	if not Economy.spend(cost, PackedInt32Array(), Ledger.SALVAGE, "Bought %s at the Salvage Yard" % Economy.ore_name(ore)):
 		return 0
 	stock[ore] -= units
 	# Paid now; the ore waits at the yard's depot for a cargo shuttle.

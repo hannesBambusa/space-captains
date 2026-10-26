@@ -35,7 +35,7 @@ func _on_ready_ship() -> void:
 	set_meta(&"focus_distance", 170.0)
 
 
-func _on_damaged(_amount: float, attacker: Node3D) -> void:
+func _on_damaged(amount: float, attacker: Node3D) -> void:
 	var mb := brain as MercenaryBrain
 	if mb:
-		mb.on_attacked(attacker)
+		mb.on_attacked(attacker, amount)

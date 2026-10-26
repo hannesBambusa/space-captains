@@ -290,8 +290,10 @@ func _make_ore_row(parent: VBoxContainer, ore: int) -> Dictionary:
 	rate.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	b.add_child(rate)
 	b.add_child(UIUtil.spacer())
-	b.add_child(UIUtil.label("Keep", &"DimLabel"))
-	var kminus := UIUtil.step_button("-", "Keep less %s back" % Economy.ore_name(ore), Vector2(22.0, 22.0))
+	var keep_l := UIUtil.label("Keep", &"DimLabel")
+	keep_l.mouse_filter = Control.MOUSE_FILTER_PASS
+	b.add_child(keep_l)
+	var kminus := UIUtil.step_button("-", "Keep less %s back from auto-sell" % Economy.ore_name(ore), Vector2(22.0, 22.0))
 	kminus.pressed.connect(func() -> void:
 		if factory:
 			var m := factory.market
@@ -300,8 +302,9 @@ func _make_ore_row(parent: VBoxContainer, ore: int) -> Dictionary:
 	var keep := UIUtil.label("", &"NumberLabel")
 	keep.custom_minimum_size.x = 38.0
 	keep.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	keep.mouse_filter = Control.MOUSE_FILTER_PASS
 	b.add_child(keep)
-	var kplus := UIUtil.step_button("+", "Keep more %s back for building" % Economy.ore_name(ore), Vector2(22.0, 22.0))
+	var kplus := UIUtil.step_button("+", "Keep more %s back from auto-sell, for building" % Economy.ore_name(ore), Vector2(22.0, 22.0))
 	kplus.pressed.connect(func() -> void:
 		if factory:
 			var m := factory.market
@@ -315,7 +318,7 @@ func _make_ore_row(parent: VBoxContainer, ore: int) -> Dictionary:
 			if factory:
 				factory.market.refine(ore, 10 if Input.is_key_pressed(KEY_SHIFT) else 1))
 		a.add_child(refine)
-	return {"box": box, "row": a, "stock_bar": bar, "stock": stock, "meter": meter, "demand": demand, "price": price, "ask": ask, "rate": rate, "keep": keep, "refine": refine}
+	return {"box": box, "row": a, "stock_bar": bar, "stock": stock, "meter": meter, "demand": demand, "price": price, "ask": ask, "rate": rate, "keep": keep, "keep_label": keep_l, "refine": refine}
 
 
 
@@ -419,11 +422,15 @@ func _refresh_live() -> void:
 		if not m.auto_sell:
 			rl.text = "auto-sell off"
 		elif m.surplus(i) <= 0:
-			rl.text = "none to sell"
+			rl.text = "keeping all" if Economy.ore[i] > 0 else "none to sell"
 		else:
 			rl.text = "~%d/min" % roundi(rate)
 		rl.add_theme_color_override("font_color", PipMeter.GOOD if rate >= m.max_buy_per_min[i] * 0.5 else (PipMeter.MID if rate > 0.0 else PipMeter.BAD))
 		(r["keep"] as Label).text = str(m.reserve[i])
+		var keep_tip := "Keep %d %s (selling stops below this; building, research and tooling still use it). You have %d." % [
+				m.reserve[i], Economy.ore_name(i), Economy.ore[i]]
+		(r["keep"] as Label).tooltip_text = keep_tip
+		(r["keep_label"] as Label).tooltip_text = keep_tip
 		var tip := "%s: Factory stock %d (target %d), demand %s, pays %.1f cr (%s). Your ask %.1f cr sells ~%.0f/min above %d kept. Export draws %.0f + %d%%/min." % [
 				Economy.ORE_NAMES[i], roundi(m.stock[i]), roundi(m.target_stock[i]), m.demand_name(i).to_lower(), m.willing_price(i), trend,
 				m.ask[i], rate, m.reserve[i], m.export_base_per_min[i], roundi(m.export_share_per_min[i] * 100.0)]

@@ -8,7 +8,9 @@ extends RefCounted
 ## EscortContract (target: a miner or a mining contract, paid per completed
 ## trip) later; SalvageContract (target: a scrap field, paid per load) in
 ## stage 3; PlanetRaidContract (target: a planet or moon, paid per load) in
-## phase C2. The board, the UI rows and the brain only use this base API.
+## phase C2; ExploreContract (target: a jump gate, paid once on the
+## explorer's return with the survey) in P3. The board, the UI rows and the
+## brain only use this base API.
 ##
 ## Status: OPEN (no one on it), ACTIVE (at least one taker on a trip),
 ## COMPLETED (limit reached), CANCELLED (withdrawn by the player). Takers are
@@ -16,10 +18,10 @@ extends RefCounted
 
 signal changed(contract: Contract)
 
-enum Type { MINING, BOUNTY, ESCORT, SALVAGE, PLANET_RAID }
+enum Type { MINING, BOUNTY, ESCORT, SALVAGE, PLANET_RAID, EXPLORE }
 enum Status { OPEN, ACTIVE, COMPLETED, CANCELLED }
 
-const TYPE_NAMES: PackedStringArray = ["Mining", "Bounty", "Escort", "Salvage", "Planet raid"]
+const TYPE_NAMES: PackedStringArray = ["Mining", "Bounty", "Escort", "Salvage", "Planet raid", "Explore"]
 const STATUS_NAMES: PackedStringArray = ["Open", "Active", "Completed", "Cancelled"]
 
 var id: int = 0
@@ -102,6 +104,22 @@ func get_reward_text() -> String:
 
 ## One-line progress text for lists ("3 / 10 loads").
 func get_progress_text() -> String:
+	return ""
+
+
+## What the takers are doing, for the contract lists ("Fleet of 3
+## forming", "Exploring Ostra (2/5 waypoints)"); "" = just count them.
+func get_activity_text() -> String:
+	return ""
+
+
+## A problem the player should see on the contract's rows ("" when none),
+## and what to do about it ([method get_warning_hint]).
+func get_warning_text() -> String:
+	return ""
+
+
+func get_warning_hint() -> String:
 	return ""
 
 

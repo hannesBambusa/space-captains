@@ -280,7 +280,7 @@ func addon_problem(def: BuildingDef, bay: int, check_cost: bool = true) -> Strin
 func install_addon(def: BuildingDef, bay: int, finished: bool = false, label: String = "") -> Building:
 	if not addon_problem(def, bay, not finished).is_empty():
 		return null
-	if not finished and not Economy.spend(def.cost_credits, def.cost_ore()):
+	if not finished and not Economy.spend(def.cost_credits, def.cost_ore(), Ledger.BUILDINGS, def.display_name):
 		return null
 	var b := _spawn(def, Vector3.ZERO, 0.0, label, bay)
 	if finished:
@@ -503,7 +503,7 @@ func place(def: BuildingDef, offset: Vector3, yaw: float = NAN) -> Building:
 	var p := plan_placement(def, offset, true, yaw)
 	if not p.is_valid():
 		return null
-	if not Economy.spend(def.cost_credits, def.cost_ore()):
+	if not Economy.spend(def.cost_credits, def.cost_ore(), Ledger.BUILDINGS, def.display_name):
 		return null
 	return _spawn(def, offset, p.yaw)
 

@@ -117,12 +117,15 @@ func _on_pressed(e: Dictionary) -> void:
 		return
 	var n := entry_target(e)
 	if n:
-		hud.camera.focus_on(n)
+		hud.focus(n)
 		if hud.selection and (n is Ship or n is ScavengerDen or n is Building):
 			hud.selection.select(n)
 		return
 	var p: Vector3 = e["position"]
 	if p != Vector3.INF and is_instance_valid(_anchor):
+		# Events without a node are home's: show home first.
+		if not hud.is_home_view() and hud.view_manager:
+			hud.view_manager.view_now(ClusterNetwork.HOME_ID)
 		_anchor.global_position = Vector3(p.x, 0.0, p.z)
 		hud.camera.focus_on(_anchor, 700.0)
 

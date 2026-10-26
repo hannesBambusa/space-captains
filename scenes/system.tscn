@@ -1,4 +1,4 @@
-[gd_scene load_steps=30 format=3]
+[gd_scene load_steps=31 format=3]
 
 [ext_resource type="Shader" path="res://shaders/space_sky.gdshader" id="1_sky"]
 [ext_resource type="Script" path="res://scripts/system_world.gd" id="0_world"]
@@ -18,6 +18,7 @@
 [ext_resource type="Resource" path="res://data/buildings/shield_generator.tres" id="31_shld"]
 [ext_resource type="Resource" path="res://data/buildings/science_lab.tres" id="32_lab"]
 [ext_resource type="Resource" path="res://data/buildings/raider_dock.tres" id="33_rdock"]
+[ext_resource type="Resource" path="res://data/buildings/explorer_outpost.tres" id="34_expl"]
 
 [sub_resource type="ShaderMaterial" id="sky_mat"]
 shader = ExtResource("1_sky")
@@ -84,7 +85,7 @@ bounds_radius = 52000.0
 
 [node name="Buildings" type="Node" parent="."]
 script = ExtResource("7_bm")
-building_defs = Array[Resource]([ExtResource("8_outpost"), ExtResource("15_merc"), ExtResource("18_outf"), ExtResource("19_salv"), ExtResource("33_rdock"), ExtResource("32_lab"), ExtResource("30_turr"), ExtResource("31_shld")])
+building_defs = Array[Resource]([ExtResource("8_outpost"), ExtResource("15_merc"), ExtResource("18_outf"), ExtResource("19_salv"), ExtResource("33_rdock"), ExtResource("34_expl"), ExtResource("32_lab"), ExtResource("30_turr"), ExtResource("31_shld")])
 factory_def = ExtResource("22_fact")
 
 [node name="Combat" type="Node3D" parent="."]

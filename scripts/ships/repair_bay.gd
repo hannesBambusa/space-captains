@@ -15,8 +15,12 @@ extends RefCounted
 const COST_PER_HULL := 0.15
 ## Share of the repair bill that is the station's income.
 const PLAYER_SHARE := 0.35
-## Repairs stop at this hull fraction (matches MercenaryBrain.REPAIRED).
-const DONE_AT := 0.97
+## Repairs run to this hull fraction (full). MercenaryBrain.REPAIRED is the
+## lower level at which a docked merc stays in the berth for them.
+const DONE_AT := 1.0
+## Hull points short of the goal that count as done: float sums never land
+## exactly on max_hull * DONE_AT (368.6 / 380 is 0.96999.. < 0.97).
+const HULL_EPS := 0.01
 
 
 ## Cost of bringing [param ship] back to [constant DONE_AT], credits.
@@ -29,7 +33,7 @@ static func cost_to_repair(ship: Ship) -> int:
 
 ## True when the hull needs work.
 static func needs_repair(ship: Ship) -> bool:
-	return ship != null and ship.durability != null and ship.durability.hull < ship.durability.max_hull * DONE_AT
+	return ship != null and ship.durability != null and ship.durability.hull < ship.durability.max_hull * DONE_AT - HULL_EPS
 
 
 ## True when the captain can pay for at least a little more hull.
@@ -50,7 +54,8 @@ static func should_repair(ship: Ship, hull: float) -> bool:
 static func step(ship: Ship, dt: float) -> float:
 	var d := ship.durability
 	var goal := d.max_hull * DONE_AT
-	if d.hull >= goal or dt <= 0.0:
+	if not needs_repair(ship) or dt <= 0.0:
+		_finish(ship, goal)
 		ship.repairing = false
 		end_session(ship)
 		return 0.0
@@ -77,8 +82,21 @@ static func step(ship: Ship, dt: float) -> float:
 		end_session(ship)
 		return 0.0
 	d.repair(points)
+	if not needs_repair(ship):
+		_finish(ship, goal)
+		ship.repairing = false
+		end_session(ship)
+		return points
 	ship.repairing = true
 	return points
+
+
+## Snaps a hull within [constant HULL_EPS] of the goal onto it, so the
+## fraction reads done everywhere.
+static func _finish(ship: Ship, goal: float) -> void:
+	var d := ship.durability
+	if not d.is_dead() and d.hull < goal and not needs_repair(ship):
+		d.hull = goal
 
 
 ## Pays the station its share of the session's bill and posts one line.
@@ -88,17 +106,27 @@ static func end_session(ship: Ship) -> void:
 		return
 	ship.repair_session_paid = 0
 	var share := roundi(float(paid) * PLAYER_SHARE)
-	Economy.add_income(share, "Repairs")
+	Economy.add_income(share, Ledger.REPAIRS, "Ship repairs")
 	var who := ship.captain.captain_name if ship.captain else ship.get_display_name()
 	var note := "" if not needs_repair(ship) else ", %d%% hull (wallet empty)" % roundi(ship.hull_fraction() * 100.0)
 	EventLog.post("%s paid %d cr for repairs%s. Repairs: +%d cr" % [who, paid, note, share], EventLog.Kind.REWARD, ship, Vector3.INF, "repairs:" + who)
 	if ship.captain:
 		var partial := needs_repair(ship)
-		ship.captain.flight_log.note(CaptainLog.Kind.REPAIR, CaptainLog.Outcome.FAILED if partial else CaptainLog.Outcome.DID,
-				"Paid %d cr for repairs%s" % [paid, ", only part of the job" if partial else ""],
-				"Hull %d%% to %d%% at %.2f cr per hull point%s" % [roundi(ship.repair_from * 100.0), roundi(ship.hull_fraction() * 100.0), COST_PER_HULL,
-				": the wallet ran dry, %d cr still to go" % cost_to_repair(ship) if partial else ""],
-				"Wallet now %s cr. The station keeps %d%% (%d cr)." % [Fmt.amount(ship.captain.wallet), roundi(PLAYER_SHARE * 100.0), share])
+		var broke := partial and not can_afford(ship)
+		var pct := floori(ship.hull_fraction() * 100.0)
+		var headline := "Repaired to %d%% for %d cr" % [pct, paid]
+		if broke:
+			headline = "Left with hull %d%%: out of credits" % pct
+		elif partial:
+			headline = "Paid %d cr for repairs, only part of the job" % paid
+		var why := "Hull %d%% to %d%% for %d cr at %.2f cr per hull point" % [roundi(ship.repair_from * 100.0), pct, paid, COST_PER_HULL]
+		if broke:
+			why += ": the wallet ran dry, %d cr still to go; flies on damaged" % cost_to_repair(ship)
+		elif partial:
+			why += ": left the berth before the job was done"
+		ship.captain.flight_log.note(CaptainLog.Kind.REPAIR, CaptainLog.Outcome.FAILED if partial else CaptainLog.Outcome.DID, headline, why,
+				"Wallet now %s cr. The station keeps %d%% (%d cr)." % [Fmt.amount(ship.captain.wallet), roundi(PLAYER_SHARE * 100.0), share],
+				"repairs_broke" if broke else "")
 
 
 static func _pays(ship: Ship) -> bool:

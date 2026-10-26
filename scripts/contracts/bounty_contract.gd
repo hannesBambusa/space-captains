@@ -80,6 +80,10 @@ func get_reward_text() -> String:
 	return "%d cr" % reward
 
 
+func get_activity_text() -> String:
+	return get_team_text()
+
+
 ## Taken: a captain is on it (alone or in a fleet).
 func is_taken() -> bool:
 	return not takers.is_empty() or (fleet != null and not fleet.members.is_empty())

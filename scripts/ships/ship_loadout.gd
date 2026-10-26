@@ -35,6 +35,7 @@ const DEFAULT_PATHS := {
 	"Scavenger": "res://data/loadouts/scavenger_default.tres",
 	"Salvager": "res://data/loadouts/salvager_default.tres",
 	"Lander": "res://data/loadouts/lander_default.tres",
+	"Explorer": "res://data/loadouts/explorer_default.tres",
 }
 ## Dropship research (Research autoload) for landers: more cargo per raid,
 ## tougher hulls.
@@ -85,15 +86,21 @@ func upgrades_fitted() -> int:
 
 
 ## True when [param m] may go in now: an upgrade over what its slot holds,
-## and a free unlocked slot unless it replaces a bought module.
+## and a free unlocked slot unless it replaces a bought module. Never a
+## module made for another role (see [method fits_hull]).
 func can_fit(m: ShipModule) -> bool:
-	if m == null:
+	if m == null or not fits_hull(m):
 		return false
 	var cur := get_module(m.slot)
 	var cur_tier := cur.tier if cur else 0
 	if m.tier <= cur_tier:
 		return false
 	return cur_tier >= 1 or upgrades_fitted() < unlocked_slots
+
+
+## True when [param m] is made for this hull's role (stock parts always are).
+func fits_hull(m: ShipModule) -> bool:
+	return m != null and (m.tier <= 0 or role_name.is_empty() or m.fits_role(role_name))
 
 
 func modules() -> Array[ShipModule]:

@@ -1,8 +1,8 @@
 class_name DerelictDef
 extends Resource
-## A derelict hulk in a SystemDef: a fixed spot with loot. Data only for
-## now (generated systems, SystemGenerator); the scene that builds and
-## salvages it comes later.
+## A derelict hulk in a SystemDef: a fixed spot with loot (generated
+## systems, SystemGenerator). Built as a [Derelict] node while its system
+## is live; explorers strip it during a survey (DerelictLoot).
 
 enum Kind { PROBE, FREIGHTER, FRIGATE, STATION_HULK }
 
@@ -13,7 +13,7 @@ enum Kind { PROBE, FREIGHTER, FRIGATE, STATION_HULK }
 @export_range(0.0, 360.0, 0.1, "degrees") var angle_deg: float = 0.0
 ## Metres above (+) or below (-) the system plane.
 @export var height: float = 0.0
-## Loot table id (looked up when derelicts get their loot).
+## Loot table id (DerelictLoot.roll: derelict_probe, _freighter, _frigate, _station).
 @export var loot_table: StringName = &"derelict_small"
 ## 1..3. Better hulks deeper in the network.
 @export_range(1, 3, 1) var loot_tier: int = 1

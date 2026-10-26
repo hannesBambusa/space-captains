@@ -28,16 +28,31 @@ extends CaptainBrain
 ##   personality's repair level ([method repair_level]) and no hostile near,
 ##   it goes home to dock and repair. Escorts and fleet members keep their
 ##   job (they repair when it ends) unless below the retreat level.
-## Target choice: whoever attacks the merc or its ward first, then the
-## nearest hostile in the mode's area. AI checks run on a timer.
+## Target choice: self-defence first. A hostile ship (not a base or its
+## guns) that hit the merc in the last [constant HIT_MEMORY] s and is within
+## [constant RETARGET_RANGE] is turned on, the one doing the most damage
+## lately among several ([method _threat_attacker]); a switch holds for
+## [constant RETARGET_LOCK] s and only flips to a clearly worse attacker.
+## Escorts count their miner's attackers too. Then the mode's target (the
+## fleet's focus, the bounty, the nearest hostile in the area); once the
+## attackers are dead or gone, back to it. AI checks run on a timer.
 ## Fleets ([MercFleet]): a bounty too strong for one ship is taken by a
 ## fleet (or by a lone wolf alone, [member solo_brave], who also holds on
 ## longer: [constant SOLO_RETREAT_SCALE]). Members fly the fleet's rally,
 ## formation and focus target instead of their own bounty steering.
 ## Warp hops: bounty runs and trips home warp (dropping out
 ## [constant HUNT_WARP_DROP] short of a target, outside its guns); fleet
-## wingmen and escorts in formation hop with their leader or ward, never
-## on their own; patrols, fights and defence never warp.
+## wingmen and escorts in formation hop with their leader or ward (a
+## wingman left behind hops on its own and the leader waits for it, see
+## MercFleet); patrols in a defence zone or toward an alarm warp on long
+## legs (home patrols never do). A target farther than
+## [constant CLOSE_IN_START] (a solo bounty, a raider far inside the
+## zone, an alarm's attacker) is first closed on ([method _close_in]): the
+## merc flies, and warps when calm, to where the target will be, dropping
+## out [constant SHIP_WARP_DROP] short of a ship (outside a fight), then
+## starts its attack run inside [constant CLOSE_IN_END]. Never mid-fight:
+## no hop while hit in the last few seconds or with a hostile near (the
+## spool is dropped and tried again once clear).
 
 enum Mode { NONE, PATROL, DEFEND, BOUNTY, ESCORT }
 
@@ -59,8 +74,9 @@ const ESCORT_RISE := 16.0
 const RETALIATE_RANGE := 1100.0
 ## Gives up waiting for a miner to launch after this long, sim seconds.
 const ESCORT_WAIT_LIMIT := 120.0
-## Repairs are done at this hull fraction.
-const REPAIRED := RepairBay.DONE_AT
+## Docked below this hull fraction a merc stays in the berth for repairs
+## (RepairBay then patches it up to RepairBay.DONE_AT).
+const REPAIRED := 0.97
 ## Calm this long (no hit, no hostile in guard range) before going home to repair.
 const REPAIR_CALM := 6.0
 ## Lone wolves on a run above their weight retreat this much later.
@@ -81,6 +97,20 @@ const CONSTRUCTOR_REACH := 2500.0
 const HUNT_WARP_DROP := 2200.0
 ## Escorts and wingmen hop with their lead within this distance, metres.
 const FORMATION_WARP_RANGE := 600.0
+## Closing on a far target: starts beyond this flat distance, the attack run
+## begins inside [constant CLOSE_IN_END], metres.
+const CLOSE_IN_START := 4000.0
+const CLOSE_IN_END := 3000.0
+## Warp drop-out short of a ship target, metres (outside weapon range).
+const SHIP_WARP_DROP := 1700.0
+## Self-defence: hits remembered this long (damage fades over it), sim
+## seconds; attackers turned on within this range, metres.
+const HIT_MEMORY := 6.0
+const RETARGET_RANGE := 3500.0
+## A switch to an attacker holds this long, sim seconds; after it, another
+## attacker takes over only with this much more recent damage.
+const RETARGET_LOCK := 6.0
+const RETARGET_MARGIN := 1.3
 
 var mode: Mode = Mode.NONE
 var combat_target: Node3D
@@ -106,6 +136,14 @@ var _patrol_zone_id: int = 0
 var _guard_site: WeakRef
 var _guard_name: String = ""
 var _guard_until: float = 0.0
+## Flying (and warping) toward a far combat target, not fighting yet.
+var _closing: bool = false
+## Recent hits by hostile ships: instance id -> {ref: WeakRef, damage
+## (fading over HIT_MEMORY), time}.
+var _hits: Dictionary = {}
+## The attacker turned on, and until when that choice holds.
+var _locked: WeakRef
+var _lock_until: float = 0.0
 
 
 func get_status_text() -> String:
@@ -119,6 +157,8 @@ func get_status_text() -> String:
 			return "Patrolling" if mode == Mode.PATROL else "Defending home"
 		State.ENGAGING:
 			var tn := Combat.name_of(combat_target)
+			if _closing and not tn.is_empty():
+				return "Closing on %s" % tn
 			if _guard() and not tn.is_empty():
 				return "Defending %s, engaging %s" % [_guard_name, tn]
 			if mode == Mode.ESCORT and _ward():
@@ -147,7 +187,8 @@ func get_status_text() -> String:
 		State.RETURNING:
 			return "Returning for repairs" if retreating else "Returning"
 		State.REPAIRING:
-			return "Repairing %d%%" % roundi(ship.hull_fraction() * 100.0)
+			# Floored: 99.6% is still "99%", the last point is real work.
+			return "Repairing %d%%" % floori(ship.hull_fraction() * 100.0)
 		State.UNDOCKING:
 			if mode == Mode.DEFEND:
 				return "Scrambling"
@@ -171,6 +212,11 @@ func can_warp() -> bool:
 			return calm
 		State.ESCORTING:
 			return calm
+		State.ENGAGING:
+			return _closing and calm and ship.nearest_hostile(PANIC_WARP_CLEAR) == null
+		State.PATROLLING:
+			# Long legs to and inside a defence zone, or to an alarm; not home loops.
+			return (patrol_zone() != null or _guard() != null) and calm and ship.nearest_hostile(PANIC_WARP_CLEAR) == null
 		State.RETURNING:
 			return calm and ship.nearest_hostile(PANIC_WARP_CLEAR) == null
 	return false
@@ -188,6 +234,11 @@ func cruise_free() -> bool:
 
 
 func warp_drop() -> float:
+	if state == State.ENGAGING and _closing:
+		return SHIP_WARP_DROP if combat_target is Ship else HUNT_WARP_DROP
+	if state == State.HUNTING and fleet and fleet.leader != ship and fleet.state != MercFleet.State.FORMING:
+		# A wingman's own hop ends near its slot, not short of the target.
+		return SpaceNav.WARP_DROP
 	return HUNT_WARP_DROP if state == State.HUNTING else SpaceNav.WARP_DROP
 
 
@@ -227,9 +278,41 @@ func destination_name() -> String:
 	return super.destination_name()
 
 
-func on_attacked(attacker: Node3D) -> void:
-	if is_instance_valid(attacker):
-		_last_attacker = weakref(attacker)
+func on_attacked(attacker: Node3D, amount: float = 0.0) -> void:
+	if not is_instance_valid(attacker):
+		return
+	_last_attacker = weakref(attacker)
+	if attacker is Ship:
+		var key := attacker.get_instance_id()
+		var e: Dictionary = _hits.get(key, {"ref": weakref(attacker), "damage": 0.0, "time": SimClock.time})
+		e["damage"] = recent_damage_from(attacker) + amount
+		e["time"] = SimClock.time
+		_hits[key] = e
+
+
+## Damage [param attacker] did to this merc lately (fades over
+## [constant HIT_MEMORY]); 0 when none.
+func recent_damage_from(attacker: Object) -> float:
+	var e: Dictionary = _hits.get(attacker.get_instance_id(), {})
+	if e.is_empty():
+		return 0.0
+	var age := SimClock.time - float(e["time"])
+	return 0.0 if age > HIT_MEMORY else float(e["damage"]) * (1.0 - age / HIT_MEMORY)
+
+
+## Hostile ships that hit this merc in the last [constant HIT_MEMORY] s,
+## alive, as {ship: damage}.
+func recent_attackers() -> Dictionary:
+	var out := {}
+	for key in _hits.keys():
+		var e: Dictionary = _hits[key]
+		var a := (e["ref"] as WeakRef).get_ref() as Ship
+		if a == null or SimClock.time - float(e["time"]) > HIT_MEMORY:
+			_hits.erase(key)
+			continue
+		if Combat.is_live_target(a):
+			out[a] = recent_damage_from(a)
+	return out
 
 
 # --- Update -------------------------------------------------------------------
@@ -254,13 +337,13 @@ func update(dt: float) -> void:
 					_note_scramble(true)
 					_launch(Mode.DEFEND, null)
 					return
-			if ship.hull_fraction() >= REPAIRED:
+			if not RepairBay.needs_repair(ship):
+				last_decision = "Repaired"
 				_set_state(State.RESTING)
 				_timer = rest_duration() * 0.5
 			elif not RepairBay.can_afford(ship):
-				last_decision = "Out of credits for repairs (hull %d%%)" % roundi(ship.hull_fraction() * 100.0)
-				note(CaptainLog.Kind.REPAIR, CaptainLog.Outcome.FAILED, "Stopped repairs at %d%% hull: out of credits" % roundi(ship.hull_fraction() * 100.0),
-						"Wallet %s cr, %s cr more would finish the job; flies on damaged" % [Fmt.amount(captain.wallet if captain else 0), Fmt.amount(RepairBay.cost_to_repair(ship))], "", "repairs_broke")
+				# RepairBay.end_session logged "Left with hull N%: out of credits".
+				last_decision = "Out of credits for repairs (hull %d%%)" % floori(ship.hull_fraction() * 100.0)
 				_set_state(State.RESTING)
 				_timer = rest_duration() * 0.5
 		State.UNDOCKING:
@@ -305,7 +388,7 @@ func _decide_merc() -> void:
 	if RepairBay.should_repair(ship, REPAIRED):
 		last_decision = "Repairing"
 		note(CaptainLog.Kind.REPAIR, CaptainLog.Outcome.DID, "Stayed in the berth for repairs",
-				"Hull %d%%, repairs run to %d%%; the bill is %s cr, the wallet has %s cr" % [roundi(ship.hull_fraction() * 100.0), roundi(REPAIRED * 100.0),
+				"Hull %d%%, repairs run to %d%%; the bill is %s cr, the wallet has %s cr" % [roundi(ship.hull_fraction() * 100.0), roundi(RepairBay.DONE_AT * 100.0),
 				Fmt.amount(RepairBay.cost_to_repair(ship)), Fmt.amount(captain.wallet if captain else 0)], "", "repairs_first")
 		_set_state(State.REPAIRING)
 		_timer = 1.0
@@ -414,7 +497,9 @@ func decline_fleet(f: MercFleet, reason: String, e: RoleEvaluator.Evaluation = n
 	if captain == null:
 		return
 	var why := DecisionNotes.why(self, e) if e else reason
-	note(CaptainLog.Kind.FLEET, CaptainLog.Outcome.REFUSED, "Declined %s's fleet for %s: %s" % [f.leader_name, DecisionNotes.job_name(f.contract), reason.to_lower()],
+	if e:
+		remember_refusal(f.contract.get_target_name(), DecisionNotes.merc_refusal_reason(self, e))
+	note(CaptainLog.Kind.FLEET, CaptainLog.Outcome.REFUSED, DecisionNotes.merc_refusal_line(self, e) if e else "Declined %s's fleet for %s: %s" % [f.leader_name, DecisionNotes.job_name(f.contract), reason.to_lower()],
 			why, DecisionNotes.detail(self, e) if e else "", DecisionNotes.key_for("decline", f.contract, reason))
 
 
@@ -437,6 +522,7 @@ func _launch(m: Mode, t: Trip) -> void:
 	_wait_time = 0.0
 	_ward_was_out = false
 	combat_target = null
+	_closing = false
 	if m == Mode.PATROL or m == Mode.DEFEND:
 		_patrol_until = SimClock.time + rng.randf_range(PATROL_TIME.x, PATROL_TIME.y)
 		_patrol_angle = rng.randf() * TAU
@@ -472,7 +558,19 @@ func return_home(for_repairs: bool) -> void:
 	_clear_guard()
 	_patrol_zone_id = 0
 	combat_target = null
+	_closing = false
 	_set_state(State.RETURNING)
+
+
+func begin_transit() -> void:
+	return_home(false)
+	mode = Mode.NONE
+
+
+func end_transit() -> void:
+	mode = Mode.NONE
+	retreating = false
+	super.end_transit()
 
 
 func _end_trip() -> void:
@@ -539,9 +637,12 @@ func _space_update(dt: float) -> void:
 	if Combat.is_live_target(combat_target):
 		if state != State.ENGAGING:
 			_set_state(State.ENGAGING)
+		if _close_in(combat_target):
+			return
 		ship.fight_step(combat_target, (ship as MercenaryShip).attack_side if ship is MercenaryShip else 1.0)
 		return
 	combat_target = null
+	_closing = false
 	if state == State.ENGAGING:
 		_enter_work_state()
 	match mode:
@@ -557,6 +658,28 @@ func _space_update(dt: float) -> void:
 				ship.set_world_goal(t.global_position, Vector3.ZERO, Vector3.ZERO, 60.0)
 		Mode.ESCORT:
 			_escort_step(dt)
+
+
+## Far from [param t]: fly (and warp, see [method can_warp]) to where it
+## will be after the hop instead of starting the attack run; the hop drops
+## out short of it ([method warp_drop]). Starts beyond
+## [constant CLOSE_IN_START] while not under fire, ends inside
+## [constant CLOSE_IN_END]. True while closing.
+func _close_in(t: Node3D) -> bool:
+	var d := SpaceNav.flat_distance(ship.global_position, t.global_position)
+	if _closing:
+		_closing = d > CLOSE_IN_END
+	else:
+		_closing = d > CLOSE_IN_START and _calm()
+	if not _closing:
+		return false
+	# Lead a moving target by the spool, the ramp and the hop, fading out
+	# as the leg gets too short to warp.
+	var tv := t.call(&"get_aim_velocity") as Vector3
+	tv.y = 0.0
+	var lead := (SpaceNav.WARP_SPOOL + SpaceNav.WARP_RAMP + d / SpaceNav.WARP_SPEED) * smoothstep(CLOSE_IN_END, CLOSE_IN_START + 1000.0, d)
+	ship.set_world_goal(t.global_position + tv * lead, tv, Vector3.ZERO, 60.0)
+	return true
 
 
 ## Damaged mercs still scramble against raiders while the hull is well
@@ -665,9 +788,13 @@ func _check_job() -> bool:
 ## Who to shoot now, or null.
 func _pick_target() -> Node3D:
 	var pos := ship.global_position
-	# Fight back first.
+	# Fight back first: the ship doing the most damage to it (escorts: to the miner too).
+	var threat := _threat_attacker()
+	if threat:
+		return threat
+	# A base (or its guns) shooting at it close by.
 	var la := _last_attacker.get_ref() as Node3D if _last_attacker else null
-	if Combat.is_live_target(la) and ship.durability.seconds_since_hit() < 5.0 and pos.distance_to(la.global_position) < RETALIATE_RANGE:
+	if Combat.is_live_target(la) and not (la is Ship) and ship.durability.seconds_since_hit() < 5.0 and pos.distance_to(la.global_position) < RETALIATE_RANGE:
 		return la
 	match mode:
 		Mode.BOUNTY:
@@ -711,6 +838,49 @@ func _pick_target() -> Node3D:
 	if Combat.is_live_target(combat_target) and pos.distance_to(combat_target.global_position) < RETALIATE_RANGE:
 		return combat_target
 	return null
+
+
+## The hostile ship to fight back at, or null: the most recent damage
+## (to this merc, and to the ward when escorting) within
+## [constant RETARGET_RANGE]. A choice holds for [constant RETARGET_LOCK]
+## s; then another attacker takes over only with [constant RETARGET_MARGIN]
+## times the damage. Logs each switch.
+func _threat_attacker() -> Ship:
+	var pos := ship.global_position
+	var cand := recent_attackers()
+	var w := _ward() if mode == Mode.ESCORT else null
+	if w and not w.is_docked():
+		for a in w.durability.attackers(HIT_MEMORY):
+			if a is Ship and Combat.is_live_target(a):
+				var e: Dictionary = w.durability.tally.get(a.get_instance_id(), {})
+				var age := SimClock.time - float(e.get("time", -INF))
+				# The ward's hits count by how recent they are (no fading tally there).
+				cand[a] = float(cand.get(a, 0.0)) + maxf(1.0 - age / HIT_MEMORY, 0.0) * 20.0
+	var best: Ship = null
+	var best_d := 0.0
+	for a: Ship in cand:
+		if pos.distance_to(a.global_position) > RETARGET_RANGE:
+			continue
+		if float(cand[a]) > best_d:
+			best_d = float(cand[a])
+			best = a
+	var cur := _locked.get_ref() as Ship if _locked else null
+	if cur and (not Combat.is_live_target(cur) or pos.distance_to(cur.global_position) > RETARGET_RANGE):
+		cur = null
+	if cur and (SimClock.time < _lock_until or (cand.has(cur) and best_d < float(cand[cur]) * RETARGET_MARGIN)):
+		return cur
+	if best == null:
+		_locked = null
+		return null
+	_locked = weakref(best)
+	_lock_until = SimClock.time + RETARGET_LOCK
+	var was := Combat.name_of(combat_target) if Combat.is_live_target(combat_target) and combat_target != best else ""
+	var victim := "them" if recent_damage_from(best) > 0.0 or w == null else w.get_display_name()
+	last_decision = "Turned on %s" % best.get_display_name()
+	note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Turned on %s%s" % [best.get_display_name(), ", leaving %s" % was if not was.is_empty() else ""],
+			"%s was shooting at %s (%d damage in the last %d s, %d m off)" % [best.get_display_name(), victim, roundi(best_d), roundi(HIT_MEMORY),
+			roundi(pos.distance_to(best.global_position))], "", "retarget")
+	return best
 
 
 ## Hostile ships (not dens) inside the home defence radius.

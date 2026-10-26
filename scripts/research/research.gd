@@ -208,7 +208,7 @@ func fund_problem(t: TechDef) -> String:
 func fund(t: TechDef) -> bool:
 	if not fund_problem(t).is_empty():
 		return false
-	if not Economy.spend(t.cost_credits, t.cost_ore()):
+	if not Economy.spend(t.cost_credits, t.cost_ore(), Ledger.RESEARCH, "Funded %s" % t.display_name):
 		return false
 	projects[t.id] = {"credits": t.cost_credits, "ore": t.cost_ore(), "progress": 0.0, "funded_at": SimClock.time}
 	_log("Funded %s: %s reserved" % [t.display_name, t.cost_text()])
@@ -246,7 +246,7 @@ func cancel(t: TechDef) -> void:
 		return
 	var c := cancel_terms(t)
 	projects.erase(t.id)
-	Economy.add_income(int(c["credits"]), "Research refund")
+	Economy.add_income(int(c["credits"]), Ledger.RESEARCH_REFUND, "Cancelled %s" % t.display_name)
 	Economy.add(0, c["ore"])
 	var r := researcher_on(t.id)
 	if r:
@@ -293,7 +293,7 @@ func hire_problem(a: Researcher) -> String:
 
 
 func hire(a: Researcher) -> bool:
-	if not hire_problem(a).is_empty() or not Economy.spend(a.hire_cost):
+	if not hire_problem(a).is_empty() or not Economy.spend(a.hire_cost, PackedInt32Array(), Ledger.HIRES, "Hired %s" % a.researcher_name):
 		return false
 	applicants.erase(a)
 	a.hired_at = SimClock.time
@@ -381,7 +381,7 @@ func _pay_wage(r: Researcher, dt: float) -> void:
 	if whole < 1 and not r.unpaid:
 		return
 	whole = maxi(whole, 1)
-	if Economy.spend(whole):
+	if Economy.spend(whole, PackedInt32Array(), Ledger.UPKEEP, "Researcher wages"):
 		r.wage_due = maxf(r.wage_due - float(whole), 0.0)
 		if r.unpaid:
 			r.unpaid = false
@@ -446,7 +446,7 @@ func grant(t: TechDef) -> void:
 	if projects.has(t.id):
 		var c := int(projects[t.id].get("credits", 0))
 		projects.erase(t.id)
-		Economy.add_income(c, "Research refund")
+		Economy.add_income(c, Ledger.RESEARCH_REFUND, "Funding back: %s" % t.display_name)
 		var r := researcher_on(t.id)
 		if r:
 			r.project = &""
@@ -526,7 +526,7 @@ func load_state(d: Dictionary) -> void:
 		var p: Dictionary = d["projects"][id]
 		if cat.find(StringName(id)) == null:
 			# A tech that no longer exists: give its reserve back.
-			Economy.add(int(p.get("credits", 0)), PackedInt32Array(p.get("ore", [])))
+			Economy.add(int(p.get("credits", 0)), PackedInt32Array(p.get("ore", [])), Ledger.RESEARCH_REFUND, "Removed research project")
 			continue
 		projects[StringName(id)] = {"credits": int(p.get("credits", 0)), "ore": PackedInt32Array(p.get("ore", [0, 0, 0])),
 				"progress": float(p.get("progress", 0.0)), "funded_at": float(p.get("funded_at", 0.0))}

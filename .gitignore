@@ -1,4 +1,4 @@
-build/
+/build/
 .godot/
 
 # Python caches from blender scripts, CI page staging

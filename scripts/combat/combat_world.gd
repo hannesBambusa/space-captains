@@ -6,7 +6,9 @@ extends Node3D
 ## station shield bubbles the tracers test against. Also the hub for
 ## combat events the UI listens to (spawns, deaths, scrap fields).
 ## Lives in scenes/system.tscn; every lookup is null-safe so scenes without
-## it (the sector prototype) still run.
+## it (the sector prototype) still run. Outside home ([member is_home]
+## false: remote systems, previews) only the pools and scrap exist: no raid
+## or threat director, claims, defence zones or alarm (all null).
 
 signal combatant_spawned(node: Node3D)
 ## A ship or den died. [param killer] may be null.
@@ -26,6 +28,8 @@ var projectiles: ProjectilePool
 var fx: CombatFx
 var raids: RaidDirector
 var threats: ThreatDirector
+## Raids through the jump gates from dangerous systems nearby (P4, home only).
+var gate_raids: GateRaidSource
 ## Faction planet claims: garrisons and re-claims (phase C3).
 var claims: PlanetClaims
 ## Defence zones and the colony alarm (mercenaries answer attacks).
@@ -34,6 +38,8 @@ var alarm: ColonyAlarm
 var scrap_root: Node3D
 ## Station shield bubbles that stop hostile tracers (ProjectilePool).
 var shields: Array[StationShield] = []
+## In the player's home system (set from its SystemWorld when ready).
+var is_home := true
 
 
 ## The combat world of [param n]'s system (see [method SystemWorld.of]).
@@ -63,6 +69,10 @@ func _ready() -> void:
 	scrap_root = Node3D.new()
 	scrap_root.name = "ScrapFields"
 	add_child(scrap_root)
+	var w := SystemWorld.of(self)
+	is_home = w == null or w.is_home
+	if not is_home:
+		return
 	raids = RaidDirector.new()
 	raids.name = "RaidDirector"
 	add_child(raids)
@@ -78,6 +88,9 @@ func _ready() -> void:
 	alarm = ColonyAlarm.new()
 	alarm.name = "ColonyAlarm"
 	add_child(alarm)
+	gate_raids = GateRaidSource.new()
+	gate_raids.name = "GateRaidSource"
+	add_child(gate_raids)
 
 
 func register_shield(s: StationShield) -> void:
@@ -97,13 +110,16 @@ func notify_destroyed(node: Node3D, killer: Node3D) -> void:
 	combatant_destroyed.emit(node, killer)
 
 
-## Leaves a scrap field at [param pos] (world, on the plane).
-func spawn_scrap(pos: Vector3, amount: int, life: float, radius: float, label: String) -> ScrapField:
+## Leaves a scrap field at [param pos] (world, on the plane), moving with
+## the frame it was made in ([method ScrapField.pick_anchor]; [param source]
+## is the dying node).
+func spawn_scrap(pos: Vector3, amount: int, life: float, radius: float, label: String, source: Node = null) -> ScrapField:
 	var f := ScrapField.new()
 	f.setup(amount, life, radius, label)
 	scrap_root.add_child(f)
 	# Keeps the height: a wreck in a belt lane stays clear of the rocks.
 	f.global_position = pos
+	f.anchor_to(ScrapField.pick_anchor(self, pos, source))
 	f.tree_exited.connect(func() -> void: scrap_changed.emit())
 	scrap_changed.emit()
 	return f

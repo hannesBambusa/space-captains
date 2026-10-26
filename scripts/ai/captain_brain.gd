@@ -27,6 +27,15 @@ extends RefCounted
 ## threatens the ship; a fleeing captain may make a panic hop only with no
 ## hostile within [constant PANIC_WARP_CLEAR] and no hit for
 ## [constant WARP_HIT_CALM] (scavengers in a belt still catch slow miners).
+## Escorted mining (an EscortContract linked to the trip's mining contract):
+## the miner leaves only with an escort beside it (WAITING_ESCORT in the
+## berth until one is within [constant ESCORT_JOIN_RANGE]), flies at the
+## slowest escort's pace, holds where it is when its escorts fall behind
+## ([constant ESCORT_LOST_RANGE]), hops only with them in formation (they
+## jump with it), and turns back home to wait when no escort is left on the
+## way out. On the way home with a load it waits for its escorts the same way,
+## but flies on alone when they are gone. Cancelling the escort contract
+## releases the waiting miners.
 
 signal state_changed(brain: CaptainBrain)
 ## A decision on a contract: accepted, or refused with a reason.
@@ -34,12 +43,12 @@ signal decided(brain: CaptainBrain, accepted: bool, text: String)
 
 enum State {
 	DOCKED, IDLE, EVALUATING, UNDOCKING, TRAVELING_TO_JOB, MINING, RETURNING, DOCKING, UNLOADING, RESTING, FLEEING,
-	PATROLLING, ENGAGING, ESCORTING, HUNTING, REPAIRING, DESTROYED,
+	PATROLLING, ENGAGING, ESCORTING, HUNTING, REPAIRING, DESTROYED, SURVEYING, WAITING_ESCORT,
 }
 
 const STATE_NAMES: PackedStringArray = [
 	"Docked", "Idle", "Evaluating", "Undocking", "En route", "Mining", "Returning", "Docking", "Unloading", "Resting", "Fleeing",
-	"Patrolling", "Engaging", "Escorting", "Hunting bounty", "Repairing", "Destroyed",
+	"Patrolling", "Engaging", "Escorting", "Hunting bounty", "Repairing", "Destroyed", "Surveying", "Waiting for an escort",
 ]
 const ORE_NAMES: PackedStringArray = ["rock", "iron", "titanium", "crystal"]
 ## Sim seconds spent "thinking" in EVALUATING (so the UI can show it).
@@ -61,6 +70,12 @@ const RUN_TO_MERC_RANGE := 2500.0
 ## Warp hops: no hostile this close for a panic hop, metres; no hit this long, sim seconds.
 const PANIC_WARP_CLEAR := 1500.0
 const WARP_HIT_CALM := 5.0
+## Escorted trips: an escort this close has joined (leave, resume), metres.
+const ESCORT_JOIN_RANGE := 450.0
+## Escorts farther than this behind: hold and wait for them, metres.
+const ESCORT_LOST_RANGE := 650.0
+## Escorted trips fly at this share of the slowest escort's top speed.
+const ESCORT_PACE := 0.85
 
 
 class Trip:
@@ -93,6 +108,11 @@ var rng := RandomNumberGenerator.new()
 ## Last refusal, for the UI ("" when the last decision was a yes).
 var last_refusal: String = ""
 var last_refusal_target: String = ""
+## Mercenaries: the latest refusal per target, with its numbers (target
+## panel): target name -> [reason line, SimClock.time]. Not saved.
+var refusal_lines: Dictionary = {}
+## Refusal lines older than this (sim seconds) are not shown.
+const REFUSAL_LINE_TTL := 120.0
 ## Last decision line for the UI ("Took Cinder Cluster", "Refused Talon Reach: ...").
 var last_decision: String = ""
 
@@ -103,6 +123,10 @@ var _threat: float = 0.0
 ## While fleeing: the friendly ship being run to (null = home).
 var _flee_to: Ship
 var _calm_time: float = 0.0
+## Escorted trip: holding in space for escorts that fell behind.
+var _escort_holding: bool = false
+## Escorted trip: turned back on the way out, docks to wait (saved).
+var _escort_wait_home: bool = false
 
 
 func _init(owner_ship: Ship, role_evaluator: RoleEvaluator) -> void:
@@ -135,6 +159,16 @@ func get_status_text() -> String:
 			if is_instance_valid(_flee_to):
 				return "Fleeing to %s" % _flee_to.get_display_name()
 			return "Fleeing home"
+		State.WAITING_ESCORT:
+			var mine := _assigned_escorts()
+			if not ship.is_docked():
+				return "Returning to wait for an escort"
+			if not mine.is_empty():
+				return "Waiting for escort %s" % mine[0].get_display_name()
+			return "Waiting for an escort"
+	if _escort_holding and (state == State.TRAVELING_TO_JOB or state == State.RETURNING):
+		var mine := _assigned_escorts()
+		return "Waiting for escort %s" % mine[0].get_display_name() if not mine.is_empty() else "Waiting for an escort"
 	return get_state_name()
 
 
@@ -148,7 +182,9 @@ func is_on_trip() -> bool:
 func can_warp() -> bool:
 	match state:
 		State.TRAVELING_TO_JOB, State.RETURNING:
-			return _threat < 0.05 and _calm()
+			return _threat < 0.05 and _calm() and _escorts_can_hop()
+		State.WAITING_ESCORT:
+			return not ship.is_docked() and _threat < 0.05 and _calm()
 		State.FLEEING:
 			return _calm() and ship.nearest_hostile(PANIC_WARP_CLEAR) == null
 	return false
@@ -232,7 +268,14 @@ func update(dt: float) -> void:
 					_abort_trip()
 					_set_state(State.RETURNING)
 		State.TRAVELING_TO_JOB:
-			_steer_to_job(false)
+			var pace := _escort_pace(false)
+			if state != State.TRAVELING_TO_JOB:
+				return
+			if _escort_holding:
+				ship.mover.hold()
+				_check_threats(dt)
+				return
+			_steer_to_job(false, pace)
 			if _check_threats(dt):
 				return
 			if ship.mover.arrived(3.0):
@@ -246,13 +289,18 @@ func update(dt: float) -> void:
 				trip.loaded = true
 				_set_state(State.RETURNING)
 		State.RETURNING:
+			var pace := -1.0
 			if trip and trip.loaded:
 				if _check_threats(dt):
+					return
+				pace = _escort_pace(true)
+				if _escort_holding:
+					ship.mover.hold()
 					return
 			else:
 				# Keep the threat fresh (can_warp reads it) without fleeing empty.
 				current_threat(dt)
-			_steer_home()
+			_steer_home(pace)
 		State.FLEEING:
 			_update_flee(dt)
 		State.DOCKING:
@@ -260,6 +308,9 @@ func update(dt: float) -> void:
 				ship.on_docked_home()
 				if trip == null:
 					_back_to_docked()
+				elif _escort_wait_home and not trip.loaded:
+					_set_state(State.WAITING_ESCORT)
+					_timer = 0.0
 				else:
 					_set_state(State.UNLOADING)
 					_timer = UNLOAD_TIME
@@ -276,6 +327,8 @@ func update(dt: float) -> void:
 				_resting_on_break = false
 				_set_state(State.DOCKED)
 				_timer = rng.randf_range(0.3, 1.5)
+		State.WAITING_ESCORT:
+			_wait_for_escort(dt)
 		State.IDLE:
 			ship.mover.hold()
 
@@ -334,9 +387,24 @@ func _record_refusal(e: RoleEvaluator.Evaluation) -> void:
 	var changed := e.reason != last_refusal or target != last_refusal_target
 	last_refusal = e.reason
 	last_refusal_target = target
+	if evaluator is MercenaryEvaluator:
+		remember_refusal(target, DecisionNotes.merc_refusal_reason(self, e))
 	note_refusal(e, changed)
 	if changed:
 		decided.emit(self, false, "%s: %s" % [target, e.reason])
+
+
+## Keeps [param line] as the latest refusal of [param target] (target panel).
+func remember_refusal(target: String, line: String) -> void:
+	refusal_lines[target] = [line, SimClock.time]
+
+
+## The latest refusal of [param target] within [constant REFUSAL_LINE_TTL], or "".
+func refusal_line_for(target: String) -> String:
+	var r: Variant = refusal_lines.get(target)
+	if r == null or SimClock.time - float(r[1]) > REFUSAL_LINE_TTL:
+		return ""
+	return String(r[0])
 
 
 # --- Decision log -------------------------------------------------------------
@@ -356,15 +424,17 @@ func note_refusal(e: RoleEvaluator.Evaluation, changed: bool) -> void:
 		# Same line as the answer to the fleet's call (MercenaryBrain.decline_fleet).
 		var dkey := DecisionNotes.key_for("decline", e.contract, e.reason)
 		if not captain.flight_log.bump(dkey):
-			note(CaptainLog.Kind.FLEET, CaptainLog.Outcome.REFUSED, "Declined %s's fleet for %s: %s" % [bounty.fleet.leader_name, DecisionNotes.job_name(e.contract), lower_first(e.reason)],
+			note(CaptainLog.Kind.FLEET, CaptainLog.Outcome.REFUSED, "Declined to join %s's fleet on %s (%s cr): %s" % [bounty.fleet.leader_name, e.contract.get_target_name(), Fmt.amount(e.contract.reward), DecisionNotes.merc_refusal_reason(self, e)],
 					DecisionNotes.why(self, e), DecisionNotes.detail(self, e), dkey)
 		return
-	var key := DecisionNotes.key_for("no", e.contract, e.reason)
+	var merc := evaluator is MercenaryEvaluator
+	# Mercenaries: a new line when the numbers move noticeably.
+	var key := DecisionNotes.key_for("no", e.contract, e.reason + ("|" + DecisionNotes.merc_refusal_tag(self, e) if merc else ""))
 	if not changed and captain.flight_log.bump(key):
 		return
 	var kind := CaptainLog.Kind.FLEET if e.terms.has("join_fleet") or e.reason == MercenaryEvaluator.FLEET_FULL else CaptainLog.Kind.CONTRACT
-	note(kind, CaptainLog.Outcome.REFUSED, "Refused %s: %s" % [DecisionNotes.job_name(e.contract), lower_first(e.reason)],
-			DecisionNotes.why(self, e), DecisionNotes.detail(self, e), key)
+	var headline := DecisionNotes.merc_refusal_line(self, e) if merc else "Refused %s: %s" % [DecisionNotes.job_name(e.contract), lower_first(e.reason)]
+	note(kind, CaptainLog.Outcome.REFUSED, headline, DecisionNotes.why(self, e), DecisionNotes.detail(self, e), key)
 
 
 ## Logs a taken contract with [param headline].
@@ -393,6 +463,9 @@ func _take(contract: Contract, e: RoleEvaluator.Evaluation = null) -> bool:
 	last_decision = "Took %s, %s" % [contract.get_target_name(), contract.get_reward_text()]
 	note_accept(e, "Accepted %s, %s" % [DecisionNotes.job_name(contract), contract.get_reward_text()])
 	decided.emit(self, true, "Took %s, %s" % [contract.get_target_name(), contract.get_reward_text()])
+	if escort_contract() and not _escort_joined():
+		_start_escort_wait()
+		return true
 	ship.start_undock()
 	_set_state(State.UNDOCKING)
 	return true
@@ -406,6 +479,7 @@ func _begin_trip(contract: Contract) -> Trip:
 	t.started_at = SimClock.time
 	last_refusal = ""
 	last_refusal_target = ""
+	refusal_lines.erase(contract.get_target_name())
 	return t
 
 
@@ -432,7 +506,7 @@ func _back_to_docked() -> void:
 
 # --- Trip steps ---------------------------------------------------------------
 
-func _steer_to_job(working: bool) -> void:
+func _steer_to_job(working: bool, speed: float = -1.0) -> void:
 	if trip == null:
 		_set_state(State.RETURNING)
 		return
@@ -441,17 +515,17 @@ func _steer_to_job(working: bool) -> void:
 		_abort_trip()
 		_set_state(State.RETURNING)
 		return
-	ship.mover.set_goal(t["pos"], t["vel"], -1.0, true, t.get("face", Vector3.ZERO), 4.0 if working else 6.0)
+	ship.mover.set_goal(t["pos"], t["vel"], speed, true, t.get("face", Vector3.ZERO), 4.0 if working else 6.0)
 
 
-func _steer_home() -> void:
+func _steer_home(speed: float = -1.0) -> void:
 	var home := ship.home
 	if home == null or not is_instance_valid(home):
 		_set_state(State.IDLE)
 		return
 	# At the complex's height (the station rides its planet's inclined orbit).
 	var approach := home.to_global(home.approach_point())
-	ship.set_world_goal(approach, SpaceNav.world_velocity(home), Vector3.ZERO, 20.0)
+	ship.set_world_goal(approach, SpaceNav.world_velocity(home), Vector3.ZERO, 20.0, speed)
 	var rel := approach - ship.global_position
 	var dy := absf(rel.y)
 	rel.y = 0.0
@@ -521,12 +595,186 @@ func _release(c: Contract) -> void:
 		c.remove_taker(ship)
 
 
+## A gate trip takes the ship (GateTransit): the job is dropped and the
+## brain waits as RETURNING (it does not run until the trip ends).
+func begin_transit() -> void:
+	_abort_trip()
+	_set_state(State.RETURNING)
+
+
+## The gate trip ended outside home with no hop left: true = the brain
+## flies the ship there (an explorer's survey), false = it holds (PARK).
+func takes_ship_back() -> bool:
+	return false
+
+
+## Back at home after a gate trip: fly to the outpost and dock.
+func end_transit() -> void:
+	trip = null
+	_set_state(State.RETURNING)
+	ship.status_changed.emit(ship)
+
+
 func _abort_trip() -> void:
 	if trip == null:
 		return
 	_release(trip.contract)
 	ship.job_end(trip)
 	trip = null
+
+
+# --- Escorted trips -----------------------------------------------------------
+
+## The open escort contract linked to the trip's mining contract, or null.
+func escort_contract() -> EscortContract:
+	if trip == null or not (trip.contract is MiningContract):
+		return null
+	return ContractBoard.escort_for_mining(trip.contract)
+
+
+## Escorts flying this trip: assigned to this ship and out in space on the
+## escort job (not docked, launching or gone home).
+func trip_escorts() -> Array[Ship]:
+	var out: Array[Ship] = []
+	var ec := escort_contract()
+	if ec == null:
+		return out
+	for e in ec.escorts_of(ship):
+		if e.dead or e.is_docked() or e.brain == null or e.brain.trip == null or e.brain.trip.contract != ec:
+			continue
+		if e.brain.state == State.ESCORTING or e.brain.state == State.ENGAGING:
+			out.append(e)
+	return out
+
+
+## Escorts the escort contract gave this ship (anywhere).
+func _assigned_escorts() -> Array[Ship]:
+	var ec := escort_contract()
+	if ec == null:
+		var none: Array[Ship] = []
+		return none
+	return ec.escorts_of(ship)
+
+
+## An escort in formation (escorting, not fighting) within
+## [constant ESCORT_JOIN_RANGE], or null.
+func _joined_escort() -> Ship:
+	for e in trip_escorts():
+		if e.brain.state == State.ESCORTING and e.global_position.distance_to(ship.global_position) <= ESCORT_JOIN_RANGE:
+			return e
+	return null
+
+
+func _escort_joined() -> bool:
+	return _joined_escort() != null
+
+
+## Escorted trip in space: the speed to fly at (-1 = own), and
+## [member _escort_holding] when the escorts fell behind. On the way out
+## with no escort left the ship turns back to wait ([param homeward] false).
+func _escort_pace(homeward: bool) -> float:
+	if escort_contract() == null:
+		_escort_holding = false
+		return -1.0
+	var list := trip_escorts()
+	if list.is_empty():
+		_escort_holding = false
+		if not homeward:
+			_turn_back_for_escort()
+		return -1.0
+	var far := 0.0
+	var slow := INF
+	for e in list:
+		far = maxf(far, e.global_position.distance_to(ship.global_position))
+		slow = minf(slow, e.max_speed)
+	var was := _escort_holding
+	_escort_holding = far > (ESCORT_JOIN_RANGE if _escort_holding else ESCORT_LOST_RANGE)
+	if _escort_holding != was:
+		ship.status_changed.emit(ship)
+		if _escort_holding and captain:
+			note(CaptainLog.Kind.CONTRACT, CaptainLog.Outcome.DID, "Held position for %s" % list[0].get_display_name(),
+					"Escorted trip: the escort is %d m behind (more than %d m), the miner waits for it" % [roundi(far), roundi(ESCORT_LOST_RANGE)], "", "escort_hold")
+	return slow * ESCORT_PACE
+
+
+## Hops only with every escort in formation and free to jump with it
+## (they follow the hop, ShipMover warp_lead).
+func _escorts_can_hop() -> bool:
+	if escort_contract() == null:
+		return true
+	for e in trip_escorts():
+		if e.brain.state != State.ESCORTING or e.global_position.distance_to(ship.global_position) > ESCORT_JOIN_RANGE or not e.can_warp():
+			return false
+	return true
+
+
+## Took an escorted contract with no escort beside it: stay in the berth.
+func _start_escort_wait() -> void:
+	var mine := _assigned_escorts()
+	last_decision = "Waiting for an escort before leaving for %s" % _trip_target_name()
+	note(CaptainLog.Kind.CONTRACT, CaptainLog.Outcome.DID, "Waiting for an escort before leaving for %s" % _trip_target_name(),
+			("Escorted contract: miners leave only with a mercenary beside them. %s is on the way" % mine[0].get_display_name()) if not mine.is_empty() \
+			else "Escorted contract: miners leave only with a mercenary beside them, and no mercenary has taken the escort contract yet", "", "escort_wait")
+	_escort_wait_home = false
+	_escort_holding = false
+	_set_state(State.WAITING_ESCORT)
+	_timer = 0.0
+
+
+## On the way out with no escort left: drop the rock and go home to wait.
+func _turn_back_for_escort() -> void:
+	ship.job_end(trip)
+	trip.progress = 0.0
+	_escort_wait_home = true
+	_escort_holding = false
+	last_decision = "Turned back: no escort"
+	note(CaptainLog.Kind.CONTRACT, CaptainLog.Outcome.DID, "Turned back to wait for an escort",
+			"No mercenary flies with it any more (lost, gone for repairs or recalled); escorted trips wait for a new one", "", "escort_lost")
+	EventLog.post("%s turned back: no escort" % ship.get_display_name(), EventLog.Kind.INFO, ship)
+	_set_state(State.WAITING_ESCORT)
+
+
+## WAITING_ESCORT: in the berth, or flying home to it after turning back.
+## Leaves once an escort has joined, or freely once the escort contract is gone.
+func _wait_for_escort(dt: float) -> void:
+	var docked := ship.is_docked()
+	if not docked and _check_threats(dt):
+		_escort_wait_home = false
+		return
+	var mc := trip.contract as MiningContract if trip else null
+	if mc == null or mc.is_finished() or mc.depleted:
+		_escort_wait_home = false
+		_abort_trip()
+		if docked:
+			_back_to_docked()
+		else:
+			_set_state(State.RETURNING)
+		return
+	if escort_contract() == null:
+		note(CaptainLog.Kind.CONTRACT, CaptainLog.Outcome.DID, "Left for %s without an escort" % _trip_target_name(), "The escort contract was cancelled", "", "escort_off")
+		_leave_for_job(docked)
+		return
+	var e := _joined_escort()
+	if e:
+		note(CaptainLog.Kind.CONTRACT, CaptainLog.Outcome.DID, "Left for %s with %s" % [_trip_target_name(), e.get_display_name()],
+				"The escort joined %d m off" % roundi(e.global_position.distance_to(ship.global_position)), "", "escort_join")
+		_leave_for_job(docked)
+		return
+	if not docked:
+		_steer_home()
+
+
+func _leave_for_job(docked: bool) -> void:
+	_escort_wait_home = false
+	_escort_holding = false
+	if docked:
+		ship.start_undock()
+		_set_state(State.UNDOCKING)
+	elif ship.job_begin(trip):
+		_set_state(State.TRAVELING_TO_JOB)
+	else:
+		_abort_trip()
+		_set_state(State.RETURNING)
 
 
 # --- Threats ------------------------------------------------------------------

@@ -33,9 +33,12 @@ extends RefCounted
 ##   apart. The leader is picked at departure by rank, then Nerve.
 ## - EN_ROUTE: the leader flies at the slowest member's pace (on its own
 ##   cruise arc, Ship.cruise_band), wingmen hold 3D offset slots behind it
-##   ([method slot_offset]: left wing above, right wing below).
+##   ([method slot_offset]: left wing above, right wing below). Wingmen
+##   near the leader hop with it; one left behind hops on its own, and
+##   short of the target the leader holds until everyone is back in
+##   formation ([constant REGROUP_DISTANCE], at most [constant REGROUP_WAIT]).
 ## - ENGAGING: inside [constant ENGAGE_RANGE] everyone shoots the fleet's
-##   focus target (whoever is shooting at the fleet, else the bounty).
+##   focus target (the ship doing the most damage to the fleet, else the bounty).
 ## - RETREATING: the leader breaks it off when the fleet's hull runs low
 ##   while the target still stands; everyone goes home together. Members
 ##   still retreat alone at their own hull threshold (they "fled early").
@@ -82,6 +85,10 @@ const INVITE_INTERVAL := 6.0
 const DECLINE_MEMORY := 40.0
 ## The fleet engages inside this distance of the target, metres.
 const ENGAGE_RANGE := 1800.0
+## Short of the target (after a hop) the leader holds while a wingman is
+## farther than this from its slot, metres, for at most this long, sim seconds.
+const REGROUP_DISTANCE := 500.0
+const REGROUP_WAIT := 30.0
 ## Formation slots: side and back offsets per row, metres.
 const SLOT_SIDE := 45.0
 const SLOT_BACK := 38.0
@@ -90,7 +97,7 @@ const SLOT_RISE := 18.0
 ## Wingmen farther than this from their slot slow the leader down, metres.
 const STRAGGLE_DISTANCE := 260.0
 ## Hostiles shooting at the fleet this close to the leader are focused first.
-const FOCUS_RANGE := 900.0
+const FOCUS_RANGE := 2500.0
 ## Share of the split by rank (the rest by damage done).
 const RANK_WEIGHT := 0.4
 const FLED_SHARE := 0.5
@@ -117,6 +124,8 @@ var focus: Node3D
 var declined: Dictionary = {}
 
 var _next_invite: float = 0.0
+## SimClock.time the leader started holding for stragglers (-1 = not).
+var _regroup_from: float = -1.0
 var _last_tick: float = -1.0
 
 
@@ -404,22 +413,33 @@ func _pick_leader() -> void:
 		members.insert(0, best)
 
 
-## Whoever is shooting at the fleet near the leader, else the bounty target.
+## The ship doing the most damage to the fleet lately (summed over the
+## members, MercenaryBrain.recent_attackers) within
+## [constant FOCUS_RANGE] of the leader, else the bounty target. A focus
+## ship is kept while it still shoots at the fleet, unless another does
+## clearly more (MercenaryBrain.RETARGET_MARGIN); once the attackers are
+## dead or gone the fleet goes back to the target.
 func _pick_focus() -> Node3D:
 	var target := contract.target
 	if not is_instance_valid(leader):
 		return target
 	var lp := leader.global_position
-	var best: Node3D = null
-	var best_d := FOCUS_RANGE
+	var dmg := {}
 	for m in members:
-		var a := m.durability.get_last_attacker() as Node3D
-		if a is Ship and Combat.is_live_target(a) and m.durability.seconds_since_hit() < 5.0:
-			var d := SpaceNav.flat_distance(lp, a.global_position)
-			if d < best_d:
-				best_d = d
-				best = a
-	if Combat.is_live_target(focus) and focus != target and focus is Ship and SpaceNav.flat_distance(lp, focus.global_position) < FOCUS_RANGE:
+		var mb := m.brain as MercenaryBrain
+		if mb == null:
+			continue
+		var hits := mb.recent_attackers()
+		for a in hits:
+			dmg[a] = float(dmg.get(a, 0.0)) + float(hits[a])
+	var best: Node3D = null
+	var best_d := 0.0
+	for a: Node3D in dmg:
+		if a != target and SpaceNav.flat_distance(lp, a.global_position) < FOCUS_RANGE and float(dmg[a]) > best_d:
+			best_d = float(dmg[a])
+			best = a
+	if Combat.is_live_target(focus) and focus != target and dmg.has(focus) and SpaceNav.flat_distance(lp, focus.global_position) < FOCUS_RANGE \
+			and best_d < float(dmg[focus]) * MercenaryBrain.RETARGET_MARGIN:
 		return focus
 	return best if best else target
 
@@ -588,6 +608,9 @@ func steer(ship: Ship) -> void:
 			ship.set_world_goal(spot, Vector3.ZERO, face, 20.0)
 		State.EN_ROUTE, State.ENGAGING:
 			if ship == leader:
+				if state == State.EN_ROUTE and _holding():
+					ship.set_world_goal(ship.global_position, Vector3.ZERO, Vector3.ZERO, 60.0)
+					return
 				var speed := _fleet_speed()
 				ship.set_world_goal(tp, Vector3.ZERO, Vector3.ZERO, 60.0, speed)
 				return
@@ -600,6 +623,29 @@ func steer(ship: Ship) -> void:
 			var spot := leader.global_position + slot_offset(idx, fwd)
 			var face := fwd if ship.global_position.distance_to(spot) < 120.0 else Vector3.ZERO
 			ship.set_world_goal(spot, leader.get_world_velocity(), face, 10.0)
+
+
+## Leader short of the target (inside the hunt drop-out plus a margin)
+## while a wingman is out of formation: hold there, for at most
+## [constant REGROUP_WAIT].
+func _holding() -> bool:
+	if not is_instance_valid(leader) or leader.mover.warp_state != ShipMover.Warp.IDLE \
+			or SpaceNav.flat_distance(leader.global_position, contract.target.global_position) > MercenaryBrain.HUNT_WARP_DROP + 400.0:
+		return false
+	var fwd := leader.global_basis * Vector3.FORWARD
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
+	var out := false
+	for i in range(1, members.size()):
+		if SpaceNav.flat_distance(members[i].global_position, leader.global_position + slot_offset(i, fwd)) > REGROUP_DISTANCE:
+			out = true
+			break
+	if not out:
+		_regroup_from = -1.0
+		return false
+	if _regroup_from < 0.0:
+		_regroup_from = SimClock.time
+	return SimClock.time - _regroup_from < REGROUP_WAIT
 
 
 ## The leader's pace: the slowest member's, slower while wingmen catch up.

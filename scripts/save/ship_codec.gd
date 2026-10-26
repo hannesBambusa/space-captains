@@ -10,8 +10,10 @@ extends RefCounted
 ## Brain states restored exactly: docked states with their timers (docked,
 ## evaluating, resting, repairing, unloading), undocking (it flies out again
 ## on the same contract), docking (it delivers the trip's load on arrival),
+## a miner waiting for an escort (in the berth, or flying home to wait),
 ## a miner travelling to or drilling its rock (same rock, same progress), a
-## salvager on its cut (same spot, same progress), returning with or
+## salvager on its cut (same spot, same progress), an explorer anywhere on
+## its survey (ExplorerBrain.restore), returning with or
 ## without a load, fleeing (cargo kept, runs home), mercenary patrols,
 ## bounty hunts (fleets included, see [method save_fleet]), escorts and
 ## trips home for repairs. Re-decided on load: an attack target (picked
@@ -21,7 +23,9 @@ extends RefCounted
 ## be restored (the ship heads home empty). Scavengers keep their state
 ## except hunting and attacking, which roam (or raid) and pick a target
 ## again; shuttles keep their cargo, and one on or near a pad flies its
-## approach again.
+## approach again. A ship on a gate trip keeps its [GateTransit] ("transit");
+## hired ships may be created in a system other than their home's (the
+## space of [param ctx]).
 
 const KIND_HIRED := "hired"
 const KIND_POD := "pod"
@@ -30,7 +34,7 @@ const KIND_SCAVENGER := "scavenger"
 
 const SLOTS: Array[int] = [ShipModule.Slot.TOOL, ShipModule.Slot.CARGO, ShipModule.Slot.DEFENSE, ShipModule.Slot.ENGINE, ShipModule.Slot.SENSOR]
 
-const BRAIN_FIELDS: PackedStringArray = ["last_refusal", "last_refusal_target", "last_decision", "_timer", "_resting_on_break", "_calm_time", "_threat_timer"]
+const BRAIN_FIELDS: PackedStringArray = ["last_refusal", "last_refusal_target", "last_decision", "_timer", "_resting_on_break", "_calm_time", "_threat_timer", "_escort_wait_home"]
 const MERC_FIELDS: PackedStringArray = ["retreating", "solo_brave", "_patrol_until", "_patrol_angle", "_patrol_point", "_wait_time", "_ward_was_out", "_passing_timer", "_patrol_zone_id"]
 const SHIP_FIELDS: PackedStringArray = ["trip_lowest_hull", "trip_was_hit", "repair_credit", "repair_session_paid", "repair_from", "_visit_timer", "_visit_pending", "_trait_timer"]
 
@@ -68,6 +72,8 @@ static func save_ship(s: Ship, contracts: Array[Contract]) -> Dictionary:
 		_save_hired(s, d, contracts)
 	else:
 		return {}
+	if s.transit:
+		d["transit"] = s.transit.to_dict()
 	return d
 
 
@@ -103,7 +109,7 @@ static func _save_hired(s: Ship, d: Dictionary, contracts: Array[Contract]) -> v
 static func _save_trip(t: CaptainBrain.Trip, contracts: Array[Contract]) -> Dictionary:
 	if t.contract and not contracts.has(t.contract):
 		contracts.append(t.contract)
-	return {"contract": SaveIds.of(t.contract), "started_at": t.started_at, "escort_requested": t.escort_requested, "meta": t.meta.duplicate(),
+	return {"contract": SaveIds.of(t.contract), "started_at": t.started_at, "escort_requested": t.escort_requested, "meta": t.meta.duplicate(true),
 			"progress": t.progress, "asteroid": t.asteroid, "ore": t.ore, "standoff_local": t.standoff_local, "work_time": t.work_time,
 			"loaded": t.loaded, "cargo": t.cargo}
 
@@ -150,7 +156,7 @@ static func create(ctx: Node, d: Dictionary, refs: SaveRefs) -> Ship:
 	var s: Ship = null
 	match String(d.get("kind", "")):
 		KIND_HIRED:
-			s = _create_hired(d, refs)
+			s = _create_hired(ctx, d, refs)
 		KIND_POD:
 			s = _create_pod(ctx, d, refs)
 		KIND_SHUTTLE:
@@ -173,7 +179,7 @@ static func _place_in_space(s: Ship, d: Dictionary) -> void:
 	s.place_in_space(d["position"] as Vector3, float(d.get("yaw", 0.0)), d.get("velocity", Vector3.ZERO) as Vector3)
 
 
-static func _create_hired(d: Dictionary, refs: SaveRefs) -> Ship:
+static func _create_hired(ctx: Node, d: Dictionary, refs: SaveRefs) -> Ship:
 	var home := refs.building(int(d["home"]))
 	var cap := refs.captain(int(d["captain"]))
 	if home == null or cap == null:
@@ -181,11 +187,16 @@ static func _create_hired(d: Dictionary, refs: SaveRefs) -> Ship:
 	var def := home.def
 	var s: Ship = def.hire_ship_script.new() as Ship if def.hire_ship_script else MinerShip.new()
 	s.setup_ship(cap, def.hire_ship_path, home, int(d.get("slot", 0)))
-	s.loadout = _loadout(Ship.ROLE_NAMES[s.role], d.get("modules", []))
+	var dropped: Array[ShipModule] = []
+	s.loadout = _loadout(Ship.ROLE_NAMES[s.role], d.get("modules", []), dropped)
+	for m in dropped:
+		cap.wallet += m.cost
+		cap.add_history("%s taken off (not for a %s), refunded %s cr" % [m.display_name, Ship.ROLE_NAMES[s.role].to_lower(), Fmt.amount(m.cost)])
 	if s is MercenaryShip:
 		(s as MercenaryShip).attack_side = float(d.get("attack_side", 1.0))
 	var docked := bool(d.get("docked", true))
-	home.restore_ship(s, docked)
+	# In space: in [param ctx]'s system, which may not be its home's (GateTransit).
+	home.restore_ship(s, docked, SpaceNav.space_root(ctx) if not docked else null)
 	if not docked:
 		_place_in_space(s, d)
 	if s is MinerShip:
@@ -195,7 +206,9 @@ static func _create_hired(d: Dictionary, refs: SaveRefs) -> Ship:
 
 
 ## The role's stock loadout with the saved modules fitted (by module id).
-static func _loadout(role_name: String, ids: Array) -> ShipLoadout:
+## Saved modules made for another role (or slot) are left off and go into
+## [param dropped], so the caller can refund them.
+static func _loadout(role_name: String, ids: Array, dropped: Array[ShipModule] = []) -> ShipLoadout:
 	var l := ShipLoadout.default_for(role_name)
 	var catalog := ModuleCatalog.shared()
 	for i in mini(ids.size(), SLOTS.size()):
@@ -207,7 +220,10 @@ static func _loadout(role_name: String, ids: Array) -> ShipLoadout:
 			l.set_module(SLOTS[i], null)
 			continue
 		var m := catalog.find(id)
-		if m:
+		if m and (m.slot != SLOTS[i] or not l.fits_hull(m)):
+			push_warning("ShipCodec: %s does not fit a %s, keeping the stock part" % [id, role_name])
+			dropped.append(m)
+		elif m:
 			l.set_module(SLOTS[i], m.duplicate() as ShipModule)
 		else:
 			push_warning("ShipCodec: unknown module '%s', keeping the stock part" % id)
@@ -319,6 +335,8 @@ static func finish(s: Ship, d: Dictionary, refs: SaveRefs) -> void:
 		SaveUtil.set_durability(s.durability, dur, refs)
 	if String(d.get("kind", "")) == KIND_HIRED and s.brain:
 		_restore_brain(s, d.get("brain", {}), bool(d.get("docked", true)), refs)
+	if d.has("transit"):
+		GateTransit.restore(s, d["transit"])
 	if s is ScavengerShip and (s as ScavengerShip).ai:
 		var sd: Dictionary = d.get("scavenger", {})
 		var lead_id := int(sd.get("lead", 0))
@@ -353,7 +371,9 @@ static func _restore_brain(s: Ship, bd: Dictionary, docked: bool, refs: SaveRefs
 		mb.mode = int(bd.get("mode", MercenaryBrain.Mode.NONE)) as MercenaryBrain.Mode
 	var trip := _load_trip(bd.get("trip", {}), refs)
 	var state := int(bd.get("state", CaptainBrain.State.DOCKED)) as CaptainBrain.State
-	if docked:
+	if s is ExplorerShip:
+		(b as ExplorerBrain).restore(state, trip, docked)
+	elif docked:
 		_restore_docked(s, state, trip)
 	elif mb:
 		_restore_merc_space(s, mb, state, trip)
@@ -371,7 +391,7 @@ static func _load_trip(td: Dictionary, refs: SaveRefs) -> CaptainBrain.Trip:
 	t.contract = c
 	t.started_at = float(td.get("started_at", 0.0))
 	t.escort_requested = bool(td.get("escort_requested", false))
-	t.meta = (td.get("meta", {}) as Dictionary).duplicate()
+	t.meta = (td.get("meta", {}) as Dictionary).duplicate(true)
 	t.progress = float(td.get("progress", 0.0))
 	t.asteroid = int(td.get("asteroid", -1))
 	t.ore = int(td.get("ore", 0))
@@ -395,6 +415,10 @@ static func _restore_docked(s: Ship, state: CaptainBrain.State, trip: CaptainBra
 				CaptainBrain.State.REPAIRING:
 			b.trip = null if state != CaptainBrain.State.UNLOADING else trip
 			_put_state(b, state)
+		CaptainBrain.State.WAITING_ESCORT:
+			# Escorted trip waiting in the berth for its escort.
+			b.trip = trip
+			_put_state(b, state if trip else CaptainBrain.State.DOCKED)
 		CaptainBrain.State.DOCKING:
 			# Already in the berth: the next step delivers the trip's load.
 			b.trip = trip
@@ -425,6 +449,10 @@ static func _restore_worker_space(s: Ship, state: CaptainBrain.State, trip: Capt
 		CaptainBrain.State.RETURNING, CaptainBrain.State.FLEEING:
 			b.trip = trip if trip and trip.loaded else null
 			_put_state(b, state)
+		CaptainBrain.State.WAITING_ESCORT:
+			# Turned back for an escort: flies home to wait, the trip kept.
+			b.trip = trip
+			_put_state(b, state if trip else CaptainBrain.State.RETURNING)
 		_:
 			b.trip = trip if trip and trip.loaded else null
 			_put_state(b, CaptainBrain.State.RETURNING)

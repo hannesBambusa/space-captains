@@ -9,8 +9,8 @@ extends Resource
 ##   Greed      pay weight, share of earnings spent at the station
 ##   Diligence  rest time, break chance, patrol eagerness
 ##   Piloting   speed, turn rate, dodge chance
-##   Skill      the specialty: Mining or Salvage (work time) or Gunnery
-##              (accuracy, damage)
+##   Skill      the specialty: Mining or Salvage (work time), Gunnery
+##              (accuracy, damage) or Surveying (survey sweep radius)
 ##   Loyalty    a small bonus for station contracts, defence eagerness
 ##   Teamwork   how readily they call or join a mercenary fleet ([MercFleet]);
 ##              low Teamwork with high Nerve makes a lone wolf who takes on
@@ -26,7 +26,7 @@ signal rank_changed(captain: Captain, rank: int)
 signal traits_changed(captain: Captain)
 
 enum Personality { BOLD, CAUTIOUS, GREEDY, LAZY }
-enum Specialty { MINING, GUNNERY, SALVAGE, LANDING }
+enum Specialty { MINING, GUNNERY, SALVAGE, LANDING, SURVEYING }
 
 const FIRST_NAMES: PackedStringArray = [
 	"Rook", "Vega", "Juno", "Kade", "Sable", "Orin", "Tamsin", "Ezra", "Nyx", "Calder",
@@ -47,14 +47,14 @@ const PERSONALITY_HINTS: PackedStringArray = [
 	"Chases the best pay and minds distance less.",
 	"Wants short trips and takes long breaks.",
 ]
-const SPECIALTY_NAMES: PackedStringArray = ["Mining", "Gunnery", "Salvage", "Landing"]
+const SPECIALTY_NAMES: PackedStringArray = ["Mining", "Gunnery", "Salvage", "Landing", "Surveying"]
 const ATTRIBUTE_NAMES: PackedStringArray = ["Nerve", "Greed", "Diligence", "Piloting", "Skill", "Loyalty", "Teamwork"]
 const ATTRIBUTE_HINTS: PackedStringArray = [
 	"Nerve: how much danger they accept before refusing, fleeing or retreating.",
 	"Greed: how much pay matters. Greedy captains spend less at the station.",
 	"Diligence: short rests, few breaks, eager patrols.",
 	"Piloting: top speed, turn rate and the chance to dodge a hit.",
-	"Specialty skill: Mining and Salvage shorten the work, Gunnery raises accuracy and damage.",
+	"Specialty skill: Mining and Salvage shorten the work, Gunnery raises accuracy and damage, Surveying widens an explorer's survey sweep.",
 	"Loyalty: favours station contracts and defending home.",
 	"Teamwork: how readily they fly in a fleet and split a bounty. Low Teamwork and high Nerve: a lone wolf who takes on big bounties alone. Lone Wolf counts 3 lower, Union Rep 2 higher.",
 ]
@@ -73,7 +73,7 @@ const UNION_REP_TEAMWORK := 2
 @export_range(1, 10) var greed: int = 5
 @export_range(1, 10) var diligence: int = 5
 @export_range(1, 10) var piloting: int = 5
-## Specialty skill (Mining or Gunnery, see [member specialty]).
+## Specialty skill (Mining, Gunnery, Salvage, Landing or Surveying, see [member specialty]).
 @export_range(1, 10) var skill: int = 5
 @export_range(1, 10) var loyalty: int = 5
 @export_range(1, 10) var teamwork: int = 5
@@ -106,6 +106,9 @@ var crystal_loads: int = 0
 var salvage_loads: int = 0
 ## Planet raid loads delivered (landers).
 var raid_loads: int = 0
+## Surveys delivered and discoveries made (explorers).
+var surveys: int = 0
+var discoveries: int = 0
 ## Jobs done alone / with escorts (Lone Wolf).
 var solo_jobs: int = 0
 var team_jobs: int = 0
@@ -118,6 +121,12 @@ var flight_log := CaptainLog.new()
 var ship: Ship
 ## True while waiting at the home outpost without a ship (after ejecting).
 var stranded: bool = false
+## While the ship is only data (between gates or in a system that is not
+## live, GateTransit): its berth at home, kept free, and where it is (a
+## system name, "the jump to Ostra"). -1 / "" otherwise. Not saved: RemoteSim
+## rebuilds them on load.
+var away_slot: int = -1
+var away_in: String = ""
 
 
 func get_personality_name() -> String:
@@ -391,6 +400,11 @@ func damage_scale() -> float:
 	return lerpf(0.85, 1.2, unit(skill)) if specialty == Specialty.GUNNERY else 0.8
 
 
+## Survey sweep multiplier (Surveying skill; other specialties 0.85).
+func survey_scale() -> float:
+	return lerpf(0.85, 1.2, unit(skill)) if specialty == Specialty.SURVEYING else 0.85
+
+
 ## Utility bonus for any station contract (Loyalty).
 func loyalty_bonus() -> float:
 	return 0.06 * factor(loyalty)
@@ -420,6 +434,8 @@ static func specialty_for(role_name: String) -> Specialty:
 			return Specialty.SALVAGE
 		"Lander":
 			return Specialty.LANDING
+		"Explorer":
+			return Specialty.SURVEYING
 	return Specialty.MINING
 
 
@@ -430,7 +446,7 @@ const SAVE_FIELDS: PackedStringArray = [
 	"captain_name", "personality", "role", "specialty",
 	"nerve", "greed", "diligence", "piloting", "skill", "loyalty", "teamwork",
 	"loads_delivered", "credits_earned", "wallet", "credits_spent", "kills", "escorts_completed", "alive",
-	"reputation", "rank", "traits", "history", "hired_at", "career_since", "crystal_loads", "salvage_loads", "raid_loads",
+	"reputation", "rank", "traits", "history", "hired_at", "career_since", "crystal_loads", "salvage_loads", "raid_loads", "surveys", "discoveries",
 	"solo_jobs", "team_jobs", "fights_survived", "ejections", "modules_bought", "stranded",
 ]
 

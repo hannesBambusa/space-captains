@@ -10,7 +10,7 @@ extends Resource
 @export_group("Star")
 ## Spectral class, for labels ("G", "K", "M", "F", "A", "B").
 @export var star_class: String = "G"
-@export var star_radius: float = 1500.0
+@export var star_radius: float = 600.0
 ## Surface temperature in kelvin; drives the star and light colour.
 @export var star_temperature: float = 5600.0
 ## Optional override. Alpha 0 = derive from temperature.
@@ -25,7 +25,7 @@ extends Resource
 @export var gates: Array[GateDef] = []
 ## Hostile bases at fixed spots; each adds its danger to clusters nearby.
 @export var dens: Array[DenDef] = []
-## Derelict hulks (data only for now; their scene comes later).
+## Derelict hulks (built as [Derelict] nodes, looted by explorers: DerelictLoot).
 @export var derelicts: Array[DerelictDef] = []
 
 @export_group("Asteroid clusters")
@@ -36,7 +36,7 @@ extends Resource
 ## minimum) to a new one showing up, random in this range.
 @export var cluster_respawn: Vector2 = Vector2(180.0, 360.0)
 ## Orbit radius range new clusters may take, metres.
-@export var cluster_orbit_range: Vector2 = Vector2(5000.0, 44000.0)
+@export var cluster_orbit_range: Vector2 = Vector2(9500.0, 44000.0)
 ## Names for new clusters, used in order, skipping names in use.
 @export var cluster_names: PackedStringArray = []
 
@@ -49,6 +49,12 @@ extends Resource
 @export var arrival_min_gap: float = 180.0
 ## Extra threat-clock speed while every arrived base is destroyed (0.5 = 1.5x).
 @export var cleared_speedup: float = 0.5
+## Bases alive at which the system counts as crowded.
+@export var crowd_bases: int = 3
+## Threat-clock speed while crowded (0.35 = arrivals take about 3x as long).
+@export var crowd_slowdown: float = 0.35
+## The min gap between arrivals is multiplied by this while crowded.
+@export var crowd_gap_mult: float = 3.0
 ## Sim seconds after its arrival before a base sends raids.
 @export var arrival_raid_grace: float = 240.0
 

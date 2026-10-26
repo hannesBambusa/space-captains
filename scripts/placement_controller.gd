@@ -78,6 +78,11 @@ func _ready() -> void:
 	add_to_group(GROUP)
 	# The viewed system's (this controller sits outside the systems, game.tscn).
 	manager = BuildingManager.of(self)
+	var vm := ViewManager.of(get_tree())
+	if vm:
+		vm.view_changed.connect(func(_w: SystemWorld) -> void:
+			if not ViewManager.viewing_home(self):
+				cancel())
 	if manager:
 		manager.building_added.connect(func(_b: Building) -> void: _update_zone())
 	set_process(false)
@@ -88,7 +93,8 @@ func is_armed() -> bool:
 
 
 func arm(building_def: BuildingDef) -> void:
-	if manager == null or not manager.has_zone():
+	# Building happens at home only (other systems have no station).
+	if manager == null or not manager.has_zone() or not ViewManager.viewing_home(self):
 		return
 	cancel()
 	def = building_def

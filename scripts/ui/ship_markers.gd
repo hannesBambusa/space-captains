@@ -14,7 +14,7 @@ extends Control
 ## icon labelled "Arriving m:ss".
 ##
 ## Clicking a marker selects it and the camera follows; hovering shows a
-## compact tooltip. M (or the minimap button) cycles the density:
+## compact tooltip. N (or the minimap button) cycles the density:
 ## all, hostiles plus selected, off. The choice lasts for the session.
 ## Mercenary fleets: a thin gold link from each wingman to its leader and a
 ## small badge with the fleet size on the leader's marker.
@@ -27,7 +27,7 @@ extends Control
 signal mode_changed(mode: Mode)
 
 enum Mode { ALL, HOSTILES, OFF }
-enum Shape { MINER, MERCENARY, SALVAGER, POD, SCAVENGER, DEN, SHUTTLE, LANDER }
+enum Shape { MINER, MERCENARY, SALVAGER, POD, SCAVENGER, DEN, SHUTTLE, LANDER, EXPLORER }
 enum Glyph { NONE, MINING, CARGO, FIGHT, FLEE, ESCORT, WARP }
 
 const MODE_NAMES: PackedStringArray = ["All", "Hostiles", "Off"]
@@ -36,6 +36,7 @@ const MINER_COLOR: Color = HudStyle.ROLE_COLORS["Miner"]
 const MERC_COLOR: Color = HudStyle.ROLE_COLORS["Mercenary"]
 const SALVAGER_COLOR: Color = HudStyle.ROLE_COLORS["Salvager"]
 const LANDER_COLOR: Color = HudStyle.ROLE_COLORS["Lander"]
+const EXPLORER_COLOR: Color = HudStyle.ROLE_COLORS["Explorer"]
 const POD_COLOR := Color(0.95, 0.97, 1.0)
 ## Cargo shuttles: small and neutral, so they do not crowd the captains.
 const SHUTTLE_COLOR := Color(0.7, 0.73, 0.78)
@@ -201,6 +202,8 @@ static func color_for(n: Node3D) -> Color:
 			return SALVAGER_COLOR
 		Ship.Role.LANDER:
 			return LANDER_COLOR
+		Ship.Role.EXPLORER:
+			return EXPLORER_COLOR
 		Ship.Role.SHUTTLE:
 			return SHUTTLE_COLOR
 	return POD_COLOR
@@ -226,7 +229,7 @@ static func is_parked(s: Ship) -> bool:
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
-	if k and k.pressed and not k.echo and k.physical_keycode == KEY_M:
+	if k and k.pressed and not k.echo and k.physical_keycode == KEY_N:
 		cycle_mode()
 		get_viewport().set_input_as_handled()
 
@@ -284,7 +287,7 @@ func _process(delta: float) -> void:
 	var screen := vp.grow(20.0)
 	for n in SystemWorld.nodes_in(self, Ship.GROUP):
 		var s := n as Ship
-		if s == null or s.dead or not s.is_inside_tree():
+		if s == null or s.dead or not s.is_inside_tree() or not s.is_visible_in_tree():
 			continue
 		var emphasis := s == selected or s == followed
 		if mode == Mode.HOSTILES and not s.is_hostile() and not emphasis:
@@ -306,7 +309,7 @@ func _process(delta: float) -> void:
 		_fill_drop(e, s, cam, p, home)
 	if hud.solar_system:
 		for d in hud.solar_system.dens:
-			if not is_instance_valid(d) or d.dead or not d.is_inside_tree():
+			if not is_instance_valid(d) or d.dead or not d.is_inside_tree() or not d.is_visible_in_tree():
 				continue
 			var p := d.global_position
 			if cam.is_position_behind(p):
@@ -444,6 +447,8 @@ func _shape_for(s: Ship) -> Shape:
 			return Shape.SALVAGER
 		Ship.Role.LANDER:
 			return Shape.LANDER
+		Ship.Role.EXPLORER:
+			return Shape.EXPLORER
 		Ship.Role.POD:
 			return Shape.POD
 		Ship.Role.SHUTTLE:
@@ -833,6 +838,9 @@ static func _shape_points(shape: Shape) -> PackedVector2Array:
 		Shape.LANDER:
 			# Wide dropship: short nose, broad wings.
 			return PackedVector2Array([Vector2(0.0, -1.0), Vector2(0.45, -0.55), Vector2(0.95, 0.75), Vector2(0.3, 0.55), Vector2(-0.3, 0.55), Vector2(-0.95, 0.75), Vector2(-0.45, -0.55)])
+		Shape.EXPLORER:
+			# Slim dart with a long sensor nose.
+			return PackedVector2Array([Vector2(0.0, -1.25), Vector2(0.3, -0.35), Vector2(0.75, 0.8), Vector2(0.0, 0.5), Vector2(-0.75, 0.8), Vector2(-0.3, -0.35)])
 		Shape.SHUTTLE:
 			# Small box with a blunt nose.
 			return PackedVector2Array([Vector2(0.0, -0.75), Vector2(0.5, -0.45), Vector2(0.5, 0.6), Vector2(-0.5, 0.6), Vector2(-0.5, -0.45)])

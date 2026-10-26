@@ -2,19 +2,29 @@
 # Headless smoke test: new game, outposts + crews + a mining contract, ~10 sim
 # minutes fast-forwarded, one summary block (tools/smoke_test.gd).
 # Exit 1 on script errors, a crash or a stall. Writes no files.
-# Usage: tools/smoke.sh [--minutes N]
+# Usage: tools/smoke.sh [--minutes N] [--multi] [--explore] [--long]
+#   --multi: also view switches and one mercenary gate round trip (own summary).
+#   --explore: an Explorer Outpost, three explorers and one explore contract on
+#   Ostra Gate, run until the survey is paid (own summary).
+#   --long: 40+ sim minutes on a fixed network seed, with a gate raid summary.
 set -u
 cd "$(dirname "$0")/.."
 GODOT="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
 MINUTES=10
+MULTI=""
+EXPLORE=""
+LONG=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--minutes) MINUTES="$2"; shift 2 ;;
 		--minutes=*) MINUTES="${1#--minutes=}"; shift ;;
+		--multi) MULTI="--multi"; shift ;;
+		--explore) EXPLORE="--explore"; shift ;;
+		--long) LONG="--long"; shift ;;
 		*) echo "unknown arg: $1" >&2; exit 2 ;;
 	esac
 done
-OUT="$("$GODOT" --headless --path . res://tools/smoke_test.tscn -- --minutes="$MINUTES" 2>&1)"
+OUT="$("$GODOT" --headless --path . res://tools/smoke_test.tscn -- --minutes="$MINUTES" $MULTI $EXPLORE $LONG 2>&1)"
 CODE=$?
 echo "$OUT" | grep '^SMOKE'
 if echo "$OUT" | grep -q 'SCRIPT ERROR\|Parse Error'; then

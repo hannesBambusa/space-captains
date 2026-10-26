@@ -147,9 +147,13 @@ func is_damaged() -> bool:
 # --- Text ---------------------------------------------------------------------
 
 ## Live status for the card: the ship's own text, the belt while mining,
-## "Waiting for a ship" while stranded, the refusal while docked.
+## "Waiting for a ship" while stranded, "In Ostra" while away as data, the
+## refusal while docked.
 static func status_text(c: Captain, ship: Ship) -> String:
 	if ship == null:
+		# On a gate trip, as data (GateTransit): where it is.
+		if not c.away_in.is_empty() and not c.stranded and c.alive:
+			return "In %s" % c.away_in
 		return "Waiting for a ship" if c.stranded or not is_instance_valid(c.ship) else "Lost"
 	var br := ship.brain
 	var text := ship.get_status_text()
@@ -264,6 +268,10 @@ static func state_look(ship: Ship) -> Dictionary:
 			return {"icon": &"st_repair", "color": H.WARN}
 		CaptainBrain.State.DESTROYED:
 			return {"icon": &"st_lost", "color": H.BAD}
+		CaptainBrain.State.SURVEYING:
+			return {"icon": &"role_explorer", "color": H.ROLE_COLORS["Explorer"]}
+		CaptainBrain.State.WAITING_ESCORT:
+			return {"icon": &"st_waiting", "color": H.WARN}
 	return {"icon": &"st_idle", "color": H.TEXT_DIM}
 
 

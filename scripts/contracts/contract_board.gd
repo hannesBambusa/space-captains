@@ -39,6 +39,13 @@ extends Node
 ## player. Sometimes a load holds a rare part for the Factory. Also
 ## reputation for escort trips. Bigger holds deliver bigger loads (more pay
 ## and materials); prospecting scanners add materials only.
+##
+## P3: explore contracts (ExploreContract) on a jump gate, reserved like a
+## bounty ([method post_explore], [method explore_problem]) and paid once
+## when the explorer brings the survey home ([method deliver_survey]).
+## One cancelled while its explorer is still out leaves the board but is
+## kept in [member held] (saved, and resolvable by save id for ships that
+## are data) until the explorer is home or lost.
 
 signal contract_posted(contract: Contract)
 signal contract_changed(contract: Contract)
@@ -58,6 +65,9 @@ const CANCEL_COMPENSATION := 0.5
 var mining_rules: MiningRules
 ## Open and active contracts, in posting order.
 var contracts: Array[Contract] = []
+## Off the board but still in use by a ship far away (a cancelled explore
+## contract whose explorer is out), see [method hold].
+var held: Array[Contract] = []
 
 var _next_id: int = 1
 
@@ -102,7 +112,7 @@ func post_bounty(on_target: Node3D, credits: int, max_takers: int = 3) -> Bounty
 	if not Combat.is_live(on_target):
 		return null
 	credits = maxi(credits, 0)
-	if not post_problem(credits, true).is_empty() or not Economy.spend(credits):
+	if not post_problem(credits, true).is_empty() or not Economy.spend(credits, PackedInt32Array(), Ledger.ESCROW, "Reserved: bounty on %s" % _name_of(on_target)):
 		return null
 	var c := BountyContract.new(on_target, credits, max_takers)
 	c.escrow = credits
@@ -111,9 +121,19 @@ func post_bounty(on_target: Node3D, credits: int, max_takers: int = 3) -> Bounty
 	return c
 
 
-## Credits held for open bounties and defence zone budgets.
+## Credits held for open bounties, explore contracts and defence zone budgets.
 func escrow_total() -> int:
-	return bounty_escrow_total() + zone_escrow_total()
+	return bounty_escrow_total() + explore_escrow_total() + zone_escrow_total()
+
+
+## Credits held for explore contracts (on the board or held for an explorer out).
+func explore_escrow_total() -> int:
+	var t := 0
+	for c in contracts + held:
+		var ec := c as ExploreContract
+		if ec and (not ec.is_finished() or held.has(ec)):
+			t += ec.escrow
+	return t
 
 
 ## Credits held for open bounties.
@@ -134,14 +154,23 @@ func zone_escrow_total() -> int:
 
 ## Reserves [param credits] from the player's credits into an escrow held
 ## outside a contract (defence zone budgets). False when they cannot pay.
-func reserve(credits: int) -> bool:
-	return credits <= 0 or (Economy.credits >= credits and Economy.spend(credits))
+## [param what] names it in the ledger ("Reserved: zone budget").
+func reserve(credits: int, what: String = "zone budget") -> bool:
+	return credits <= 0 or (Economy.credits >= credits and Economy.spend(credits, PackedInt32Array(), Ledger.ESCROW, "Reserved: " + what))
 
 
 ## Gives [param credits] of an escrow back to the player (bounties,
-## defence zone budgets; nothing for 0).
+## defence zone budgets; nothing for 0). [param source] is the ledger
+## label after "Returned: ".
 func release(credits: int, source: String) -> void:
-	Economy.add_income(credits, source)
+	Economy.add_income(credits, Ledger.ESCROW, "Returned: " + source.to_lower())
+
+
+## A target's name for the ledger.
+static func _name_of(n: Node) -> String:
+	if n == null or not is_instance_valid(n):
+		return "?"
+	return String(n.call(&"get_display_name")) if n.has_method(&"get_display_name") else String(n.name)
 
 
 ## Salvage bonus on a scrap field, paid per delivered load on top of the
@@ -159,6 +188,111 @@ func post_planet_raid(body: PlanetBody, credits_per_load: int, max_loads: int = 
 	if body == null or not is_instance_valid(body) or not post_problem(credits_per_load).is_empty():
 		return null
 	return post(PlanetRaidContract.new(body, maxi(credits_per_load, 0), max_loads)) as PlanetRaidContract
+
+
+## Why an explore contract on gate [param gate] of system [param from]
+## cannot be posted now (any pay), or "".
+func explore_problem(from: StringName, gate: String) -> String:
+	if Sector.network == null:
+		return "No gate network"
+	var t := Sector.network.gate_target(from, gate)
+	if t.is_empty():
+		return "This gate leads nowhere"
+	var to: StringName = t["system"]
+	if to == ClusterNetwork.HOME_ID:
+		return "This gate leads home"
+	if from != ClusterNetwork.HOME_ID and not (Sector.state(from) and Sector.state(from).known):
+		return "Survey %s first: explorers only go on from charted systems" % Sector.system_def(from).system_name
+	for c in contracts:
+		var ec := c as ExploreContract
+		if ec and not ec.is_finished() and ec.target_system == to:
+			return "%s already has an explore contract" % ec.target_name()
+	if not Sector.is_stale(to):
+		return "%s was surveyed %s: nothing new to chart yet" % [Sector.system_def(to).system_name, Sector.seen_text(to).trim_prefix("seen ")]
+	return ""
+
+
+## Explore contract on gate [param gate] of [param from] (P3). The reward
+## is reserved now (null when it cannot be posted or paid).
+## [param exit]: the target's gate to leave by ("" = the way in).
+func post_explore(from: StringName, gate: String, credits: int, exit: String = "") -> ExploreContract:
+	credits = maxi(credits, 0)
+	if not explore_problem(from, gate).is_empty() or not post_problem(credits, true).is_empty() or not Economy.spend(credits, PackedInt32Array(), Ledger.ESCROW, "Reserved: explore %s" % gate):
+		return null
+	var c := ExploreContract.new(from, gate, credits, exit)
+	c.escrow = credits
+	c.refresh_target()
+	post(c)
+	return c
+
+
+## The explorer of [param c] is home with the survey: the charts go in
+## (the system is known, its finds delivered) and the reward is paid once
+## from the escrow. Returns the credits paid.
+func deliver_survey(c: ExploreContract, ship: Ship, survey: Dictionary) -> int:
+	if c == null or ship == null:
+		return 0
+	var id := StringName(survey.get("target", c.target_system))
+	Sector.mark_surveyed(id, float(survey.get("done_at", SimClock.time)))
+	var finds := Sector.deliver_discoveries(id, SaveIds.of(ship.captain))
+	var pay := mini(c.reward, maxi(c.escrow, 0))
+	c.escrow -= pay
+	if pay > 0:
+		c.credits_paid += pay
+		Economy.note_escrow_pay(pay, Ledger.CONTRACT_PAY, c.get_title())
+		_credit_captain(ship, pay, c)
+	var back := maxi(c.escrow, 0)
+	c.escrow = 0
+	if back > 0:
+		release(back, "Explore leftover")
+	if ship.captain:
+		ship.captain.surveys += 1
+		ship.captain.discoveries += finds
+	var def := Sector.system_def(id)
+	var text := "Survey of %s complete" % (def.system_name if def else String(id))
+	EventLog.post("%s: %s charted %s (+%s cr)" % [text, ship.get_display_name(), Survey.tally_text(id), Fmt.amount(pay)], EventLog.Kind.REWARD, ship)
+	# P4: the corporation pays the station for the new finds (once each).
+	var bounty := DiscoveryBounty.pay(id, SaveIds.of(ship.captain), ship.captain)
+	var extra := DiscoveryBounty.short_text(bounty)
+	if not extra.is_empty():
+		text += ": " + extra
+	var pm := get_tree().root.get_node_or_null(^"PauseMenu") if is_inside_tree() else null
+	if pm and pm.has_method(&"toast"):
+		pm.call(&"toast", text)
+	held.erase(c)
+	c.mark_completed()
+	return pay
+
+
+## Keeps [param c] resolvable off the board (see [member held]).
+func hold(c: Contract) -> void:
+	if c and not held.has(c):
+		held.append(c)
+
+
+## A held contract nobody needs any more (its explorer was lost): what is
+## left of its escrow comes back.
+func drop_held(c: Contract) -> void:
+	if not held.has(c):
+		return
+	held.erase(c)
+	var ec := c as ExploreContract
+	if ec and ec.escrow > 0:
+		release(ec.escrow, "Explore refund")
+		ec.escrow = 0
+
+
+## The contract with save id [param sid] on the board or held, or null.
+func find_saved(sid: int) -> Contract:
+	if sid <= 0:
+		return null
+	for c in contracts:
+		if SaveIds.of(c) == sid:
+			return c
+	for c in held:
+		if SaveIds.of(c) == sid:
+			return c
+	return null
 
 
 ## Escort on one miner.
@@ -221,6 +355,7 @@ func reset() -> void:
 			(c as BountyContract).fleet.members.clear()
 			(c as BountyContract).fleet = null
 	contracts.clear()
+	held.clear()
 	_next_id = 1
 
 
@@ -269,12 +404,13 @@ func pay_captain(ship: Ship, amount: int, contract: Contract = null) -> int:
 	if bc:
 		pay = mini(amount, maxi(bc.escrow, 0))
 		bc.escrow -= pay
+		Economy.note_escrow_pay(pay, Ledger.BOUNTIES, bc.get_title())
 	else:
 		pay = mini(amount, maxi(Economy.credits, 0))
 		if pay < amount and contract:
 			note_short_pay(contract, amount, pay)
 		if pay > 0:
-			Economy.spend(pay)
+			Economy.spend(pay, PackedInt32Array(), Ledger.CONTRACT_PAY, contract.get_title() if contract else "Captain pay")
 	if pay <= 0:
 		return 0
 	if contract:
@@ -289,6 +425,7 @@ func pay_captain(ship: Ship, amount: int, contract: Contract = null) -> int:
 func pay_from_escrow(ship: Ship, amount: int) -> int:
 	if amount <= 0:
 		return 0
+	Economy.note_escrow_pay(amount, Ledger.ZONES, "Zone kill bounty")
 	_credit_captain(ship, amount, null)
 	return amount
 
@@ -310,6 +447,14 @@ func note_short_pay(contract: Contract, due: int, paid: int) -> void:
 ## What cancelling [param contract] does with its escrow now: {refund,
 ## compensation, takers} (zeros for contracts that hold nothing).
 func cancel_terms(contract: Contract) -> Dictionary:
+	var ec := contract as ExploreContract
+	if ec:
+		if ec.is_finished() or ec.escrow <= 0:
+			return {"refund": 0, "compensation": 0, "takers": 0}
+		if not ec.taken():
+			return {"refund": ec.escrow, "compensation": 0, "takers": 0}
+		var keep := mini(roundi(float(ec.reward) * CANCEL_COMPENSATION), ec.escrow)
+		return {"refund": ec.escrow - keep, "compensation": keep, "takers": 1}
 	var bc := contract as BountyContract
 	if bc == null or bc.is_finished() or bc.escrow <= 0:
 		return {"refund": 0, "compensation": 0, "takers": 0}
@@ -322,6 +467,12 @@ func cancel_terms(contract: Contract) -> Dictionary:
 
 ## "Cancel: refunds all 800 cr (nobody has taken it)" and the like.
 func cancel_text(contract: Contract) -> String:
+	if contract is ExploreContract:
+		var e := cancel_terms(contract)
+		if int(e["takers"]) == 0:
+			return "Cancel: refunds all %s cr (nobody has taken it yet)." % Fmt.amount(int(e["refund"]))
+		return "Cancel: refunds %s cr now. %s is already out: they still bring the survey home and are paid the other %s cr." % [
+				Fmt.amount(int(e["refund"])), (contract as ExploreContract).explorer_name, Fmt.amount(int(e["compensation"]))]
 	if not (contract is BountyContract):
 		return "Cancel this contract. Trips already under way are still paid."
 	var t := cancel_terms(contract)
@@ -337,6 +488,20 @@ func cancel_text(contract: Contract) -> String:
 ## [param refund_all] = the target slipped away: everything comes back.
 func cancel(contract: Contract, refund_all: bool = false) -> void:
 	if contract == null or contract.is_finished():
+		return
+	var ec := contract as ExploreContract
+	if ec:
+		var e := cancel_terms(ec)
+		if int(e["refund"]) > 0:
+			ec.escrow -= int(e["refund"])
+			release(int(e["refund"]), "Explore refund")
+		if ec.taken():
+			# The explorer is out: it is paid the rest on its return.
+			ec.reward = ec.escrow
+			hold(ec)
+		else:
+			ec.escrow = 0
+		contract.mark_cancelled()
 		return
 	var bc := contract as BountyContract
 	if bc and bc.escrow > 0:
@@ -492,7 +657,7 @@ func _pay_for_load(contract: Contract, full_pay: int) -> int:
 	if pay < full_pay:
 		note_short_pay(contract, full_pay, pay)
 	if pay > 0:
-		Economy.spend(pay)
+		Economy.spend(pay, PackedInt32Array(), Ledger.CONTRACT_PAY, contract.get_title())
 	return pay
 
 

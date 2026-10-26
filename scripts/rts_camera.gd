@@ -52,7 +52,7 @@ const FOCUS_GROUP := "focusable"
 @export_group("Pan")
 ## Pan speed as a fraction of the current distance per second.
 @export var pan_speed: float = 1.1
-@export var edge_pan_enabled: bool = true
+@export var edge_pan_enabled: bool = false
 @export var edge_pan_margin_px: int = 10
 ## Mouse button that drag-pans. Right is reserved for orders.
 @export var drag_button: MouseButton = MOUSE_BUTTON_MIDDLE
@@ -113,6 +113,9 @@ var _left_down := false
 var _left_travel := 0.0
 var _left_pending := Vector2.ZERO
 var _orbiting := false
+## False while this camera's system is not on screen (ViewManager): no
+## keyboard pan or rotation, no edge pan.
+var input_enabled := true
 
 
 ## The camera of [param n]'s system (see [method SystemWorld.of]).
@@ -393,11 +396,11 @@ func _notification(what: int) -> void:
 
 func _process(delta: float) -> void:
 	# The HUD sits in the window, outside this system's SubViewport.
-	var gui_busy := get_window().gui_get_focus_owner() != null
+	var gui_busy := get_window().gui_get_focus_owner() != null or not input_enabled
 	var move := Vector2.ZERO
 	if not gui_busy:
 		move = Vector2(Input.get_axis("cam_left", "cam_right"), Input.get_axis("cam_up", "cam_down"))
-	if edge_pan_enabled and not _dragging and not _orbiting:
+	if edge_pan_enabled and input_enabled and not _dragging and not _orbiting:
 		move += _edge_pan_vector()
 	if move.length_squared() > 1.0:
 		move = move.normalized()

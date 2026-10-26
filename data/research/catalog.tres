@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="TechCatalog" load_steps=29 format=3]
+[gd_resource type="Resource" script_class="TechCatalog" load_steps=30 format=3]
 
 [ext_resource type="Script" path="res://scripts/research/tech_catalog.gd" id="0_cat"]
 [ext_resource type="Resource" path="res://data/research/eng_shield_emitters.tres" id="1_t"]
@@ -28,7 +28,8 @@
 [ext_resource type="Resource" path="res://data/research/pln_planet_scanners.tres" id="25_t"]
 [ext_resource type="Resource" path="res://data/research/wpn_ballistic_calibration.tres" id="26_t"]
 [ext_resource type="Resource" path="res://data/research/pln_cargo_racks.tres" id="27_t"]
+[ext_resource type="Resource" path="res://data/research/eng_jump_navigation.tres" id="28_t"]
 
 [resource]
 script = ExtResource("0_cat")
-techs = Array[Resource]([ExtResource("1_t"), ExtResource("2_t"), ExtResource("3_t"), ExtResource("4_t"), ExtResource("5_t"), ExtResource("6_t"), ExtResource("7_t"), ExtResource("8_t"), ExtResource("9_t"), ExtResource("10_t"), ExtResource("11_t"), ExtResource("12_t"), ExtResource("13_t"), ExtResource("14_t"), ExtResource("15_t"), ExtResource("16_t"), ExtResource("17_t"), ExtResource("18_t"), ExtResource("19_t"), ExtResource("20_t"), ExtResource("21_t"), ExtResource("22_t"), ExtResource("23_t"), ExtResource("24_t"), ExtResource("25_t"), ExtResource("26_t"), ExtResource("27_t")])
+techs = Array[Resource]([ExtResource("1_t"), ExtResource("2_t"), ExtResource("3_t"), ExtResource("4_t"), ExtResource("5_t"), ExtResource("6_t"), ExtResource("7_t"), ExtResource("8_t"), ExtResource("9_t"), ExtResource("10_t"), ExtResource("11_t"), ExtResource("12_t"), ExtResource("13_t"), ExtResource("14_t"), ExtResource("15_t"), ExtResource("16_t"), ExtResource("17_t"), ExtResource("18_t"), ExtResource("19_t"), ExtResource("20_t"), ExtResource("21_t"), ExtResource("22_t"), ExtResource("23_t"), ExtResource("24_t"), ExtResource("25_t"), ExtResource("26_t"), ExtResource("27_t"), ExtResource("28_t")])

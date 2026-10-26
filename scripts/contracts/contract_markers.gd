@@ -103,8 +103,10 @@ func _update_escort_icons() -> void:
 
 func _refresh() -> void:
 	var by_target: Dictionary = {}
+	var here := SystemWorld.of(self)
 	for c in ContractBoard.get_listed():
-		if is_instance_valid(c.target):
+		# Only targets in this system (an explore contract's gate may be remote).
+		if is_instance_valid(c.target) and SystemWorld.of(c.target) == here:
 			if not by_target.has(c.target):
 				by_target[c.target] = []
 			(by_target[c.target] as Array).append(c)
@@ -151,6 +153,7 @@ func _make_icon_marker(target: Node3D, first: Contract) -> Node3D:
 	var bounty := first is BountyContract
 	var salvage := first is SalvageContract
 	var raid := first is PlanetRaidContract
+	var explore := first is ExploreContract
 	var color := BOUNTY_COLOR if bounty else (SALVAGE_COLOR if salvage else (RAID_COLOR if raid else ESCORT_COLOR))
 	var m := Node3D.new()
 	m.name = "Contract_%s" % String(target.name)
@@ -160,6 +163,9 @@ func _make_icon_marker(target: Node3D, first: Contract) -> Node3D:
 	var tex: Texture2D = IconTextures.reticle() if bounty else (IconTextures.salvage() if salvage else IconTextures.shield())
 	if raid:
 		tex = HudStyle.icon(&"role_lander")
+	elif explore:
+		tex = HudStyle.icon(&"role_explorer")
+		color = HudStyle.ROLE_COLORS["Explorer"]
 	var icon := _make_icon(tex, color)
 	if target is ScavengerDen:
 		icon.pixel_size = ICON_PIXEL_SIZE * 1.3

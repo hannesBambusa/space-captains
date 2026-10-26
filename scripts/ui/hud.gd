@@ -2,12 +2,27 @@ class_name HUD
 extends CanvasLayer
 ## Game HUD root. Finds the world-side controllers by group and hands itself
 ## to each widget. Tab toggles the system overview; H (or the top bar's
-## HOME button) flies the camera to the home station;
-## M cycles the ship markers (see [ShipMarkers]).
+## HOME button) flies the camera to the home station, or takes the view
+## home while another system is viewed;
+## M (or the top bar's MAP button) opens the cluster map ([ClusterMap]);
+## N cycles the ship markers (see [ShipMarkers]).
+## L (or a click on the top bar's credits) opens the ledger ([LedgerPanel]).
 ## Right column: the minimap, under it the pilot list ([PilotColumn]), and
 ## the selection panels at the bottom. [method _layout_right] keeps them
 ## apart: an open selection panel is capped to the room under the minimap
 ## (its content scrolls) and the pilot list ends above it.
+##
+## Views (ViewManager): [member solar_system] and [member camera] are the
+## viewed system's, rebound on every switch ([signal view_rebound] for the
+## widgets that keep signal links); [member manager] stays home's (the
+## economy, the pilots and the build menu are global). Outside home the
+## build menu is hidden and placement cancelled (no station there). The
+## top bar's system name opens the system menu. [method focus] switches
+## the view to the system of what it focuses on.
+
+## After a view switch, once [member solar_system] and [member camera] point
+## at the new system.
+signal view_rebound(world: SystemWorld)
 
 const GROUP := "hud"
 
@@ -29,10 +44,13 @@ var manager: BuildingManager
 var placement: PlacementController
 var zone_placement: ZonePlacement
 var selection: SelectionController
+var view_manager: ViewManager
 ## Built in code (bottom right, like the other panels).
 var zone_panel: ZonePanel
 ## Built in code: the selected planet or moon (planet raids).
 var planet_panel: PlanetPanel
+## Built in code: the selected jump gate (explore contracts).
+var gate_panel: GatePanel
 ## Built in code: the pilot list under the minimap.
 var pilots: PilotColumn
 ## Built in code: posted contracts, bottom left above the event feed.
@@ -41,6 +59,10 @@ var contracts: ContractStrip
 ## the left panel).
 var tutorial: Tutorial
 var tutorial_card: TutorialCard
+## Built in code: the full-screen cluster map (M), on top of everything.
+var cluster_map: ClusterMap
+## Built in code: the credit log (L), a centred overlay above the build bar.
+var ledger: LedgerPanel
 
 ## Width of the right column (minimap, pilot list, selection panels).
 const RIGHT_WIDTH := 380.0
@@ -55,7 +77,8 @@ func _ready() -> void:
 	var tree := get_tree()
 	solar_system = SolarSystem.of(self)
 	camera = RTSCamera.of(self)
-	manager = BuildingManager.of(self)
+	manager = BuildingManager.of(SystemWorld.home(tree))
+	view_manager = ViewManager.of(tree)
 	placement = tree.get_first_node_in_group(PlacementController.GROUP) as PlacementController
 	zone_placement = tree.get_first_node_in_group(ZonePlacement.GROUP) as ZonePlacement
 	selection = tree.get_first_node_in_group(SelectionController.GROUP) as SelectionController
@@ -85,6 +108,18 @@ func _ready() -> void:
 	planet_panel.offset_bottom = -12.0
 	planet_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	planet_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	gate_panel = GatePanel.new()
+	gate_panel.name = "GatePanel"
+	$Root.add_child(gate_panel)
+	$Root.move_child(gate_panel, planet_panel.get_index() + 1)
+	for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+		gate_panel.set_anchor(side, 1.0)
+	gate_panel.offset_left = -392.0
+	gate_panel.offset_top = -12.0
+	gate_panel.offset_right = -12.0
+	gate_panel.offset_bottom = -12.0
+	gate_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	gate_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	pilots = PilotColumn.new()
 	pilots.name = "Pilots"
 	$Root.add_child(pilots)
@@ -109,6 +144,7 @@ func _ready() -> void:
 	belt_panel.setup(self)
 	zone_panel.setup(self)
 	planet_panel.setup(self)
+	gate_panel.setup(self)
 	captain_panel.setup(self)
 	target_panel.setup(self)
 	event_feed.setup(self)
@@ -116,8 +152,24 @@ func _ready() -> void:
 	minimap.setup(self, ship_markers)
 	pilots.setup(self)
 	top_bar.home_pressed.connect(fly_home)
+	top_bar.system_menu_opening.connect(_fill_system_menu)
+	top_bar.system_picked.connect(func(id: StringName) -> void:
+		if view_manager:
+			view_manager.view(id))
+	if view_manager:
+		view_manager.view_changed.connect(_on_view_changed)
 	top_bar.research_pressed.connect(select_lab)
 	contracts.setup(self)
+	ledger = LedgerPanel.new()
+	ledger.name = "Ledger"
+	$Root.add_child(ledger)
+	ledger.setup(self)
+	top_bar.ledger_pressed.connect(ledger.toggle)
+	cluster_map = ClusterMap.new()
+	cluster_map.name = "ClusterMap"
+	$Root.add_child(cluster_map)
+	cluster_map.setup(self)
+	top_bar.map_pressed.connect(cluster_map.toggle)
 	tutorial.setup(self)
 	tutorial_card.setup(self, tutorial)
 	get_viewport().size_changed.connect(_layout_right)
@@ -137,7 +189,7 @@ func _process(delta: float) -> void:
 
 ## The bottom-right selection panels (the Factory and Science Lab panels once they exist).
 func selection_panels() -> Array[PanelContainer]:
-	var out: Array[PanelContainer] = [building_panel, belt_panel, captain_panel, target_panel, zone_panel, planet_panel]
+	var out: Array[PanelContainer] = [building_panel, belt_panel, captain_panel, target_panel, zone_panel, planet_panel, gate_panel]
 	if building_panel and is_instance_valid(building_panel.factory_panel) and building_panel.factory_panel.is_inside_tree():
 		out.append(building_panel.factory_panel)
 	if building_panel and is_instance_valid(building_panel.lab_panel) and building_panel.lab_panel.is_inside_tree():
@@ -240,6 +292,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	elif k and k.pressed and not k.echo and k.physical_keycode == KEY_H and not (k.ctrl_pressed or k.meta_pressed or k.alt_pressed):
 		fly_home()
 		get_viewport().set_input_as_handled()
+	elif k and k.pressed and not k.echo and k.physical_keycode == KEY_M and not (k.ctrl_pressed or k.meta_pressed or k.alt_pressed):
+		cluster_map.toggle()
+		get_viewport().set_input_as_handled()
+	elif k and k.pressed and not k.echo and k.physical_keycode == KEY_L and not (k.ctrl_pressed or k.meta_pressed or k.alt_pressed):
+		ledger.toggle()
+		get_viewport().set_input_as_handled()
 
 
 ## Flies the camera to the home station and follows it (its focus distance),
@@ -252,5 +310,73 @@ func select_lab() -> void:
 
 
 func fly_home() -> void:
+	if not is_home_view():
+		view_manager.view_home()
+		return
 	if camera and solar_system and is_instance_valid(solar_system.home_station):
 		camera.focus_on(solar_system.home_station)
+
+
+# --- Views ----------------------------------------------------------------------
+
+## Home is on screen (or there is no view switch).
+func is_home_view() -> bool:
+	return view_manager == null or view_manager.viewed == null or view_manager.viewed == view_manager.home
+
+
+## The viewed system's buildings (null outside home).
+func local_manager() -> BuildingManager:
+	return manager if is_home_view() else null
+
+
+## Camera to [param n] (its focus distance, or [param distance]); first
+## switches the view to the system [param n] is in. False when it cannot.
+func focus(n: Node3D, distance: float = -1.0) -> bool:
+	if not is_instance_valid(n) or not n.is_inside_tree():
+		return false
+	if not show_system_of(n):
+		return false
+	if camera == null:
+		return false
+	if distance > 0.0:
+		camera.focus_on(n, distance)
+	else:
+		camera.focus_on(n)
+	return true
+
+
+## Switches the view at once to the live system [param n] is in.
+func show_system_of(n: Node) -> bool:
+	var w := n.get_viewport().get_meta(SystemWorld.META) as SystemWorld if n.get_viewport().has_meta(SystemWorld.META) else null
+	if w == null or view_manager == null or w == view_manager.viewed:
+		return true
+	return view_manager.view_now(w.system_id) == w
+
+
+func _fill_system_menu() -> void:
+	if view_manager == null:
+		return
+	var items := []
+	for id in view_manager.viewable_ids():
+		var note := ""
+		if id != ClusterNetwork.HOME_ID:
+			# "danger ? (2 jumps out)" or "danger 3 · seen 12 min ago".
+			note = Sector.danger_text(id)
+		items.append({"id": id, "name": view_manager.system_name(id), "note": note, "current": id == view_manager.viewed_id()})
+	top_bar.set_system_list(items)
+
+
+func _on_view_changed(w: SystemWorld) -> void:
+	if not is_instance_valid(w):
+		return
+	solar_system = w.sys
+	camera = w.camera
+	var home := is_home_view()
+	if placement and not home:
+		placement.cancel()
+	if zone_placement and not home:
+		zone_placement.cancel()
+	build_menu.visible = home
+	if solar_system and solar_system.system_def:
+		top_bar.set_system_name(solar_system.system_def.system_name)
+	view_rebound.emit(w)

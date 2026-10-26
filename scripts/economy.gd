@@ -12,6 +12,10 @@ extends Node
 ## paid every [member grant_interval] sim seconds. Each income shows as a
 ## green delta in the top bar ([signal income]). Selling ore to the Factory
 ## (FactoryMarket) is income too.
+##
+## Every credit change is written to [member ledger] (the Ledger panel, L):
+## [method spend] and [method add] take a category ([Ledger] constants) and
+## a short label; [method add_income] uses its source as the category.
 
 ## [param materials] is the ore total; read [member ore] for the types.
 signal changed(credits: int, materials: int)
@@ -42,7 +46,7 @@ const ORE_ICONS: Array[StringName] = [&"iron", &"titanium", &"crystal", &"fuel",
 ## Iron, titanium, crystal at start.
 @export var start_ore: PackedInt32Array = PackedInt32Array([300, 80, 0, 0, 0, 0, 0, 0])
 ## Corporate grant, credits per sim minute.
-@export var grant_per_minute: float = 30.0
+@export var grant_per_minute: float = 90.0
 ## The grant is paid in installments this often, sim seconds.
 @export var grant_interval: float = 20.0
 
@@ -55,6 +59,8 @@ var materials: int:
 ## Totals for tests and the UI.
 var total_fees: int = 0
 var total_grants: int = 0
+## The credit log (see [Ledger]).
+var ledger := Ledger.new()
 
 var _grant_clock: float = 0.0
 var _last_time: float = 0.0
@@ -74,6 +80,7 @@ func reset() -> void:
 	total_grants = 0
 	_grant_clock = 0.0
 	_last_time = SimClock.time
+	ledger.clear()
 	changed.emit(credits, materials)
 
 
@@ -109,17 +116,24 @@ func tick_grant() -> void:
 		_grant_clock -= grant_interval
 		var amount := roundi(grant_per_minute * grant_interval / 60.0)
 		total_grants += amount
-		add_income(amount, "Grant")
+		add_income(amount, Ledger.GRANT, "Corporate grant")
 
 
 ## Credits that come back to the player (fees, grant, refunds).
-func add_income(amount: int, source: String) -> void:
+## [param source] is the ledger category ([Ledger] constants).
+func add_income(amount: int, source: String, label: String = "") -> void:
 	if amount <= 0:
 		return
-	if source == "Fees":
+	if source == Ledger.FEES:
 		total_fees += amount
-	add(amount)
+	add(amount, PackedInt32Array(), source, label)
 	income.emit(amount, source)
+
+
+## Credits paid to a captain out of an escrow reserved earlier: nothing
+## leaves the credits now, the ledger gets a note line.
+func note_escrow_pay(amount: int, category: String, label: String) -> void:
+	ledger.note_held(amount, category, label, credits)
 
 
 ## A captain paid [param paid] spends their share at the station. Returns the
@@ -130,7 +144,7 @@ func collect_fees(captain: Captain, paid: int) -> int:
 	var fee := roundi(float(paid) * captain.station_spend_share())
 	captain.credits_spent += fee
 	captain.wallet += paid - fee
-	add_income(fee, "Fees")
+	add_income(fee, Ledger.FEES, "Station fees")
 	return fee
 
 
@@ -219,7 +233,8 @@ func shortfall_text(cost_credits: int, cost_ore: PackedInt32Array = PackedInt32A
 
 
 ## Deducts the cost. Returns false (and changes nothing) when unaffordable.
-func spend(cost_credits: int, cost_ore: PackedInt32Array = PackedInt32Array()) -> bool:
+## [param category] and [param label] go to the [member ledger].
+func spend(cost_credits: int, cost_ore: PackedInt32Array = PackedInt32Array(), category: String = Ledger.OTHER, label: String = "") -> bool:
 	if cost_credits < 0 or not can_afford(cost_credits, cost_ore):
 		return false
 	for i in mini(cost_ore.size(), ore.size()):
@@ -228,14 +243,17 @@ func spend(cost_credits: int, cost_ore: PackedInt32Array = PackedInt32Array()) -
 	credits -= cost_credits
 	for i in mini(cost_ore.size(), ore.size()):
 		ore[i] -= cost_ore[i]
+	ledger.record(-cost_credits, category, label, credits)
 	changed.emit(credits, materials)
 	return true
 
 
-func add(add_credits: int, add_ore: PackedInt32Array = PackedInt32Array()) -> void:
+## [param category] and [param label] go to the [member ledger].
+func add(add_credits: int, add_ore: PackedInt32Array = PackedInt32Array(), category: String = Ledger.OTHER, label: String = "") -> void:
 	credits += add_credits
 	for i in mini(add_ore.size(), ore.size()):
 		ore[i] += add_ore[i]
+	ledger.record(add_credits, category, label, credits)
 	changed.emit(credits, materials)
 
 

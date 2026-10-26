@@ -9,13 +9,34 @@ extends Node
 ## error was logged during the run, or when the run stalls (a script error
 ## stops the run coroutine; [constant STALL_TIME] real seconds after it, or
 ## [constant MAX_REAL_TIME] in all, it reports what it has and quits).
-## Args after "--": --minutes=N (default 10).
+## Args after "--": --minutes=N (default 10); --multi also switches the view
+## (s1, s2, home, a few times, live systems dropped after) and sends one
+## mercenary through Ostra Gate and back (GateTransit.debug_round_trip),
+## then prints a "SMOKE multi" block. --explore (P3) instead fixes the
+## network seed, researches Jump navigation, builds an Explorer Outpost,
+## hires a Bold, a Cautious and a Greedy explorer, posts an explore contract
+## on Ostra Gate at fair pay and runs until the survey is paid (at most
+## [constant EXPLORE_MAX] sim seconds), then prints a "SMOKE explore" block.
+## --long (P4): at least [constant LONG_MINUTES] sim minutes on the fixed
+## network seed [constant LONG_SEED] (systems two jumps out that can raid
+## home), then a "SMOKE long" block with the gate raids (GateRaidSource).
+## The default run never touches them.
 
 const SEED := 12345
+## --explore: the gate network seed and the longest run, sim seconds.
+const EXPLORE_SEED := 4242
+const EXPLORE_MAX := 2400.0
+## --long: the network seed and the shortest run, sim minutes.
+const LONG_SEED := 3
+const LONG_MINUTES := 40.0
 const STALL_TIME := 3.0
 const MAX_REAL_TIME := 300.0
 
 var minutes: float = 10.0
+var multi := false
+var explore := false
+var long_run := false
+var _multi: PackedStringArray = []
 
 var _seeded := 0
 var _raids: PackedStringArray = []
@@ -62,6 +83,12 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--minutes="):
 			minutes = maxf(a.trim_prefix("--minutes=").to_float(), 0.1)
+		elif a == "--multi":
+			multi = true
+		elif a == "--explore":
+			explore = true
+		elif a == "--long":
+			long_run = true
 	_log = SmokeLogger.new()
 	OS.add_logger(_log)
 	seed(SEED)
@@ -104,6 +131,9 @@ func _run() -> void:
 		print("SMOKE FAIL: no home system")
 		tree.quit(1)
 		return
+	if long_run:
+		Sector.start(LONG_SEED)
+		minutes = maxf(minutes, LONG_MINUTES)
 	_setup()
 	Economy.cargo_received.connect(func(ore: PackedInt32Array, _s: String) -> void:
 		_cargo_n += 1
@@ -118,10 +148,22 @@ func _run() -> void:
 	if raids:
 		raids.raid_started.connect(func(_d: Node, size: int) -> void: _raids.append("%s x%d" % [Fmt.clock(SimClock.time), size]))
 	_start_time = SimClock.time
+	if explore:
+		await _explore_run()
+		_finish(Time.get_ticks_msec() - t0)
+		return
 	var left := minutes * 60.0
+	var minute := 0
 	while left > 0.0:
+		if multi:
+			_multi_step(minute)
 		left -= SimStepper.run(tree, minf(60.0, left))
+		minute += 1
 		await tree.process_frame
+	if multi:
+		_multi_report()
+	if long_run:
+		_long_report()
 	_finish(Time.get_ticks_msec() - t0)
 
 
@@ -166,7 +208,7 @@ func _find_home() -> void:
 
 func _setup() -> void:
 	var mgr := _mgr
-	Economy.add(20000)
+	Economy.add(20000, PackedInt32Array(), Ledger.OTHER, "Smoke test credits")
 	var rng := RandomNumberGenerator.new()
 	rng.seed = SEED
 	for id: StringName in [&"mining_outpost", &"mercenary_outpost"]:
@@ -199,6 +241,136 @@ func _spawn_near_station(mgr: BuildingManager, def: BuildingDef) -> Building:
 	return null
 
 
+var _merc: Captain
+var _merc_wallet := 0
+var _nodes0 := 0
+
+
+## --multi: minute 1 sends the merc, 2..5 switch the view, 6 drops the live
+## remote systems.
+func _multi_step(minute: int) -> void:
+	var vm := ViewManager.of(get_tree())
+	if vm == null:
+		return
+	match minute:
+		1:
+			_nodes0 = int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))
+			var s := GateTransit.debug_round_trip(get_tree(), "Ostra Gate", 30.0)
+			if s:
+				_merc = s.captain
+				_merc_wallet = _merc.wallet
+			_multi.append("merc sent: %s" % (_merc.captain_name if _merc else "none"))
+		2, 3, 4, 5:
+			var id: StringName = [&"s1", &"s2", &"s1", &"home"][minute - 2]
+			vm.debug_view_all = true
+			vm.view_now(id)
+			_multi.append("view %s (%s ms)" % [id, vm.build_ms(id) if id != &"home" else 0])
+		6:
+			for id in vm.worlds.keys():
+				if id != ClusterNetwork.HOME_ID:
+					vm.dematerialise(id)
+
+
+func _multi_report() -> void:
+	var vm := ViewManager.of(get_tree())
+	print("SMOKE multi ---------------------------------------")
+	print("SMOKE multi steps   %s" % ", ".join(_multi))
+	print("SMOKE multi view    %s, live %s, nodes %d at minute 1 -> %d" % [vm.viewed_id() if vm else &"?", vm.worlds.keys() if vm else [], _nodes0,
+			int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))])
+	if _merc:
+		var s := _merc.ship if is_instance_valid(_merc.ship) else null
+		var where := String(SystemWorld.of(s).system_id) if s else "data: " + _merc.away_in
+		print("SMOKE multi merc    %s in %s, %s, wallet %d -> %d, rank %d" % [_merc.captain_name, where, s.get_status_text() if s else "-",
+				_merc_wallet, _merc.wallet, _merc.rank])
+
+
+## --long: the gate raids of the run.
+func _long_report() -> void:
+	var g := _combat.gate_raids if _combat else null
+	print("SMOKE long ----------------------------------------")
+	if g == null:
+		print("SMOKE long gate raids: no GateRaidSource")
+		return
+	var src: PackedStringArray = []
+	for c in g.candidates():
+		src.append("%s (danger %d, %d jumps, via %s)" % [Sector.system_def(c["id"]).system_name, int(c["danger"]), int(c["jumps"]), c["gate"]])
+	print("SMOKE long seed      %d, sources: %s" % [LONG_SEED, ", ".join(src) if not src.is_empty() else "-"])
+	print("SMOKE long gate raids %s" % g.summary())
+
+
+# --- Explore (P3) ------------------------------------------------------------
+
+var _explore: PackedStringArray = []
+
+
+func _explore_run() -> void:
+	var tree := get_tree()
+	Sector.start(EXPLORE_SEED)
+	Research.grant(TechCatalog.shared().find(&"eng_jump_navigation"))
+	var def := _mgr.def_by_id(&"explorer_outpost")
+	var b := _spawn_near_station(_mgr, def) if def else null
+	if b == null:
+		_explore.append("no outpost")
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = SEED + 1
+	b.captain_rng = rng
+	for p in [Captain.Personality.BOLD, Captain.Personality.CAUTIOUS, Captain.Personality.GREEDY]:
+		b.hire(p)
+	for i in 5:
+		await tree.process_frame
+	var to: StringName = Sector.network.gate_target(ClusterNetwork.HOME_ID, "Ostra Gate")["system"]
+	var c := ContractBoard.post_explore(ClusterNetwork.HOME_ID, "Ostra Gate", ExploreContract.fair_for(1, ExploreContract.danger_guess(to)))
+	if c == null:
+		_explore.append("could not post")
+		return
+	var t0 := SimClock.time
+	var marks := {}
+	var income := {}
+	Economy.income.connect(func(amount: int, source: String) -> void:
+		income[source] = int(income.get(source, 0)) + amount)
+	var lines: PackedStringArray = []
+	EventLog.posted.connect(func(e: Dictionary) -> void:
+		var t := String(e.get("text", ""))
+		if t.begins_with("Corporate bounty") or t.contains("salvage"):
+			lines.append(t))
+	while SimClock.time - t0 < EXPLORE_MAX and not c.is_finished():
+		SimStepper.run(tree, 10.0)
+		if c.taken() and not marks.has("taken"):
+			marks["taken"] = "%s at %s" % [c.explorer_name, Fmt.clock(SimClock.time - t0)]
+		if c.phase == Survey.PHASE_SURVEY and not marks.has("survey"):
+			marks["survey"] = Fmt.clock(SimClock.time - t0)
+		if c.phase == Survey.PHASE_BACK and not marks.has("back"):
+			marks["back"] = Fmt.clock(SimClock.time - t0)
+		await tree.process_frame
+	var refusals: PackedStringArray = []
+	for s in b.ships:
+		if is_instance_valid(s) and s.brain and not s.brain.last_refusal.is_empty():
+			refusals.append("%s (%s): %s" % [s.captain.captain_name, s.captain.get_personality_name(), s.brain.last_refusal])
+	var st := Sector.state(to)
+	var found := 0
+	for x in Sector.discoveries:
+		if x["system"] == to:
+			found += 1
+	print("SMOKE explore -------------------------------------")
+	print("SMOKE explore seed  %d, target %s, reward %d cr" % [EXPLORE_SEED, Sector.system_def(to).system_name, c.reward])
+	print("SMOKE explore taken %s; surveying from %s, heading home from %s, done %s (%s)" % [marks.get("taken", "never"), marks.get("survey", "-"),
+			marks.get("back", "-"), Fmt.clock(SimClock.time - t0), Contract.STATUS_NAMES[c.status]])
+	print("SMOKE explore waypoints %d/%d, paid %d cr, known %s, revealed %d names: %s" % [c.waypoint, c.waypoints, c.credits_paid, st.known, st.revealed.size(), Survey.tally_text(to)])
+	print("SMOKE explore finds %d (delivered %d)" % [found, Sector.discoveries.filter(func(x: Dictionary) -> bool: return bool(x["delivered"])).size()])
+	print("SMOKE explore refused %s" % ("; ".join(refusals) if not refusals.is_empty() else "-"))
+	var paid := 0
+	var sum := 0
+	for x in Sector.discoveries:
+		if bool(x.get("paid", false)):
+			paid += 1
+			sum += int(x.get("bounty", 0))
+	print("SMOKE explore bounty %d of %d finds paid, %d cr (income Discovery %d, Salvage %d), looted %s" % [paid, found, sum,
+			int(income.get(DiscoveryBounty.SOURCE, 0)), int(income.get(DerelictLoot.INCOME_SOURCE, 0)), st.looted])
+	for l in lines:
+		print("SMOKE explore feed  %s" % l)
+
+
 func _report(advanced: float, ms: int) -> void:
 	var roles: Dictionary = {}
 	var alive := 0
@@ -222,6 +394,9 @@ func _report(advanced: float, ms: int) -> void:
 	print("SMOKE raids         %d launched: %s" % [raids.raids_sent if raids else -1, ", ".join(_raids) if not _raids.is_empty() else "-"])
 	print("SMOKE ore delivered %d in %d cargo drops" % [_cargo_ore, _cargo_n])
 	print("SMOKE contracts     %d payouts, %d finished, %d listed" % [_payouts, _finished, ContractBoard.contracts.size()])
+	var lg := Economy.ledger
+	var lg_ok := lg.total() == Economy.credits - Economy.start_credits
+	print("SMOKE ledger        %d entries, sum check %s (%d vs %d)" % [lg.entries.size(), "ok" if lg_ok else "FAIL", lg.total(), Economy.credits - Economy.start_credits])
 	print("SMOKE log           %d errors (%d script), %d warnings" % [_log.errors, _log.script_errors, _log.warnings])
 	for line in _log.first:
 		print("SMOKE   %s" % line)

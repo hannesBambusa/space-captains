@@ -364,7 +364,7 @@ func _pay(ore: int, units: int, credits: float) -> int:
 	var cost := Economy.zero_ore()
 	cost[ore] = units
 	Economy.spend(0, cost)
-	Economy.add_income(paid, "Factory")
+	Economy.add_income(paid, Ledger.FACTORY, "Ore sold to the Factory")
 	total_units[ore] += units
 	total_credits += paid
 	sold.emit(ore, units, paid)

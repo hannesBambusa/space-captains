@@ -45,6 +45,11 @@ enum Warp { IDLE, SPOOL, WARP }
 const WARP_COOLDOWN := 3.0
 ## A warp only starts with the nose this close to the line (cosine).
 const WARP_ALIGN := 0.94
+## Vertical speed a hop's 3D line reports (and a follower copies) at most,
+## m/s. The line's end height moves with the leg, so one short step can
+## jump: unclamped, a near-zero step turned that into a huge climb rate
+## and flung followers off the disc.
+const WARP_CLIMB_LIMIT := 800.0
 
 
 class Waypoint:
@@ -571,7 +576,7 @@ func _warp_step(dt: float, target: Vector3, _via: bool) -> bool:
 				# No band on the hop: the straight 3D line to the drop-out height.
 				var y0 := pos.y
 				pos.y = lerpf(_warp_y0, warp_exit_y, clampf(_warp_flown / maxf(_warp_flown + left - stride, 1.0), 0.0, 1.0))
-				climb_rate = (pos.y - y0) / dt
+				climb_rate = clampf((pos.y - y0) / maxf(dt, 0.02), -WARP_CLIMB_LIMIT, WARP_CLIMB_LIMIT)
 				pitch = lerpf(pitch, 0.0, 1.0 - exp(-3.0 * dt))
 			else:
 				pos.y = _step_height(pos.y, dt)
@@ -632,9 +637,10 @@ func _follow_warp(dt: float, lead: ShipMover) -> bool:
 			pos += Vector3(velocity.x, 0.0, velocity.z) * dt
 			if warp_altitude <= 0.0:
 				# The lead flies a 3D line: ride its climb, keep easing onto the slot height.
-				pos.y += lead.climb_rate * dt
+				var lead_climb := clampf(lead.climb_rate, -WARP_CLIMB_LIMIT, WARP_CLIMB_LIMIT)
+				pos.y += lead_climb * dt
 				pos.y = move_toward(pos.y, cruise_y, max_climb_rate * dt)
-				climb_rate = lead.climb_rate
+				climb_rate = lead_climb
 			else:
 				pos.y = _step_height(pos.y, dt)
 			ship.position = _push_out(pos)

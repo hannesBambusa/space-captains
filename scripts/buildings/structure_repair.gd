@@ -52,7 +52,7 @@ func _repair(d: Durability, dt: float, rate: float) -> void:
 	if _repair_credit < cost:
 		# Whole credits up front; the change is kept for the next step.
 		var need := ceili(cost - _repair_credit)
-		if Economy.credits < need or not Economy.spend(need):
+		if Economy.credits < need or not Economy.spend(need, PackedInt32Array(), Ledger.REPAIRS, "Structure repairs"):
 			if repairing:
 				end_session()
 			return

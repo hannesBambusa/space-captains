@@ -48,11 +48,15 @@ var planets: Array[PlanetBody] = []
 var belts: Array[AsteroidCluster] = []
 var gates: Array[JumpGate] = []
 var dens: Array[ScavengerDen] = []
+## Derelict hulks of a generated system (P4, [Derelict]).
+var derelicts: Array[Derelict] = []
 var home_station: Orbiter
 ## Spawns new clusters when one is mined out (child node, saved by GameSnapshot).
 var cluster_spawner: ClusterSpawner
 
 var _orbiters: Array[Orbiter] = []
+## Planet -> its orbit line (the fog of war hides both, FogOfWar).
+var _planet_lines: Dictionary = {}
 var _labels: Array[Label3D] = []
 ## Per label: world radius of the body it sits under (keeps the text below the disc).
 var _label_radii: PackedFloat32Array = []
@@ -89,6 +93,11 @@ func _process(_delta: float) -> void:
 ## Places every orbiting body and cluster for sim time [param t] (fast-forward).
 func update_bodies(t: float) -> void:
 	_update_bodies(t)
+
+
+## The orbit line of planet [param body], or null.
+func orbit_line_of(body: PlanetBody) -> MeshInstance3D:
+	return _planet_lines.get(body) as MeshInstance3D
 
 
 ## Finds a built body (planet, moon, station, gate, cluster, star) by node name.
@@ -144,7 +153,7 @@ func _build() -> void:
 
 	for pdef in def.planets:
 		var body := _add_planet(pdef, self)
-		_add_orbit_line(lines, pdef.orbit_radius, _orbit_mat, Color(0.55, 0.72, 1.0, 0.12), body.orbit_basis)
+		_planet_lines[body] = _add_orbit_line(lines, pdef.orbit_radius, _orbit_mat, Color(0.55, 0.72, 1.0, 0.12), body.orbit_basis)
 		_add_label(body, pdef.name.to_upper(), pdef.radius * (pdef.ring_outer if pdef.has_rings else 1.0), 1.0)
 		for mdef: PlanetDef in pdef.moons:
 			var moon := _add_planet(mdef, body)
@@ -172,6 +181,13 @@ func _build() -> void:
 		if ddef.starts_present():
 			_add_den(ddef)
 
+	for xdef in def.derelicts:
+		var x := Derelict.new()
+		x.setup(xdef)
+		_add_label(x, xdef.name.to_upper(), 60.0, 0.75, Color(0.9, 0.62, 0.45))
+		add_child(x)
+		derelicts.append(x)
+
 	_apply_sky_seed(def.sky_seed)
 
 
@@ -184,6 +200,14 @@ func den_of(ddef: DenDef) -> ScavengerDen:
 
 
 # --- Clusters -----------------------------------------------------------------
+
+## The hulk named [param item], or null.
+func derelict_named(item: String) -> Derelict:
+	for x in derelicts:
+		if is_instance_valid(x) and x.def and x.def.name == item:
+			return x
+	return null
+
 
 ## Builds an asteroid cluster from [param bdef] with its name label.
 func add_cluster(bdef: ClusterDef) -> AsteroidCluster:
@@ -390,7 +414,7 @@ func _make_orbit_material(px: float) -> ShaderMaterial:
 	return m
 
 
-func _add_orbit_line(parent: Node3D, radius: float, mat: ShaderMaterial, color: Color, plane: Basis = Basis.IDENTITY) -> void:
+func _add_orbit_line(parent: Node3D, radius: float, mat: ShaderMaterial, color: Color, plane: Basis = Basis.IDENTITY) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	mi.name = "Orbit"
 	mi.basis = plane
@@ -399,6 +423,7 @@ func _add_orbit_line(parent: Node3D, radius: float, mat: ShaderMaterial, color: 
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mi.set_instance_shader_parameter("line_color", color)
 	parent.add_child(mi)
+	return mi
 
 
 func _add_label(parent: Node3D, text: String, body_radius: float, size_scale: float, tint: Color = Color(0.82, 0.88, 1.0)) -> void:

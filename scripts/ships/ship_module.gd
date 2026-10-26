@@ -19,7 +19,7 @@ const TIER_NAMES: PackedStringArray = ["Stock", "Mk I", "Mk II", "Mk III"]
 @export_range(0, 3) var tier: int = 0
 ## Outfitter price, credits.
 @export var cost: int = 0
-## Roles that can fit it ("Miner", "Mercenary", "Salvager", "Lander"). Empty = any.
+## Roles that can fit it ("Miner", "Mercenary", "Salvager", "Lander", "Explorer"). Empty = any.
 @export var roles: PackedStringArray = []
 ## One-line description for tooltips.
 @export var blurb: String = ""

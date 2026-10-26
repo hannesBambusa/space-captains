@@ -12,9 +12,24 @@ extends Node3D
 ##
 ## Group scans: [method nodes_in] returns the group's nodes in the same
 ## system as the asking node.
+##
+## [member system_id] says which system of the gate network this is
+## ("home", "s1", ..); set before the node enters the tree (SystemHost).
+## Only home has a station, buildings and the raid and threat directors;
+## a remote system is live only while viewed (plus a grace period), see
+## [ViewManager] and [SystemHost]. An empty id (SystemPreview) registers
+## nowhere.
 
 const META := &"system_world"
 const GROUP := "system_world"
+
+## Network id of this system (ClusterNetwork ids), "" = a debug preview.
+var system_id: StringName = ClusterNetwork.HOME_ID
+
+## The player's home system (station, buildings, directors).
+var is_home: bool:
+	get:
+		return system_id == ClusterNetwork.HOME_ID
 
 var sys: SolarSystem:
 	get:
@@ -76,13 +91,18 @@ static func of(n: Node) -> SystemWorld:
 
 
 ## The home system (for global code: saves, research, the contract board).
+## Never a remote system or a preview.
 static func home(tree: SceneTree) -> SystemWorld:
 	if tree == null:
 		return null
 	var vm := ViewManager.of(tree)
 	if vm and is_instance_valid(vm.home):
 		return vm.home
-	return tree.get_first_node_in_group(GROUP) as SystemWorld
+	for n in tree.get_nodes_in_group(GROUP):
+		var w := n as SystemWorld
+		if w and w.is_home:
+			return w
+	return null
 
 
 ## Every live system.
@@ -102,7 +122,7 @@ static func camera_3d(n: Node) -> Camera3D:
 
 
 ## Nodes of [param group] in [param n]'s system (all of them while only one
-## system is live).
+## system is live). Filters on the viewport (one per system), the cheap test.
 static func nodes_in(n: Node, group: StringName) -> Array[Node]:
 	if n == null or not n.is_inside_tree():
 		var none: Array[Node] = []
@@ -113,8 +133,11 @@ static func nodes_in(n: Node, group: StringName) -> Array[Node]:
 		return list
 	var w := of(n)
 	var out: Array[Node] = []
+	if w == null:
+		return out
+	var vp := w.get_viewport()
 	for x in list:
-		if of(x) == w:
+		if x.get_viewport() == vp:
 			out.append(x)
 	return out
 

@@ -158,7 +158,7 @@ static func switch(ship: Ship, target: String, why: String = "") -> Ship:
 	var old_home := ship.home.display_name if is_instance_valid(ship.home) else "?"
 	c.wallet -= b.def.ship_cost
 	c.credits_spent += b.def.ship_cost
-	Economy.add_income(roundi(b.def.ship_cost * Building.SHIP_SALE_SHARE), "Ship sales")
+	Economy.add_income(roundi(b.def.ship_cost * Building.SHIP_SALE_SHARE), Ledger.SHIP_SALES, "Ship sold at %s" % b.display_name)
 	ship.retire()
 	c.role = target
 	c.specialty = Captain.specialty_for(target)

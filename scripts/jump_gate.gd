@@ -89,6 +89,33 @@ func _process(_delta: float) -> void:
 		_glow_light.light_energy = 0.8 + 0.5 * pulse
 
 
+## World position of the portal disc's centre (GateTransit flies through it).
+func portal_center() -> Vector3:
+	var p := _pivot.find_child("Portal", true, false) as Node3D if _pivot else null
+	return p.global_position if p else global_position
+
+
+## World ring axis on the star side of the portal (tilted up by the lean).
+func portal_axis() -> Vector3:
+	return (_pivot.global_basis.z if _pivot else Vector3.UP).normalized()
+
+
+## The same axis from a GateDef alone (systems that are data: RemoteSim).
+static func axis_for(gate_def: GateDef, pos: Vector3) -> Vector3:
+	var to_star := -Vector3(pos.x, 0.0, pos.z)
+	to_star = to_star.normalized() if to_star.length_squared() >= 1.0 else Vector3.FORWARD
+	var tilt := deg_to_rad(gate_def.tilt_deg)
+	return (to_star * cos(tilt) + Vector3.UP * sin(tilt)).normalized()
+
+
+## Where [param gate_def]'s gate is at [param sim_time] (gates orbit the star).
+static func position_for(gate_def: GateDef, sim_time: float) -> Vector3:
+	var a := deg_to_rad(gate_def.orbit_angle_deg)
+	if gate_def.orbit_period != 0.0:
+		a += TAU * sim_time / gate_def.orbit_period
+	return Vector3(cos(a), 0.0, sin(a)) * gate_def.orbit_radius
+
+
 ## Ring axis toward the star, leaned back so the face tilts up.
 func _orient() -> void:
 	var to_star := -Vector3(position.x, 0.0, position.z)
