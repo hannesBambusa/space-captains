@@ -35,10 +35,10 @@ func _ready() -> void:
 	var sh := HBoxContainer.new()
 	sh.add_theme_constant_override("separation", 8)
 	add_child(sh)
-	_scrap = UIUtil.label("", &"ValueLabel")
+	_scrap = UIUtil.label("", &"NumberLabel")
 	_scrap.custom_minimum_size.x = 210.0
 	sh.add_child(_scrap)
-	_scrap_bar = UIUtil.bar(Color(1.0, 0.6, 0.24), Vector2(110.0, 6.0))
+	_scrap_bar = UIUtil.bar(HudStyle.ACCENT, Vector2(110.0, 6.0))
 	_scrap_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_scrap_bar.tooltip_text = "Scrap waiting to be reprocessed, against what the yard handles in a minute"
 	sh.add_child(_scrap_bar)
@@ -60,7 +60,7 @@ func _ready() -> void:
 		name_l.add_theme_color_override("font_color", Economy.ORE_COLORS[i])
 		name_l.custom_minimum_size.x = 64.0
 		row.add_child(name_l)
-		var stock := UIUtil.label("", &"ValueLabel")
+		var stock := UIUtil.label("", &"NumberLabel")
 		stock.custom_minimum_size.x = 30.0
 		stock.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(stock)
@@ -153,7 +153,7 @@ func _refresh_transit(y: SalvageYard) -> void:
 	var depot := CargoDepot.of(y.building)
 	var lines: PackedStringArray = depot.transit_lines() if depot else PackedStringArray()
 	_transit.text = "\n".join(lines) if not lines.is_empty() else "Bought ore: nothing in transit"
-	_transit.add_theme_color_override("font_color", Color(0.55, 1.0, 0.65) if not lines.is_empty() else Color(0.6, 0.64, 0.7))
+	_transit.add_theme_color_override("font_color", Color(0.55, 1.0, 0.65) if not lines.is_empty() else HudStyle.TEXT_DIM)
 	var note := "Bought ore waits here for a cargo shuttle (it leaves with a full load of %d or after %d s) and counts as yours when it lands at the station." % [
 			depot.capacity() if depot else 0, roundi(depot.max_wait) if depot else 0]
 	var f := Factory.find(get_tree()) if is_inside_tree() else null

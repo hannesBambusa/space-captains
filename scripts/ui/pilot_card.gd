@@ -58,7 +58,7 @@ func _init() -> void:
 	if _f_name == null:
 		_f_name = H.font("SemiBold")
 		_f_small = H.font("Medium")
-		_f_num = H.font("SemiBold", false, true)
+		_f_num = H.mono("Medium")
 		_f_badge = H.font("Bold", true, false, 1)
 		_f_tag = H.font("SemiBold", true, false, 1)
 	mouse_entered.connect(func() -> void:
@@ -420,7 +420,7 @@ func _draw_compact() -> void:
 		draw_rect(Rect2(0, 0, w, hgt), Color(H.ACCENT, 0.16))
 		draw_rect(Rect2(0, hgt - 1, w, 1), Color(H.ACCENT, 0.7))
 	elif _hover:
-		draw_rect(Rect2(0, 0, w, hgt), Color(1, 1, 1, 0.07))
+		draw_rect(Rect2(0, 0, w, hgt), Color(H.HOLO, 0.08))
 	if _combat:
 		draw_rect(Rect2(0, 2, 2, hgt - 4), H.BAD.lerp(Color(1, 0.8, 0.7), 0.5 + 0.5 * sin(_pulse * 7.0)))
 	elif is_damaged():

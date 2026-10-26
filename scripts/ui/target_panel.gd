@@ -108,7 +108,7 @@ func _ready() -> void:
 	minus.tooltip_text = "Lower the reward (Shift: x5)"
 	minus.pressed.connect(_step_reward.bind(-1))
 	row.add_child(minus)
-	_reward_value = UIUtil.label("", &"ValueLabel")
+	_reward_value = UIUtil.label("", &"NumberLabel")
 	_reward_value.custom_minimum_size.x = 84.0
 	_reward_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	row.add_child(_reward_value)

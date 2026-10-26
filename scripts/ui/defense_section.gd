@@ -38,7 +38,7 @@ func _ready() -> void:
 	var hh := HBoxContainer.new()
 	hh.add_theme_constant_override("separation", 8)
 	add_child(hh)
-	_hull = UIUtil.label("", &"ValueLabel")
+	_hull = UIUtil.label("", &"NumberLabel")
 	_hull.custom_minimum_size.x = 210.0
 	hh.add_child(_hull)
 	_hull_bar = _bar(PipMeter.GOOD)
@@ -74,7 +74,7 @@ func _ready() -> void:
 	var bh := HBoxContainer.new()
 	bh.add_theme_constant_override("separation", 8)
 	_shield_box.add_child(bh)
-	_bubble = UIUtil.label("", &"ValueLabel")
+	_bubble = UIUtil.label("", &"NumberLabel")
 	_bubble.custom_minimum_size.x = 210.0
 	bh.add_child(_bubble)
 	_bubble_bar = _bar(SHIELD_COLOR)

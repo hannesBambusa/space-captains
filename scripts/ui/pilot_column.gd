@@ -1,6 +1,6 @@
 class_name PilotColumn
 extends PanelContainer
-## Right-hand pilot list, under the minimap, floating over space (no panel,
+## Right-hand pilot list, under the minimap, floating over space (no frame, no background,
 ## outlined text): a title row (PILOTS, count, collapse) with a rule line
 ## over a compact [PilotRoster] (summary line, small role chips, sort,
 ## one-row pilots). The HUD sets its height (HUD._layout_right) so it ends
@@ -24,6 +24,7 @@ var _rule: ColorRect
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	clip_contents = true
+	# No background: the outlined labels (H.outline_labels) stay readable.
 	add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 4)
@@ -31,9 +32,9 @@ func _ready() -> void:
 	var top := HBoxContainer.new()
 	top.add_theme_constant_override("separation", 6)
 	v.add_child(top)
-	top.add_child(H.icon_rect(&"tab_pilots", 14.0, H.ACCENT))
+	top.add_child(H.icon_rect(&"tab_pilots", 14.0, H.HOLO))
 	top.add_child(UIUtil.label("PILOTS", &"HeaderLabel"))
-	_count = UIUtil.label("0", &"ValueLabel")
+	_count = UIUtil.label("0", &"NumberLabel")
 	_count.add_theme_font_size_override("font_size", 14)
 	top.add_child(_count)
 	_alert = UIUtil.label("", &"SubHeaderLabel")

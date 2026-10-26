@@ -1,9 +1,10 @@
 @tool
 class_name ChamferBox
 extends StyleBox
-## The HUD's panel and button style ("Industrial Expanse"): a flat fill with
-## cut (45 degree) corners, a hairline border, an optional accent stripe on
-## one edge, faint horizontal scanlines and a soft drop shadow. Drawn with
+## The HUD's panel and button style (the player guide's console look): a
+## flat fill with optional cut (45 degree) corners, a hairline border, an
+## optional accent stripe on one edge, corner brackets (top left and bottom
+## right, like the guide's panels), faint holo scanlines and a soft shadow. Drawn with
 ## RenderingServer polygons, so it stays crisp at every UI scale.
 ## Built by [HudThemeBuilder]; every HUD panel shares these through the theme.
 
@@ -70,6 +71,29 @@ enum Accent { NONE, TOP, LEFT, BOTTOM }
 	set(v):
 		corner_ticks = v
 		emit_changed()
+## Scanline colour (its alpha is multiplied by [member scanlines]).
+@export var scanline_color: Color = Color(0.373, 0.816, 0.886):
+	set(v):
+		scanline_color = v
+		emit_changed()
+## L-shaped brackets on the top left and bottom right corners.
+@export var brackets: bool = false:
+	set(v):
+		brackets = v
+		emit_changed()
+@export var bracket_color: Color = Color(0.373, 0.816, 0.886):
+	set(v):
+		bracket_color = v
+		emit_changed()
+## Bracket arm length and thickness, px.
+@export var bracket_size: float = 14.0:
+	set(v):
+		bracket_size = v
+		emit_changed()
+@export var bracket_width: float = 2.0:
+	set(v):
+		bracket_width = v
+		emit_changed()
 
 
 func _draw(ci: RID, rect: Rect2) -> void:
@@ -89,7 +113,7 @@ func _draw(ci: RID, rect: Rect2) -> void:
 		else:
 			RenderingServer.canvas_item_add_polygon(ci, pts, PackedColorArray([bg_color]))
 	if scanlines > 0.0 and rect.size.y > 6.0:
-		var c := Color(1, 1, 1, scanlines)
+		var c := Color(scanline_color, scanline_color.a * scanlines)
 		var y := rect.position.y + 2.0
 		var ml := maxf(cut.x, cut.w)
 		var mr := maxf(cut.y, cut.z)
@@ -104,6 +128,8 @@ func _draw(ci: RID, rect: Rect2) -> void:
 		_draw_accent(ci, rect)
 	if corner_ticks:
 		_draw_ticks(ci, rect)
+	if brackets and bracket_color.a > 0.0:
+		_draw_brackets(ci, rect)
 
 
 ## Corner polygon of [param r] grown by [param grow], clockwise from top left.
@@ -184,3 +210,15 @@ func _draw_ticks(ci: RID, r: Rect2) -> void:
 	if cut.w <= 0.0:
 		RenderingServer.canvas_item_add_rect(ci, Rect2(Vector2(r.position.x, r.end.y - 1), Vector2(l, 1)), c)
 		RenderingServer.canvas_item_add_rect(ci, Rect2(Vector2(r.position.x, r.end.y - l), Vector2(1, l)), c)
+
+
+func _draw_brackets(ci: RID, r: Rect2) -> void:
+	var l := minf(bracket_size, minf(r.size.x, r.size.y) * 0.5)
+	var w := bracket_width
+	var o := r.grow(w * 0.5)
+	if cut.x <= 0.0:
+		RenderingServer.canvas_item_add_rect(ci, Rect2(o.position, Vector2(l, w)), bracket_color)
+		RenderingServer.canvas_item_add_rect(ci, Rect2(o.position, Vector2(w, l)), bracket_color)
+	if cut.z <= 0.0:
+		RenderingServer.canvas_item_add_rect(ci, Rect2(Vector2(o.end.x - l, o.end.y - w), Vector2(l, w)), bracket_color)
+		RenderingServer.canvas_item_add_rect(ci, Rect2(Vector2(o.end.x - w, o.end.y - l), Vector2(w, l)), bracket_color)

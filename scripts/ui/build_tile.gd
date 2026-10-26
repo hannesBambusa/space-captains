@@ -54,7 +54,7 @@ func _init() -> void:
 	if _f_name == null:
 		_f_name = H.font("SemiBold", true, false, 0)
 		_f_cost = H.font("SemiBold", true, true)
-		_f_key = H.font("Bold", true, true)
+		_f_key = H.mono("Medium")
 	mouse_entered.connect(queue_redraw)
 	mouse_exited.connect(queue_redraw)
 
@@ -98,7 +98,7 @@ func _draw() -> void:
 	var w := size.x
 	# Icon well.
 	var well := Rect2((w - ICON_PX - 8.0) * 0.5, 9.0, ICON_PX + 8.0, ICON_PX + 4.0)
-	draw_rect(well, Color(0, 0, 0, 0.28))
+	draw_rect(well, Color(H.VOID, 0.45))
 	var hovered := is_hovered() and not disabled
 	var tint := Color(1, 1, 1, 0.42) if dim else Color.WHITE
 	if _icon:
@@ -116,7 +116,7 @@ func _draw() -> void:
 	if not hotkey.is_empty():
 		var ks := _f_key.get_string_size(hotkey, HORIZONTAL_ALIGNMENT_LEFT, -1, 12)
 		var kr := Rect2(5, 5, maxf(ks.x + 8, 18), 17)
-		draw_rect(kr, Color(0, 0, 0, 0.7))
+		draw_rect(kr, Color(0.086, 0.059, 0.024, 0.9))
 		draw_rect(kr, Color(H.ACCENT, 0.75 if not dim else 0.35), false, 1.0)
 		draw_string(_f_key, Vector2(kr.position.x + (kr.size.x - ks.x) * 0.5, 18), hotkey, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, H.ACCENT_SOFT if not dim else H.TEXT_FAINT)
 	# Built count, top right.
@@ -126,7 +126,7 @@ func _draw() -> void:
 	# Name.
 	var name_col := H.TEXT_BRIGHT if not dim else H.TEXT_DIM
 	if state == State.PLACING:
-		name_col = Color(1.0, 0.9, 0.75)
+		name_col = H.ACCENT_SOFT
 	var lines := _name_lines(title.to_upper(), w - 10)
 	var ny := 91.0 if lines.size() == 1 else 84.0
 	for line in lines:
@@ -182,10 +182,10 @@ func _draw_placeholder(r: Rect2, dim: bool) -> void:
 	var pts := PackedVector2Array([Vector2(r.position.x + c, r.position.y), Vector2(r.end.x, r.position.y), Vector2(r.end.x, r.end.y - c),
 			Vector2(r.end.x - c, r.end.y), Vector2(r.position.x, r.end.y), Vector2(r.position.x, r.position.y + c)])
 	var g := r.grow(-8.0)
-	draw_colored_polygon(pts, Color(0.12, 0.13, 0.15, 0.9))
+	draw_colored_polygon(pts, H.RAISED_BG)
 	var loop := pts.duplicate()
 	loop.append(pts[0])
-	draw_polyline(loop, Color(H.ACCENT, 0.35 if dim else 0.7), 1.0)
+	draw_polyline(loop, Color(H.HOLO, 0.35 if dim else 0.7), 1.0)
 	var ic := H.icon(glyph)
 	if ic:
-		draw_texture_rect(ic, g, false, Color(H.ACCENT_SOFT, 0.4 if dim else 0.9))
+		draw_texture_rect(ic, g, false, Color(H.HOLO_SOFT, 0.4 if dim else 0.9))

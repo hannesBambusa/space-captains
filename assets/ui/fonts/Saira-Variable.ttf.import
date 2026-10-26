@@ -2,13 +2,13 @@
 
 importer="font_data_dynamic"
 type="FontFile"
-uid="uid://ccmcdbr2bvqe2"
-path="res://.godot/imported/Barlow-Medium.ttf-e13795419e9e4073d918efed0220e273.fontdata"
+uid="uid://c16mn22flx2ru"
+path="res://.godot/imported/Saira-Variable.ttf-a2ada6f18107fa3f81eb2f0faee28755.fontdata"
 
 [deps]
 
-source_file="res://assets/ui/fonts/Barlow-Medium.ttf"
-dest_files=["res://.godot/imported/Barlow-Medium.ttf-e13795419e9e4073d918efed0220e273.fontdata"]
+source_file="res://assets/ui/fonts/Saira-Variable.ttf"
+dest_files=["res://.godot/imported/Saira-Variable.ttf-a2ada6f18107fa3f81eb2f0faee28755.fontdata"]
 
 [params]
 

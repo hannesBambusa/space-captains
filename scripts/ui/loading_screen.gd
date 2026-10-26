@@ -74,15 +74,15 @@ func _build(title: String) -> void:
 	add_child(_root)
 
 	var bg := ColorRect.new()
-	bg.color = Color(0.02, 0.024, 0.032)
+	bg.color = H.VOID
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_root.add_child(bg)
 
-	# Faint warm glow low on the screen, like a star below the horizon.
+	# Faint holo glow low on the screen, like a console warming up.
 	var glow := TextureRect.new()
 	var grad := Gradient.new()
-	grad.set_color(0, Color(1.0, 0.55, 0.15, 0.10))
-	grad.set_color(1, Color(1.0, 0.55, 0.15, 0.0))
+	grad.set_color(0, Color(H.HOLO, 0.09))
+	grad.set_color(1, Color(H.HOLO, 0.0))
 	var tex := GradientTexture2D.new()
 	tex.gradient = grad
 	tex.fill = GradientTexture2D.FILL_RADIAL
@@ -107,17 +107,17 @@ func _build(title: String) -> void:
 	var logo := Label.new()
 	logo.text = "SPACE CAPTAINS"
 	logo.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	logo.add_theme_font_override("font", H.font("SemiBold", true, false, 4))
+	logo.add_theme_font_override("font", H.font("Bold", true, false, 7))
 	logo.add_theme_font_size_override("font_size", 52)
-	logo.add_theme_color_override("font_color", H.ACCENT)
+	logo.add_theme_color_override("font_color", H.TEXT_BRIGHT)
 	col.add_child(logo)
 
 	var sub := Label.new()
 	sub.text = title.to_upper()
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sub.add_theme_font_override("font", H.font("Medium", true, false, 3))
-	sub.add_theme_font_size_override("font_size", 15)
-	sub.add_theme_color_override("font_color", H.TEXT_DIM)
+	sub.add_theme_font_override("font", H.mono("Medium", 2))
+	sub.add_theme_font_size_override("font_size", 14)
+	sub.add_theme_color_override("font_color", H.HOLO)
 	col.add_child(sub)
 
 	var track := Control.new()
@@ -130,7 +130,7 @@ func _build(title: String) -> void:
 	rail.set_anchors_preset(Control.PRESET_FULL_RECT)
 	track.add_child(rail)
 	_bar = ColorRect.new()
-	_bar.color = H.ACCENT
+	_bar.color = H.HOLO
 	track.add_child(_bar)
 
 	var tip := Label.new()
@@ -140,6 +140,6 @@ func _build(title: String) -> void:
 	tip.custom_minimum_size = Vector2(560, 0)
 	tip.add_theme_font_override("font", H.font("Regular"))
 	tip.add_theme_font_size_override("font_size", 14)
-	tip.add_theme_color_override("font_color", H.TEXT_FAINT)
+	tip.add_theme_color_override("font_color", H.TEXT_DIM)
 	col.add_child(UIUtil.spacer(8.0))
 	col.add_child(tip)

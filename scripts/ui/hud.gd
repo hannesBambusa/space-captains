@@ -37,6 +37,10 @@ var planet_panel: PlanetPanel
 var pilots: PilotColumn
 ## Built in code: posted contracts, bottom left above the event feed.
 var contracts: ContractStrip
+## Built in code: the first-time tutorial and its card (top left, right of
+## the left panel).
+var tutorial: Tutorial
+var tutorial_card: TutorialCard
 
 ## Width of the right column (minimap, pilot list, selection panels).
 const RIGHT_WIDTH := 380.0
@@ -90,6 +94,14 @@ func _ready() -> void:
 	contracts.name = "Contracts"
 	$Root.add_child(contracts)
 	$Root.move_child(contracts, event_feed.get_index())
+	tutorial = Tutorial.new()
+	tutorial.name = "Tutorial"
+	add_child(tutorial)
+	tutorial_card = TutorialCard.new()
+	tutorial_card.name = "TutorialCard"
+	$Root.add_child(tutorial_card)
+	$Root.move_child(tutorial_card, overview.get_index() + 1)
+	tutorial_card.position = Vector2(overview.position.x + overview.panel_width + EDGE, overview.position.y)
 	UIUtil.no_focus($Root)
 	overview.setup(self)
 	build_menu.setup(self)
@@ -106,6 +118,8 @@ func _ready() -> void:
 	top_bar.home_pressed.connect(fly_home)
 	top_bar.research_pressed.connect(select_lab)
 	contracts.setup(self)
+	tutorial.setup(self)
+	tutorial_card.setup(self, tutorial)
 	get_viewport().size_changed.connect(_layout_right)
 	_layout_right.call_deferred()
 	if selection:

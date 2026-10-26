@@ -93,7 +93,7 @@ func setup(owner_hud: HUD) -> void:
 		head.add_theme_constant_override("separation", 5)
 		head.mouse_filter = Control.MOUSE_FILTER_PASS
 		head.tooltip_text = GROUP_TIPS[gi] % BuildingManager.BAY_COUNT if gi == 2 else GROUP_TIPS[gi]
-		head.add_child(H.icon_rect(GROUP_ICONS[gi], 13.0, H.ACCENT))
+		head.add_child(H.icon_rect(GROUP_ICONS[gi], 13.0, H.HOLO))
 		head.add_child(UIUtil.label(GROUPS[gi], &"HeaderLabel"))
 		col.add_child(head)
 		var tiles := HBoxContainer.new()

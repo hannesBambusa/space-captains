@@ -54,7 +54,7 @@ func _ready() -> void:
 	var tb := HBoxContainer.new()
 	tb.add_theme_constant_override("separation", 4)
 	tb.add_child(H.icon_rect(&"clock", 14.0, H.TEXT_DIM))
-	_time = UIUtil.label("", &"ValueLabel")
+	_time = UIUtil.label("", &"NumberLabel")
 	tb.add_child(_time)
 	row.add_child(tb)
 	_hire = _wrap(UIUtil.label("", &"DimLabel"))
@@ -63,7 +63,7 @@ func _ready() -> void:
 	_stats_box.theme_type_variation = &"InsetPanel"
 	v.add_child(_stats_box)
 	_stats = _wrap(UIUtil.label("", &"SmallLabel"))
-	_stats.add_theme_color_override("font_color", Color(0.75, 0.85, 0.95))
+	_stats.add_theme_color_override("font_color", HudStyle.TEXT)
 	_stats_box.add_child(_stats)
 	_block = _wrap(UIUtil.label("", &"WarnLabel"))
 	v.add_child(_block)
@@ -95,7 +95,7 @@ func show_info(info: Dictionary, above: Rect2) -> void:
 		var short := bool(c.get("short", false))
 		var col: Color = H.BAD if short else (c.get("color", H.TEXT) as Color)
 		h.add_child(H.icon_rect(StringName(c["icon"]), 15.0, col))
-		var l := UIUtil.label(String(c["text"]), &"ValueLabel")
+		var l := UIUtil.label(String(c["text"]), &"NumberLabel")
 		l.add_theme_color_override("font_color", col.lerp(Color.WHITE, 0.25) if not short else H.BAD)
 		h.add_child(l)
 		if short and c.has("have"):

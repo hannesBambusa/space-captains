@@ -29,6 +29,7 @@ var _form: PostContractForm
 var escorted: bool = false
 var escort_pay: int = 35
 var _escorted: CheckButton
+var _profit: Label
 var _escort_row: HBoxContainer
 var _escort_value: Label
 var _refresh_timer := 0.0
@@ -64,14 +65,14 @@ func _ready() -> void:
 	grid.add_child(_ore)
 	grid.add_child(UIUtil.label("Richness", &"DimLabel"))
 	var rh := HBoxContainer.new()
-	_richness = UIUtil.bar(Color(0.85, 0.88, 0.95), Vector2(90.0, 5.0))
+	_richness = UIUtil.bar(HudStyle.HOLO, Vector2(90.0, 5.0))
 	rh.add_child(_richness)
-	_richness_pct = UIUtil.label("", &"ValueLabel")
+	_richness_pct = UIUtil.label("", &"NumberLabel")
 	rh.add_child(_richness_pct)
 	grid.add_child(rh)
 	grid.add_child(UIUtil.label("Ore left", &"DimLabel"))
 	var lh := HBoxContainer.new()
-	_left = UIUtil.bar(Color(0.55, 1.0, 0.65), Vector2(90.0, 5.0))
+	_left = UIUtil.bar(HudStyle.GOOD, Vector2(90.0, 5.0))
 	lh.add_child(_left)
 	_left_text = UIUtil.label("", &"ValueLabel")
 	lh.add_child(_left_text)
@@ -89,7 +90,7 @@ func _ready() -> void:
 	dh.add_child(_danger_text)
 	grid.add_child(dh)
 	grid.add_child(UIUtil.label("From home", &"DimLabel"))
-	_distance = UIUtil.label("", &"ValueLabel")
+	_distance = UIUtil.label("", &"NumberLabel")
 	grid.add_child(_distance)
 
 	v.add_child(HSeparator.new())
@@ -111,6 +112,8 @@ func _ready() -> void:
 	_escorted.toggled.connect(func(on: bool) -> void:
 		escorted = on
 		_refresh_form())
+	_profit = UIUtil.label("", &"ValueLabel")
+	_form.add_row(_profit)
 	_form.add_row(_escorted)
 	var er := UIUtil.stepper_row(_form, "Escort pay per trip", _step_escort, "Lower the escort pay", "Raise the escort pay")
 	_escort_value = er[0]
@@ -222,8 +225,13 @@ func _refresh_form() -> void:
 	var ore := Economy.ore_of_belt(belt.ore_type)
 	var worth := ""
 	var f := Factory.find(get_tree())
+	_profit.visible = f != null
 	if f:
-		worth = " The Factory pays about %d cr for it now." % roundi(float(mats) * f.market.willing_price(ore))
+		var load_value := roundi(float(mats) * f.market.willing_price(ore))
+		worth = " The Factory pays about %d cr for it now." % load_value
+		var margin := load_value - _form.reward
+		_profit.text = "Factory pays ~%d / load, you pay %d: %s%d" % [load_value, _form.reward, "+" if margin >= 0 else "", margin]
+		_profit.add_theme_color_override("font_color", HudStyle.GOOD if margin >= 0 else HudStyle.BAD)
 	_form.fair.text = "Fair pay here is about %d cr (%s). One load = %d %s.%s" % [fair, PostContractForm.fair_verdict(reward, fair), mats, Economy.ore_name(ore), worth]
 	_escorted.set_pressed_no_signal(escorted)
 	_escort_row.visible = escorted

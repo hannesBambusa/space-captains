@@ -38,6 +38,8 @@ extends RefCounted
 ## Asteroid clusters (the "clusters" key) replaced the belts without a bump:
 ## a save without it keeps the starting clusters full, and its contracts'
 ## belt names map onto them ("Cinder Belt" -> "Cinder Cluster").
+## The tutorial step (the "tutorial" key) was added without a bump: a save
+## without it loads with the tutorial off.
 const VERSION := 3
 
 
@@ -76,6 +78,8 @@ static func capture(tree: SceneTree) -> Dictionary:
 	d["research"] = Research.save_state()
 	d["planets"] = PlanetRaidContract.save_records()
 	d["camera"] = _save_camera(tree)
+	var tut := Tutorial.of(tree)
+	d["tutorial"] = tut.save_state() if tut else {}
 	d["ids_next"] = SaveIds.next
 	return d
 
@@ -194,6 +198,9 @@ static func apply_scene(tree: SceneTree, d: Dictionary) -> void:
 	var sys := SolarSystem.of(tree)
 	var mgr := BuildingManager.of(tree)
 	var world := CombatWorld.of(tree)
+	var tut := Tutorial.of(tree)
+	if tut:
+		tut.load_state(d.get("tutorial", {}))
 	for cd: Dictionary in d.get("captains", []):
 		refs.add(int(cd["id"]), Captain.from_save(cd))
 	if mgr:

@@ -2,13 +2,13 @@
 
 importer="font_data_dynamic"
 type="FontFile"
-uid="uid://omjy5ry8vus8"
-path="res://.godot/imported/Barlow-Regular.ttf-2ee49ddf8581c7c06ce868342e99a03d.fontdata"
+uid="uid://dytwfnesnh5vg"
+path="res://.godot/imported/SairaCondensed-Bold.ttf-41eccf8eee0c374415ec68fe7dfb4ce5.fontdata"
 
 [deps]
 
-source_file="res://assets/ui/fonts/Barlow-Regular.ttf"
-dest_files=["res://.godot/imported/Barlow-Regular.ttf-2ee49ddf8581c7c06ce868342e99a03d.fontdata"]
+source_file="res://assets/ui/fonts/SairaCondensed-Bold.ttf"
+dest_files=["res://.godot/imported/SairaCondensed-Bold.ttf-41eccf8eee0c374415ec68fe7dfb4ce5.fontdata"]
 
 [params]
 

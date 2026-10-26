@@ -100,16 +100,18 @@ func setup(owner_hud: HUD) -> void:
 
 func _add_summary(key: StringName, icon_name: StringName, color: Color, title: String, tip: String) -> void:
 	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 4)
+	h.add_theme_constant_override("separation", 5)
 	h.tooltip_text = tip
 	h.mouse_filter = Control.MOUSE_FILTER_PASS
 	h.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(H.icon_rect(icon_name, 14.0, color))
-	var l := UIUtil.label("0", &"ValueLabel")
+	var l := UIUtil.label("0", &"NumberLabel")
 	l.add_theme_color_override("font_color", color.lerp(Color.WHITE, 0.3))
 	h.add_child(l)
 	var t := UIUtil.label(title, &"SubHeaderLabel")
-	t.add_theme_font_size_override("font_size", 11)
+	# 12 px: at 11 the thin first stroke ("C" of COMBAT) vanished into the
+	# outline once the HUD scales down (1600 px wide and less).
+	t.add_theme_font_size_override("font_size", 12)
 	h.add_child(t)
 	_summary.add_child(h)
 	_sum_labels[key] = l

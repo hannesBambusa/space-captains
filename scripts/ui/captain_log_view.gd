@@ -13,9 +13,9 @@ const REFUSED_COLOR := Color(1.0, 0.42, 0.36)
 const COMBAT_COLOR := Color(1.0, 0.7, 0.3)
 const MONEY_COLOR := Color(0.45, 0.72, 1.0)
 const CAREER_COLOR := Color(1.0, 0.84, 0.35)
-const REST_COLOR := Color(0.6, 0.66, 0.74)
-const WHY_COLOR := Color(0.58, 0.64, 0.72)
-const DETAIL_COLOR := Color(0.72, 0.78, 0.86)
+const REST_COLOR := HudStyle.TEXT_DIM
+const WHY_COLOR := HudStyle.TEXT_DIM
+const DETAIL_COLOR := HudStyle.TEXT
 
 ## Width of the text column, pixels (the panel's content width).
 @export var row_width: float = 340.0

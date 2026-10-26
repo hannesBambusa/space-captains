@@ -89,7 +89,7 @@ class ContractLine:
 		var mid := size.y * 0.5
 		var base := mid + 4.5
 		if hover:
-			draw_rect(Rect2(0, 0, w, size.y), Color(1, 1, 1, 0.07))
+			draw_rect(Rect2(0, 0, w, size.y), Color(H.HOLO, 0.08))
 		var paused := bool(_d["paused"])
 		var col := H.WARN if paused else (H.ACCENT_SOFT if bool(_d["busy"]) else H.TEXT_DIM)
 		draw_rect(Rect2(0, 3, 2, size.y - 6), Color(col, 0.9))
@@ -99,7 +99,7 @@ class ContractLine:
 		var x := 25.0
 		var right := w - (26.0 if hover else 4.0)
 		var f_name := H.font("SemiBold")
-		var f_num := H.font("SemiBold", true, true)
+		var f_num := H.mono("Medium")
 		var f_dim := H.font("Medium")
 		var status := String(_d["takers"]) + ("  ·  paused, station can't pay" if paused else "")
 		var sw := minf(f_dim.get_string_size(status, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x, 170.0)
@@ -127,7 +127,7 @@ func _ready() -> void:
 	top.add_theme_constant_override("separation", 6)
 	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(top)
-	top.add_child(H.icon_rect(&"tab_contracts", 13.0, H.ACCENT))
+	top.add_child(H.icon_rect(&"tab_contracts", 13.0, H.HOLO))
 	_title = UIUtil.label("CONTRACTS", &"HeaderLabel")
 	_title.add_theme_font_size_override("font_size", 13)
 	top.add_child(_title)

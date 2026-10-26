@@ -36,8 +36,8 @@ const MAX_HISTORY := 12
 
 @export var target_stock: PackedFloat32Array = PackedFloat32Array([250.0, 150.0, 80.0, 60.0, 120.0, 40.0, 80.0, 100.0])
 @export var start_stock: PackedFloat32Array = PackedFloat32Array([200.0, 80.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-@export var price_floor: PackedFloat32Array = PackedFloat32Array([2.0, 5.0, 6.0, 6.0, 3.0, 12.0, 4.0, 3.0])
-@export var price_ceiling: PackedFloat32Array = PackedFloat32Array([10.0, 20.0, 30.0, 22.0, 10.0, 38.0, 14.0, 12.0])
+@export var price_floor: PackedFloat32Array = PackedFloat32Array([5.0, 5.0, 6.0, 6.0, 3.0, 12.0, 4.0, 3.0])
+@export var price_ceiling: PackedFloat32Array = PackedFloat32Array([12.0, 20.0, 30.0, 22.0, 10.0, 38.0, 14.0, 12.0])
 @export var demand_curve: float = 1.5
 ## Demand added per open backorder that needs this ore, and its cap.
 @export var backorder_demand: float = 0.06

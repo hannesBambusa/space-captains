@@ -2,13 +2,13 @@ class_name MainMenu
 extends Control
 ## The start screen (scenes/main_menu.tscn, the project's main scene):
 ## Continue (the newest save), New game, Load game ([SaveList]), Settings
-## (fullscreen) and Quit, over the slowly turning station ([MenuBackdrop]).
+## (fullscreen, the tutorial for new games) and Quit, over the slowly turning station ([MenuBackdrop]).
 ## Styled like the pause menu (ui/theme.tres).
 ## Run with "-- --screenshot=..." it starts a new game at once, so the
 ## screenshot check keeps rendering the system.
 
 const THEME_PATH := "res://ui/theme.tres"
-const TITLE_COLOR := Color(1.0, 0.55, 0.15)
+const TITLE_COLOR := HudStyle.ACCENT
 ## Click played when the mouse moves onto a button (made with ElevenLabs).
 const HOVER_SOUND := "res://assets/audio/ui/menu_hover.wav"
 const HOVER_VOLUME_DB := -14.0
@@ -22,6 +22,7 @@ var _continue_hint: Label
 var _error: Label
 var _backup: Button
 var _fullscreen: Button
+var _tutorial: CheckButton
 var _newest: Dictionary = {}
 var _hover_player: AudioStreamPlayer
 var _last_hover := -1.0
@@ -75,21 +76,23 @@ func _build() -> void:
 	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	kicker.add_child(bar)
 	var kl := UIUtil.label("SOLACE SECTOR  /  STATION ADMINISTRATION", &"HeaderLabel")
-	kl.add_theme_font_size_override("font_size", 15)
+	kl.add_theme_font_override("font", HudStyle.mono("Medium", 2))
+	kl.add_theme_font_size_override("font_size", 14)
 	kicker.add_child(kl)
 	col.add_child(kicker)
 	var title := Label.new()
 	title.text = "SPACE CAPTAINS"
-	title.add_theme_font_override("font", HudStyle.font("Bold", true, false, 4))
-	title.add_theme_color_override("font_color", Color(0.96, 0.97, 1.0))
+	title.add_theme_font_override("font", HudStyle.font("Bold", true, false, 8))
+	title.add_theme_color_override("font_color", HudStyle.TEXT_BRIGHT)
 	title.add_theme_font_size_override("font_size", 92)
 	title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
 	title.add_theme_constant_override("shadow_offset_y", 3)
 	title.add_theme_constant_override("shadow_outline_size", 10)
 	col.add_child(title)
+	col.add_child(HudStyle.hazard_stripe(Vector2(240, 8)))
 	var sub := UIUtil.label("Run the station. Hire the captains. Let them choose.", &"DimLabel")
 	sub.add_theme_font_size_override("font_size", 20)
-	sub.add_theme_color_override("font_color", Color(0.72, 0.77, 0.84))
+	sub.add_theme_color_override("font_color", HudStyle.TEXT)
 	col.add_child(sub)
 	col.add_child(UIUtil.spacer(0.0))
 
@@ -137,6 +140,18 @@ func _build() -> void:
 	var keys := UIUtil.label("F11 or Alt+Enter also toggles fullscreen", &"DimLabel")
 	keys.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_settings.add_child(keys)
+	_tutorial = CheckButton.new()
+	_tutorial.text = "TUTORIAL"
+	_tutorial.theme_type_variation = &"MainMenuButton"
+	_tutorial.focus_mode = Control.FOCUS_NONE
+	_tutorial.custom_minimum_size.y = 46.0
+	_tutorial.mouse_entered.connect(_play_hover)
+	_tutorial.tooltip_text = "Show the training card in a new game"
+	_tutorial.toggled.connect(func(on: bool) -> void: Tutorial.set_runs_on_new_game(on))
+	_settings.add_child(_tutorial)
+	var tut_hint := UIUtil.label("New games start with a short training card", &"DimLabel")
+	tut_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_settings.add_child(tut_hint)
 	_settings.add_child(_button("Back", _show_main))
 
 	UIUtil.no_focus(self)
@@ -204,6 +219,7 @@ func _show_settings() -> void:
 	_main.hide()
 	_loads.hide()
 	_update_fullscreen()
+	_tutorial.set_pressed_no_signal(Tutorial.runs_on_new_game())
 	_settings.show()
 
 

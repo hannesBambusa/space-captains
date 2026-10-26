@@ -54,7 +54,7 @@ static func stepper_row(parent: Container, title: String, step: Callable, minus_
 	var minus := step_button("-", minus_tip)
 	minus.pressed.connect(step.bind(-1))
 	row.add_child(minus)
-	var value := label("", &"ValueLabel")
+	var value := label("", &"NumberLabel")
 	value.custom_minimum_size.x = 74.0
 	value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	row.add_child(value)

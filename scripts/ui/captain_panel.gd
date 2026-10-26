@@ -22,7 +22,7 @@ extends PanelContainer
 const ATTR_COLOR := Color(0.55, 0.85, 1.0)
 const HULL_COLOR := Color(0.45, 0.95, 0.55)
 const SHIELD_COLOR := Color(0.45, 0.75, 1.0)
-const TIER_COLORS: Array[Color] = [Color(0.55, 0.6, 0.68), Color(0.75, 0.9, 1.0), Color(0.6, 1.0, 0.68), Color(1.0, 0.82, 0.35)]
+const TIER_COLORS: Array[Color] = [HudStyle.TEXT_DIM, Color(0.75, 0.9, 1.0), Color(0.6, 1.0, 0.68), Color(1.0, 0.82, 0.35)]
 const GOOD_TRAIT := Color(0.6, 1.0, 0.7)
 const BAD_TRAIT := Color(1.0, 0.68, 0.4)
 ## Career lines shown (the tooltip has them all).
@@ -458,7 +458,7 @@ func _refresh_last(brain: CaptainBrain) -> void:
 		_decision.tooltip_text = ""
 	_decision.text = "Last: " + text
 	_decision.visible = not text.is_empty()
-	_decision.add_theme_color_override("font_color", Color(1.0, 0.55, 0.45) if refused else Color(0.58, 0.64, 0.72))
+	_decision.add_theme_color_override("font_color", Color(1.0, 0.55, 0.45) if refused else HudStyle.TEXT_DIM)
 
 
 # --- Escort request -------------------------------------------------------------
@@ -518,7 +518,7 @@ func _refresh_order(cap: Captain) -> void:
 		return
 	var state := f.order_state(o)
 	_order.text = "%s, paid %s cr, %s" % [(o["module"] as ShipModule).display_name, UIUtil.amount(int(o.get("paid", 0))), f.order_state_text(o)]
-	_order.add_theme_color_override("font_color", PipMeter.GOOD if state == "ready" else (PipMeter.MID if state == "ore" or state == "tooling" else Color(0.85, 0.9, 1.0)))
+	_order.add_theme_color_override("font_color", PipMeter.GOOD if state == "ready" else (PipMeter.MID if state == "ore" or state == "tooling" else HudStyle.TEXT_BRIGHT))
 
 
 func _refresh_fleet_and_repairs(cap: Captain) -> void:
@@ -627,7 +627,7 @@ func _refresh_modules() -> void:
 		var t := _module_tiers[i]
 		n.text = m.display_name if m else "empty"
 		n.tooltip_text = (ModuleTips.tip(m) if m.tier > 0 else (m.blurb if not m.blurb.is_empty() else "Stock fitting of this hull.")) if m else ""
-		n.add_theme_color_override("font_color", Color(0.9, 0.94, 1.0) if m and m.tier > 0 else Color(0.6, 0.66, 0.74))
+		n.add_theme_color_override("font_color", HudStyle.TEXT_BRIGHT if m and m.tier > 0 else HudStyle.TEXT_DIM)
 		var tier := m.tier if m else 0
 		t.text = ShipModule.TIER_NAMES[tier]
 		t.add_theme_color_override("font_color", TIER_COLORS[tier])

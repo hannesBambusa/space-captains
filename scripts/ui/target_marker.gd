@@ -3,8 +3,8 @@ extends Control
 ## Screen overlay: corner brackets around the object under a hovered overview
 ## row (dim) and around the selected building (accent). Ignores the mouse.
 
-const HOVER_COLOR := Color(0.85, 0.9, 1.0, 0.75)
-const SELECT_COLOR := Color(1.0, 0.62, 0.26, 0.95)
+const HOVER_COLOR := Color(0.373, 0.816, 0.886, 0.8)
+const SELECT_COLOR := Color(0.949, 0.647, 0.255, 0.95)
 
 @export var min_px: float = 12.0
 @export var max_px: float = 160.0

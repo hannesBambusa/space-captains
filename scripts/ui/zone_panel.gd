@@ -98,7 +98,7 @@ func _ready() -> void:
 	v.add_child(grow)
 	grow.add_child(UIUtil.label("Budget", &"DimLabel"))
 	grow.add_child(UIUtil.spacer())
-	_budget_value = UIUtil.label("", &"ValueLabel")
+	_budget_value = UIUtil.label("", &"NumberLabel")
 	grow.add_child(_budget_value)
 	var arow := HBoxContainer.new()
 	arow.add_theme_constant_override("separation", 6)
@@ -175,7 +175,7 @@ func refresh() -> void:
 			patrolling += 1
 	_mercs.text = "%d patrolling here" % patrolling if patrolling > 0 else "None patrolling here now"
 	_raiders.text = "None" if z.raiders_inside <= 0 else "%d" % z.raiders_inside
-	_raiders.add_theme_color_override("font_color", Color(1.0, 0.45, 0.38) if z.raiders_inside > 0 else Color(0.85, 0.9, 1.0))
+	_raiders.add_theme_color_override("font_color", Color(1.0, 0.45, 0.38) if z.raiders_inside > 0 else HudStyle.TEXT_BRIGHT)
 	_radius_value.text = "%.1f km" % (z.radius / 1000.0)
 	_radius_minus.disabled = z.radius <= DefenseZones.RADIUS_RANGE.x
 	_radius_plus.disabled = z.radius >= DefenseZones.RADIUS_RANGE.y

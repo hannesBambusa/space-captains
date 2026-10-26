@@ -87,7 +87,7 @@ func _on_posted(e: Dictionary) -> void:
 	h.add_child(HudStyle.icon_rect(KIND_ICONS[kind], 14.0, tone))
 	var t := int(float(e["time"]))
 	var clock := UIUtil.label("%02d:%02d" % [floori(t / 60.0) % 60, t % 60], &"SmallLabel")
-	clock.add_theme_font_override("font", HudStyle.font("Medium", false, true))
+	clock.add_theme_font_override("font", HudStyle.mono("Regular"))
 	clock.add_theme_color_override("font_color", HudStyle.TEXT_FAINT)
 	h.add_child(clock)
 	var l := UIUtil.label(String(e["text"]))

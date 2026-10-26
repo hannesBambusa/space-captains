@@ -38,7 +38,7 @@ const ORE_COLORS: Array[Color] = [Color(0.95, 0.6, 0.42), Color(0.8, 0.85, 0.94)
 ## HUD icon per type (assets/ui/icons).
 const ORE_ICONS: Array[StringName] = [&"iron", &"titanium", &"crystal", &"fuel", &"water", &"rare_metals", &"silicates", &"heavy_ore"]
 
-@export var start_credits: int = 2000
+@export var start_credits: int = 3000
 ## Iron, titanium, crystal at start.
 @export var start_ore: PackedInt32Array = PackedInt32Array([300, 80, 0, 0, 0, 0, 0, 0])
 ## Corporate grant, credits per sim minute.

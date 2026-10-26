@@ -127,7 +127,7 @@ func _build() -> void:
 	add_child(_root)
 
 	var dim := ColorRect.new()
-	dim.color = Color(0.0, 0.0, 0.02, 0.55)
+	dim.color = Color(HudStyle.VOID, 0.62)
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_root.add_child(dim)
 

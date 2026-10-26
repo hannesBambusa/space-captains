@@ -6,10 +6,10 @@ extends Control
 
 enum Style { PIPS, BAR }
 
-const GOOD := Color(0.35, 0.9, 0.5)
-const MID := Color(1.0, 0.78, 0.25)
-const BAD := Color(1.0, 0.32, 0.26)
-const OFF := Color(0.62, 0.72, 0.86, 0.16)
+const GOOD := HudStyle.GOOD
+const MID := HudStyle.WARN
+const BAD := HudStyle.BAD
+const OFF := Color(0.373, 0.816, 0.886, 0.16)
 
 @export var style: Style = Style.PIPS
 @export var max_value: float = 5.0
@@ -18,7 +18,7 @@ const OFF := Color(0.62, 0.72, 0.86, 0.16)
 		value = v
 		queue_redraw()
 @export var graded: bool = false
-@export var color: Color = Color(1.0, 0.6, 0.24)
+@export var color: Color = HudStyle.ACCENT
 @export var pip_size: float = 7.0
 @export var pip_gap: float = 3.0
 ## PIPS stacked bottom to top (signal bars, each a bit taller) instead of in a row.

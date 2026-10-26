@@ -14,13 +14,13 @@ extends PanelContainer
 ## show what each module does in numbers and the research it still needs. The hidden tab keeps the
 ## height of the taller one, so the panel does not jump when switching.
 
-const DEMAND_COLORS: Array[Color] = [Color(0.6, 0.66, 0.74), Color(1.0, 0.78, 0.25), Color(0.35, 0.9, 0.5)]
+const DEMAND_COLORS: Array[Color] = [HudStyle.TEXT_DIM, Color(1.0, 0.78, 0.25), Color(0.35, 0.9, 0.5)]
 const MAX_RECENT := 6
 const MAX_ORDERS := 6
 const MAX_DEMAND := 10
 const STATE_COLORS := {
-	"ready": Color(0.35, 0.9, 0.5), "making": Color(0.55, 0.85, 1.0), "next": Color(0.85, 0.9, 1.0),
-	"queued": Color(0.6, 0.66, 0.74), "ore": Color(1.0, 0.78, 0.25), "tooling": Color(1.0, 0.6, 0.4),
+	"ready": Color(0.35, 0.9, 0.5), "making": Color(0.55, 0.85, 1.0), "next": HudStyle.TEXT_BRIGHT,
+	"queued": HudStyle.TEXT_DIM, "ore": Color(1.0, 0.78, 0.25), "tooling": Color(1.0, 0.6, 0.4),
 }
 
 @export var panel_width: float = 400.0
@@ -216,7 +216,7 @@ func _build_production(v: VBoxContainer) -> void:
 		grid.add_child(name_l)
 		var row: Array[Label] = []
 		for t in 3:
-			var cell := UIUtil.label("", &"ValueLabel")
+			var cell := UIUtil.label("", &"NumberLabel")
 			cell.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 			cell.custom_minimum_size.x = 56.0
 			cell.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -254,7 +254,7 @@ func _make_ore_row(parent: VBoxContainer, ore: int) -> Dictionary:
 	demand.custom_minimum_size.x = 52.0
 	a.add_child(demand)
 	a.add_child(UIUtil.spacer())
-	var price := UIUtil.label("", &"ValueLabel")
+	var price := UIUtil.label("", &"NumberLabel")
 	price.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	a.add_child(price)
 	a.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -269,7 +269,7 @@ func _make_ore_row(parent: VBoxContainer, ore: int) -> Dictionary:
 		if factory:
 			factory.market.step_ask(ore, -1))
 	b.add_child(minus)
-	var ask := UIUtil.label("", &"ValueLabel")
+	var ask := UIUtil.label("", &"NumberLabel")
 	ask.custom_minimum_size.x = 64.0
 	ask.mouse_filter = Control.MOUSE_FILTER_PASS
 	ask.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -297,7 +297,7 @@ func _make_ore_row(parent: VBoxContainer, ore: int) -> Dictionary:
 			var m := factory.market
 			m.set_reserve(ore, m.reserve[ore] - m.reserve_step[ore]))
 	b.add_child(kminus)
-	var keep := UIUtil.label("", &"ValueLabel")
+	var keep := UIUtil.label("", &"NumberLabel")
 	keep.custom_minimum_size.x = 38.0
 	keep.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	b.add_child(keep)
@@ -453,7 +453,7 @@ func _refresh() -> void:
 			var can := f.tooling_tier >= t + 1
 			row[t].tooltip_text = ModuleTips.cell_tip(s, t + 1, f)
 			row[t].text = str(n) if n > 0 else ("0" if can else "-")
-			row[t].add_theme_color_override("font_color", CaptainPanel.TIER_COLORS[t + 1] if n > 0 else Color(0.5, 0.55, 0.62))
+			row[t].add_theme_color_override("font_color", CaptainPanel.TIER_COLORS[t + 1] if n > 0 else HudStyle.TEXT_FAINT)
 	_ware_header.text = "WAREHOUSE  %d / %d   (%d made)" % [f.warehouse_total(), f.warehouse_cap, f.total_built]
 	_rebuild_orders()
 	_rebuild_demand()
@@ -511,7 +511,7 @@ func _rebuild_orders() -> void:
 		var state := f.order_state(o)
 		var st := UIUtil.label(f.order_state_text(o), &"ValueLabel")
 		st.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		st.add_theme_color_override("font_color", STATE_COLORS.get(state, Color(0.6, 0.66, 0.74)))
+		st.add_theme_color_override("font_color", STATE_COLORS.get(state, HudStyle.TEXT_DIM))
 		row.add_child(st)
 		var sub := UIUtil.label("   %s, paid %s cr" % [cap.captain_name if cap else "-", UIUtil.amount(int(o.get("paid", 0)))], &"DimLabel")
 		sub.clip_text = true
@@ -556,7 +556,7 @@ func _rebuild_demand() -> void:
 		var stock := int(r["stock"])
 		var cells: Array[String] = [str(stock), str(int(r["orders"])), str(ceili(float(r["misses"]))) if float(r["misses"]) >= 0.05 else "-"]
 		for i in cells.size():
-			var l := UIUtil.label(cells[i], &"ValueLabel")
+			var l := UIUtil.label(cells[i], &"NumberLabel")
 			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 			if i == 0 and stock <= 0:
 				l.add_theme_color_override("font_color", PipMeter.BAD)

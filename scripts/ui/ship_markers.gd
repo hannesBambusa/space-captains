@@ -2,7 +2,7 @@ class_name ShipMarkers
 extends Control
 ## Always-on screen overlay for ships and Scavenger Dens: one constant-size
 ## icon per ship (shape by role, colour by faction), turned to the screen
-## heading of its velocity, with a status glyph (mining, cargo, fighting,
+## heading of its nose, with a status glyph (mining, cargo, fighting,
 ## fleeing, escorting, spooling or in a warp hop), a hull pip when damaged
 ## and a short name label.
 ## Labels fade with zoom and are decluttered; the selected, followed and
@@ -486,11 +486,14 @@ func _glyph_for(s: Ship) -> Glyph:
 	return Glyph.NONE
 
 
-## Screen angle of the ship's motion (nose up = 0), its nose when slow.
+## Screen angle of the ship's nose (up = 0). Not its velocity: that holds
+## the frame's orbit and the slide of turns, brakes and strafing runs.
 func _screen_heading(s: Ship, cam: Camera3D, sp: Vector2, d: float) -> float:
-	var v := s.get_world_velocity()
-	v.y = 0.0
-	var dir := v / v.length() if v.length() > 3.0 else -s.global_basis.z
+	var dir := -s.global_basis.z
+	dir.y = 0.0
+	if dir.length() < 1e-3:
+		return 0.0
+	dir = dir.normalized()
 	var ahead := s.global_position + dir * d * 0.03
 	if cam.is_position_behind(ahead):
 		return 0.0

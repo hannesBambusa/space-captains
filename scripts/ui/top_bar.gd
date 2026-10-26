@@ -68,7 +68,7 @@ func _ready() -> void:
 	sys_box.add_theme_constant_override("separation", 8)
 	sys_box.custom_minimum_size.x = 300.0
 	h.add_child(sys_box)
-	sys_box.add_child(HudStyle.icon_rect(&"tab_system", 18.0, HudStyle.ACCENT))
+	sys_box.add_child(HudStyle.icon_rect(&"tab_system", 18.0, HudStyle.HOLO))
 	_system = UIUtil.label("", &"BigValueLabel")
 	_system.add_theme_font_override("font", HudStyle.font("Bold", true, false, 2))
 	sys_box.add_child(_system)
@@ -95,7 +95,7 @@ func _ready() -> void:
 		var v := _add_resource(res, Economy.ORE_ICONS[i], Economy.ORE_COLORS[i], Economy.ORE_NAMES[i].to_upper())
 		v.add_theme_color_override("font_color", Economy.ORE_COLORS[i].lerp(Color.WHITE, 0.55))
 		var pend := UIUtil.label("", &"SmallLabel")
-		pend.add_theme_font_override("font", HudStyle.font("Medium", false, true))
+		pend.add_theme_font_override("font", HudStyle.mono("Regular"))
 		pend.add_theme_color_override("font_color", Economy.ORE_COLORS[i].lerp(HudStyle.TEXT_DIM, 0.45))
 		pend.mouse_filter = Control.MOUSE_FILTER_PASS
 		pend.visible = false
@@ -123,7 +123,7 @@ func _ready() -> void:
 	_shield_bar = UIUtil.bar(DefenseSection.SHIELD_COLOR, Vector2(64.0, 5.0))
 	_shield_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_shield_box.add_child(_shield_bar)
-	_shield_value = UIUtil.label("", &"ValueLabel")
+	_shield_value = UIUtil.label("", &"NumberLabel")
 	_shield_value.custom_minimum_size.x = 64.0
 	_shield_box.add_child(_shield_value)
 	_research_box = HBoxContainer.new()
@@ -142,7 +142,7 @@ func _ready() -> void:
 	_research_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_research_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_research_box.add_child(_research_bar)
-	_research_value = UIUtil.label("", &"ValueLabel")
+	_research_value = UIUtil.label("", &"NumberLabel")
 	_research_value.custom_minimum_size.x = 58.0
 	_research_box.add_child(_research_value)
 	h.add_child(UIUtil.spacer())
@@ -165,7 +165,7 @@ func _ready() -> void:
 	_speed_pips.pip_gap = 2.0
 	_speed_pips.color = HudStyle.ACCENT
 	clock_box.add_child(_speed_pips)
-	_speed = UIUtil.label("", &"ValueLabel")
+	_speed = UIUtil.label("", &"NumberLabel")
 	_speed.custom_minimum_size.x = 58.0
 	clock_box.add_child(_speed)
 	tooltip_text = "Space: pause    1 / 2 / 3: sim speed"
@@ -232,7 +232,7 @@ func _make_goods_box(res: HBoxContainer) -> void:
 		var ic := HudStyle.icon_rect(Economy.ORE_ICONS[i], 14.0, Economy.ORE_COLORS[i])
 		ic.mouse_filter = Control.MOUSE_FILTER_PASS
 		cell.add_child(ic)
-		var v := UIUtil.label("", &"ValueLabel")
+		var v := UIUtil.label("", &"NumberLabel")
 		v.add_theme_color_override("font_color", Economy.ORE_COLORS[i].lerp(Color.WHITE, 0.5))
 		v.mouse_filter = Control.MOUSE_FILTER_PASS
 		cell.add_child(v)
@@ -280,7 +280,7 @@ func _add_resource(parent: HBoxContainer, icon_name: StringName, tint: Color, ti
 
 
 func _add_delta(parent: HBoxContainer, color: Color) -> Label:
-	var l := UIUtil.label("", &"ValueLabel")
+	var l := UIUtil.label("", &"NumberLabel")
 	l.add_theme_color_override("font_color", color)
 	l.add_theme_font_size_override("font_size", 13)
 	l.custom_minimum_size.x = 44.0
@@ -388,7 +388,7 @@ func _update_shield() -> void:
 		StationShield.State.DOWN:
 			text = "DOWN %ds" % ceili(b.cooldown_left)
 	_shield_value.text = text
-	_shield_value.add_theme_color_override("font_color", PipMeter.BAD if not b.is_up() else Color(0.85, 0.93, 1.0))
+	_shield_value.add_theme_color_override("font_color", PipMeter.BAD if not b.is_up() else HudStyle.TEXT_BRIGHT)
 	_shield_box.tooltip_text = "Station shield: %s, %d / %d HP, radius %d m" % [b.get_state_name().to_lower(), roundi(b.hp), roundi(b.max_hp), roundi(b.radius)]
 
 
@@ -411,7 +411,7 @@ func _update_research() -> void:
 		var lead: Dictionary = active[0]
 		_research_bar.value = float(lead["progress"])
 		_research_value.text = "%d  %d%%" % [active.size(), roundi(float(lead["progress"]) * 100.0)]
-		_research_value.add_theme_color_override("font_color", Color(0.85, 0.93, 1.0) if working > 0 else HudStyle.WARN)
+		_research_value.add_theme_color_override("font_color", HudStyle.TEXT_BRIGHT if working > 0 else HudStyle.WARN)
 	var lines: PackedStringArray = ["Research: %d project%s funded, %d at work, %d of %d researchers. Click: open the Science Lab." % [
 			active.size(), "" if active.size() == 1 else "s", working, Research.researchers.size(), Research.MAX_RESEARCHERS]]
 	for a in active:

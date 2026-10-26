@@ -38,6 +38,8 @@ var _frame: PanelContainer
 var _tab_buttons: Array[Button] = []
 var _tab_counts: Array[Label] = []
 var _body: VBoxContainer
+## Fades the row cut by the scroll's bottom edge while more rows follow.
+var _fade: TextureRect
 var _scroll: ScrollContainer
 var _list: VBoxContainer
 var _structures: VBoxContainer
@@ -95,7 +97,7 @@ func _ready() -> void:
 		var ic := HudStyle.icon_rect(TAB_ICONS[i], 16.0, HudStyle.TEXT_DIM)
 		ic.name = "Icon"
 		top.add_child(ic)
-		var cnt := UIUtil.label("", &"ValueLabel")
+		var cnt := UIUtil.label("", &"NumberLabel")
 		cnt.add_theme_font_size_override("font_size", 14)
 		top.add_child(cnt)
 		_tab_counts.append(cnt)
@@ -123,7 +125,18 @@ func _ready() -> void:
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_scroll.focus_mode = Control.FOCUS_NONE
 	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_body.add_child(_scroll)
+	# The scroll and its bottom fade share a plain holder.
+	var holder := Control.new()
+	holder.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_body.add_child(holder)
+	_scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	holder.add_child(_scroll)
+	_fade = _make_fade()
+	holder.add_child(_fade)
+	var vbar := _scroll.get_v_scroll_bar()
+	vbar.value_changed.connect(func(_v: float) -> void: _sync_fade())
+	vbar.changed.connect(_sync_fade)
 	var groups := VBoxContainer.new()
 	groups.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	groups.add_theme_constant_override("separation", 14)
@@ -131,9 +144,44 @@ func _ready() -> void:
 	_contracts = _make_group(groups)
 	_threats = _make_group(groups)
 	_list = _make_group(groups)
+	# Room under the last row, so scrolled to the end it clears the frame.
+	var end_pad := Control.new()
+	end_pad.custom_minimum_size.y = 6.0
+	end_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	groups.add_child(end_pad)
 	_set_tab(Tab.ALL)
 	get_viewport().size_changed.connect(_fit_height)
 	_fit_height.call_deferred()
+
+
+## A strip along the scroll's bottom edge that fades the cut row into the
+## panel, so a part row reads as "more below" (the scroll bar is thin).
+func _make_fade() -> TextureRect:
+	var grad := Gradient.new()
+	grad.set_color(0, Color(HudStyle.PANEL_BG_BOTTOM, 0.0))
+	grad.set_color(1, Color(HudStyle.PANEL_BG_BOTTOM, 0.97))
+	var tex := GradientTexture2D.new()
+	tex.gradient = grad
+	tex.fill_from = Vector2(0.0, 0.0)
+	tex.fill_to = Vector2(0.0, 1.0)
+	tex.width = 4
+	tex.height = 32
+	var r := TextureRect.new()
+	r.texture = tex
+	r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	r.stretch_mode = TextureRect.STRETCH_SCALE
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	r.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	r.offset_top = -30.0
+	# Leaves the scroll bar unfaded.
+	r.offset_right = -10.0
+	r.visible = false
+	return r
+
+
+func _sync_fade() -> void:
+	var vb := _scroll.get_v_scroll_bar()
+	_fade.visible = vb.max_value - vb.page - vb.value > 2.0
 
 
 ## A group of sections in the shared scroll.
@@ -636,12 +684,12 @@ func _section(parent: VBoxContainer, title: String, count: int = -1, icon_name: 
 	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	strip.add_child(h)
 	if not icon_name.is_empty():
-		h.add_child(HudStyle.icon_rect(icon_name, 14.0, HudStyle.ACCENT))
+		h.add_child(HudStyle.icon_rect(icon_name, 14.0, HudStyle.HOLO))
 	h.add_child(UIUtil.label(title, &"HeaderLabel"))
 	h.add_child(UIUtil.spacer())
 	var count_label: Label = null
 	if count >= 0:
-		count_label = UIUtil.label(str(count), &"ValueLabel")
+		count_label = UIUtil.label(str(count), &"NumberLabel")
 		count_label.add_theme_font_size_override("font_size", 13)
 		count_label.add_theme_color_override("font_color", HudStyle.TEXT_DIM)
 		h.add_child(count_label)
@@ -679,7 +727,7 @@ func _add_belt_row(belt: AsteroidCluster) -> void:
 	var ore := ORE_NAMES[d.ore_type]
 	var row := _add_row(_clusters, belt, d.name, ore)
 	_cluster_rows.append(row)
-	var bar := UIUtil.bar(Color(0.85, 0.88, 0.95), Vector2(36.0, 4.0))
+	var bar := UIUtil.bar(HudStyle.TEXT, Vector2(36.0, 4.0))
 	bar.value = d.richness
 	row.add_right(bar)
 	var pct := UIUtil.label("%d%%" % roundi(d.richness * 100.0), &"DimLabel")

@@ -12,7 +12,7 @@ extends PanelContainer
 
 const ZOOM_LEVELS: Array[float] = [1.0, 0.25, 0.0625]
 const STAR_COLOR := Color(1.0, 0.86, 0.55)
-const ORBIT_COLOR := Color(0.6, 0.72, 0.9, 0.22)
+const ORBIT_COLOR := Color(0.373, 0.816, 0.886, 0.2)
 const PLANET_COLOR := Color(0.75, 0.82, 0.95)
 const BELT_COLOR := Color(0.75, 0.62, 0.48, 0.28)
 ## Cluster blob tint per ore (rock, iron, titanium, crystal).
@@ -46,7 +46,7 @@ func _ready() -> void:
 	add_child(v)
 	var h := HBoxContainer.new()
 	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	h.add_child(HudStyle.icon_rect(&"tab_system", 14.0, HudStyle.ACCENT))
+	h.add_child(HudStyle.icon_rect(&"tab_system", 14.0, HudStyle.HOLO))
 	h.add_child(UIUtil.label("SECTOR MAP", &"HeaderLabel"))
 	h.add_child(UIUtil.spacer())
 	_mode_button = UIUtil.button("Markers: All", &"IconButton")
@@ -257,13 +257,13 @@ func _draw_clusters(c: Control, sys: SolarSystem, sc: float, xf: Transform2D) ->
 func _draw_map() -> void:
 	var c := _canvas
 	var size := Vector2(map_px, map_px)
-	c.draw_rect(Rect2(Vector2.ZERO, size), Color(0.02, 0.03, 0.045, 0.8), true)
+	c.draw_rect(Rect2(Vector2.ZERO, size), Color(HudStyle.VOID, 0.82), true)
 	# Survey grid and corner brackets.
 	for i in range(1, 4):
 		var g := size.x * float(i) / 4.0
-		c.draw_line(Vector2(g, 0), Vector2(g, size.y), Color(0.6, 0.67, 0.76, 0.06), 1.0)
-		c.draw_line(Vector2(0, g), Vector2(size.x, g), Color(0.6, 0.67, 0.76, 0.06), 1.0)
-	var bk := Color(HudStyle.ACCENT, 0.6)
+		c.draw_line(Vector2(g, 0), Vector2(g, size.y), Color(HudStyle.HOLO, 0.06), 1.0)
+		c.draw_line(Vector2(0, g), Vector2(size.x, g), Color(HudStyle.HOLO, 0.06), 1.0)
+	var bk := Color(HudStyle.HOLO, 0.7)
 	for corner: Vector2 in [Vector2(0, 0), Vector2(1, 0), Vector2(0, 1), Vector2(1, 1)]:
 		var p := corner * size
 		var sx := 1.0 if corner.x == 0.0 else -1.0
@@ -335,7 +335,7 @@ func _draw_map() -> void:
 			c.draw_circle(m, 2.4, ShipMarkers.color_for(n))
 	if is_instance_valid(selected) and selected.is_inside_tree():
 		c.draw_arc(_to_map(selected.global_position), 5.5, 0.0, TAU, 20, ShipMarkers.SELECT_COLOR, 1.5, true)
-	c.draw_rect(Rect2(Vector2.ZERO, size), Color(0.5, 0.65, 0.85, 0.25), false, 1.0)
+	c.draw_rect(Rect2(Vector2.ZERO, size), HudStyle.HAIRLINE, false, 1.0)
 
 
 ## The camera's footprint on the plane (screen corners), or its pivot.
