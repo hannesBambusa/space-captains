@@ -8,48 +8,46 @@ extends Control
 ## danger and survey age ("seen 12 min ago"; stale surveys dimmed), what was
 ## charted (clusters by ore, bases, derelicts left), your ships there and in
 ## the jump there (cyan count) and an open explore contract (amber flag).
+## Double-click a node: view it (like "View system").
 ## Click a node: the info panel on the right with "View system" (when the
 ## view may switch there, ViewManager.can_view) and "Post explore contract"
 ## at fair pay (on the charted gate that leads there, when the board allows
 ## it: ContractBoard.explore_problem). A gate raid forming there that the
-## player was warned of shows too.
+## player was warned of shows too. A system with a station (home or a
+## forward one) has the station icon above its node, the forward station's
+## name under it, and a station line in the info panel ([method station_text]).
+## Layout and drawing live in [ClusterGraph] (shared with the minimap's
+## CLUSTER mode, which opens this map on a node with [method open_on]).
 
 const H := preload("res://scripts/ui/theme/hud_style.gd")
-const NODE_R := 22.0
-const HOME_R := 27.0
 const COL_W := 300.0
 const PANEL_W := 400.0
 const REFRESH := 0.5
-const STALE_ALPHA := 0.5
 
 var hud: HUD
 var selected: StringName = ClusterNetwork.HOME_ID
 
-## Shown nodes: id -> {pos, known (bool), via: [from id, gate name] or []}.
+## Layout and drawing, shared with the minimap's CLUSTER mode.
+var _graph := ClusterGraph.new()
+## Shown nodes (the graph's): id -> {pos, known (bool), via: [from id, gate name] or []}.
 var _nodes: Dictionary = {}
-## [a, b, charted both ways (bool)].
-var _links: Array = []
 var _info: VBoxContainer
 var _title: Label
 var _body: Label
 var _view: Button
 var _post: Button
+## F6: "Set destination here" for a mobile station (StationPanel.pick_mobile).
+var _dest: Button
 var _post_from: StringName = &""
 var _post_gate := ""
 var _post_reward := 0
 var _timer := 0.0
-var _f_name: Font
-var _f_small: Font
-var _f_mono: Font
 
 
 func _ready() -> void:
 	visible = false
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	_f_name = H.font("SemiBold", true, false, 1)
-	_f_small = H.font("Regular", false)
-	_f_mono = H.mono("Medium")
 	var head := HBoxContainer.new()
 	head.position = Vector2(28.0, 22.0)
 	head.add_theme_constant_override("separation", 8)
@@ -96,11 +94,15 @@ func _ready() -> void:
 	_post = UIUtil.button("Post explore contract", &"")
 	_post.pressed.connect(_on_post)
 	row.add_child(_post)
+	_dest = UIUtil.button("Set destination here", &"AccentButton")
+	_dest.pressed.connect(_on_dest)
+	_info.add_child(_dest)
 	UIUtil.no_focus(self)
 
 
 func setup(owner_hud: HUD) -> void:
 	hud = owner_hud
+	_graph.hud = hud
 	Sector.surveyed.connect(func(_id: StringName) -> void: _rebuild())
 	Sector.revealed.connect(func(_id: StringName, _n: PackedStringArray) -> void: _rebuild())
 	ContractBoard.contract_posted.connect(func(_c: Contract) -> void: _refresh())
@@ -119,6 +121,15 @@ func open_map() -> void:
 	if not _nodes.has(selected):
 		selected = ClusterNetwork.HOME_ID
 	_rebuild()
+
+
+## Opens the map with [param id] selected (the minimap's right click).
+func open_on(id: StringName) -> void:
+	visible = true
+	_rebuild()
+	if _nodes.has(id):
+		selected = id
+		_refresh()
 
 
 func close_map() -> void:
@@ -147,12 +158,13 @@ func _gui_input(event: InputEvent) -> void:
 	if mb == null or not mb.pressed or mb.button_index != MOUSE_BUTTON_LEFT:
 		accept_event()
 		return
-	for id: StringName in _nodes:
-		var r := HOME_R if id == ClusterNetwork.HOME_ID else NODE_R
-		if mb.position.distance_to(_nodes[id]["pos"]) <= r + 8.0:
-			selected = id
-			_refresh()
-			break
+	var id := _graph.node_at(mb.position)
+	if not id.is_empty():
+		selected = id
+		_refresh()
+		# Double click: same as "View system".
+		if mb.double_click:
+			_on_view()
 	accept_event()
 
 
@@ -160,83 +172,18 @@ func _gui_input(event: InputEvent) -> void:
 
 ## True when [param id] has been surveyed (home always).
 static func is_charted(id: StringName) -> bool:
-	if id == ClusterNetwork.HOME_ID:
-		return true
-	var st := Sector.state(id)
-	return st != null and st.known
+	return ClusterGraph.is_charted(id)
 
 
-## What the player knows of the network: charted systems and the systems
-## behind their charted gates.
+## What the player knows of the network ([method ClusterGraph.rebuild]),
+## left of the info panel.
 func _rebuild() -> void:
-	_nodes.clear()
-	_links.clear()
-	var net := Sector.network
-	if net == null:
-		return
-	var shown := {ClusterNetwork.HOME_ID: {"known": true, "via": []}}
-	var ids: Array[StringName] = [ClusterNetwork.HOME_ID]
-	ids.append_array(net.remote_ids())
-	for id in ids:
-		if not is_charted(id):
-			continue
-		shown[id] = {"known": true, "via": shown.get(id, {}).get("via", [])}
-		var def := Sector.system_def(id)
-		if def == null:
-			continue
-		for g in def.gates:
-			if not Sector.is_revealed(id, g.name):
-				continue
-			var to: StringName = net.gate_target(id, g.name).get("system", &"")
-			if to.is_empty():
-				continue
-			if not shown.has(to):
-				shown[to] = {"known": is_charted(to), "via": [id, g.name]}
-			elif (shown[to]["via"] as Array).is_empty() and to != ClusterNetwork.HOME_ID:
-				shown[to]["via"] = [id, g.name]
-			var dup := false
-			for l in _links:
-				if (l[0] == id and l[1] == to) or (l[0] == to and l[1] == id):
-					l[2] = true
-					dup = true
-			if not dup:
-				_links.append([id, to, false])
-	# Columns by depth, rows in parent order.
-	var cols: Dictionary = {}
-	for id: StringName in shown:
-		var d := net.depth(id) if id != ClusterNetwork.HOME_ID else 0
-		if not cols.has(d):
-			cols[d] = []
-		(cols[d] as Array).append(id)
 	var area := Rect2(Vector2(110.0, 120.0), Vector2(size.x - PANEL_W - 260.0, size.y - 240.0))
-	var depths := cols.keys()
-	depths.sort()
-	var col_w := minf(COL_W, area.size.x / maxf(float(depths.size() - 1), 1.0))
-	# Centred in the room left of the info panel.
-	area.position.x += (area.size.x - col_w * float(depths.size() - 1)) * 0.5
-	var row_of: Dictionary = {}
-	for d: int in depths:
-		var list: Array = cols[d]
-		list.sort_custom(func(a: StringName, b: StringName) -> bool:
-			var pa := float(row_of.get(_parent_in(a, shown), 0.0))
-			var pb := float(row_of.get(_parent_in(b, shown), 0.0))
-			return pa < pb if pa != pb else String(a) < String(b))
-		for i in list.size():
-			var y := area.position.y + area.size.y * (float(i) + 0.5) / float(list.size())
-			row_of[list[i]] = y
-			shown[list[i]]["pos"] = Vector2(area.position.x + col_w * float(d), y)
-	_nodes = shown
+	_graph.rebuild(area, COL_W)
+	_nodes = _graph.nodes
 	if not _nodes.has(selected):
 		selected = ClusterNetwork.HOME_ID
 	_refresh()
-
-
-func _parent_in(id: StringName, shown: Dictionary) -> StringName:
-	var e := Sector.network.entry(id)
-	if e and shown.has(e.parent):
-		return e.parent
-	var via: Array = shown[id].get("via", [])
-	return via[0] if not via.is_empty() else &""
 
 
 func _refresh() -> void:
@@ -249,41 +196,15 @@ func _refresh() -> void:
 # --- Data per node ---------------------------------------------------------------------
 
 func _ships_in(id: StringName) -> PackedStringArray:
-	var out := PackedStringArray()
-	var vm := hud.view_manager if hud else null
-	var w := vm.world(id) if vm else null
-	if w and id != ClusterNetwork.HOME_ID:
-		for n in SystemWorld.nodes_in(w, Ship.GROUP):
-			var s := n as Ship
-			if s and not s.dead and s.faction == Combat.Faction.PLAYER and s.captain:
-				out.append(s.captain.captain_name)
-		return out
-	var st := Sector.state(id)
-	if st == null:
-		return out
-	var refs := SystemHost.known_refs(get_tree())
-	for d: Dictionary in st.ships:
-		if String(d.get("kind", "")) == ShipCodec.KIND_HIRED:
-			var c := refs.captain(int(d.get("captain", 0)))
-			out.append(c.captain_name if c else "a pilot")
-	return out
+	return _graph.ships_in(id)
 
 
 func _in_transit(id: StringName) -> int:
-	var n := 0
-	for t: Dictionary in Sector.transits:
-		if t["to"] == id and String((t["ship"] as Dictionary).get("kind", "")) == ShipCodec.KIND_HIRED:
-			n += 1
-	return n
+	return ClusterGraph.in_transit(id)
 
 
 func _contracts_for(id: StringName) -> Array[ExploreContract]:
-	var out: Array[ExploreContract] = []
-	for c in ContractBoard.contracts:
-		var ec := c as ExploreContract
-		if ec and ec.target_system == id:
-			out.append(ec)
-	return out
+	return ClusterGraph.contracts_for(id)
 
 
 ## "3 clusters (2 titanium, 1 crystal), 1 base, 2 derelicts left".
@@ -318,17 +239,11 @@ static func contents_text(id: StringName, short: bool = false) -> String:
 
 
 static func danger_color(danger: int) -> Color:
-	var k := clampf(float(danger - 1) / 4.0, 0.0, 1.0)
-	return H.HOLO.lerp(H.WARN, k * 2.0) if k < 0.5 else H.WARN.lerp(H.BAD, (k - 0.5) * 2.0)
+	return ClusterGraph.danger_color(danger)
 
 
 func _name_of(id: StringName) -> String:
-	if id == ClusterNetwork.HOME_ID:
-		var w := hud.view_manager.home if hud and hud.view_manager else null
-		return w.sys.system_def.system_name if w and w.sys and w.sys.system_def else "Home"
-	var known: bool = _nodes.get(id, {}).get("known", false)
-	var def := Sector.system_def(id)
-	return def.system_name if def and known else "Unknown"
+	return _graph.name_of(id)
 
 
 # --- Draw ---------------------------------------------------------------------------------
@@ -345,76 +260,37 @@ func _draw() -> void:
 	while y < size.y:
 		draw_line(Vector2(0, y), Vector2(size.x, y), Color(H.HOLO, 0.035), 1.0)
 		y += step
-	for l in _links:
-		if not _nodes.has(l[0]) or not _nodes.has(l[1]):
-			continue
-		var a: Vector2 = _nodes[l[0]]["pos"]
-		var b: Vector2 = _nodes[l[1]]["pos"]
-		var known := bool(_nodes[l[0]]["known"]) and bool(_nodes[l[1]]["known"])
-		if known:
-			draw_line(a, b, Color(H.HOLO, 0.55), 2.0, true)
-		else:
-			draw_dashed_line(a, b, Color(H.HOLO_DIM, 0.9), 1.5, 8.0)
-		var n := _in_transit(l[1]) + _in_transit(l[0])
-		if n > 0:
-			draw_circle(a.lerp(b, 0.5), 5.0, H.role_color("Explorer"))
-	for id: StringName in _nodes:
-		_draw_node(id)
+	_graph.draw(self, selected)
 
 
-func _draw_node(id: StringName) -> void:
-	var n: Dictionary = _nodes[id]
-	var p: Vector2 = n["pos"]
-	var home := id == ClusterNetwork.HOME_ID
-	var r := HOME_R if home else NODE_R
-	var known := bool(n["known"])
-	var e := Sector.network.entry(id) if Sector.network else null
-	var stale := not home and known and Sector.is_stale(id)
-	var a := STALE_ALPHA if stale else 1.0
-	var col := H.ACCENT if home else (danger_color(e.danger) if known and e else H.TEXT_FAINT)
-	draw_circle(p, r + 6.0, Color(col, 0.08 * a))
-	draw_circle(p, r, Color(H.PANEL_BG, 0.95))
-	draw_arc(p, r, 0.0, TAU, 48, Color(col, 0.9 * a), 2.0, true)
-	if id == selected:
-		draw_arc(p, r + 6.0, 0.0, TAU, 48, H.ACCENT_SOFT, 2.0, true)
-	var mid := "?" if not known else ("H" if home else str(e.danger if e else 0))
-	var fs := 20
-	var ms := _f_mono.get_string_size(mid, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
-	draw_string(_f_mono, p + Vector2(-ms.x * 0.5, ms.y * 0.32), mid, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(col.lerp(Color.WHITE, 0.3), a))
-	var lines: Array = []
-	lines.append([_name_of(id).to_upper(), _f_name, 16, Color(H.TEXT_BRIGHT, a)])
-	if not home:
-		lines.append([Sector.danger_text(id), _f_small, 13, Color(H.TEXT_DIM, a)])
-		if known or not (Sector.state(id).revealed.is_empty()):
-			lines.append([contents_text(id, true), _f_small, 13, Color(H.TEXT_DIM, a)])
-	var ly := p.y + r + 18.0
-	for ln in lines:
-		var f: Font = ln[1]
-		var w := f.get_string_size(String(ln[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, int(ln[2])).x
-		draw_string(f, Vector2(p.x - w * 0.5, ly), String(ln[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, int(ln[2]), ln[3])
-		ly += float(ln[2]) + 4.0
-	# Your ships there: a cyan badge.
-	var ships := _ships_in(id).size() if not home else 0
-	if ships > 0:
-		var bp := p + Vector2(r * 0.75, -r * 0.75)
-		draw_circle(bp, 9.0, H.role_color("Explorer"))
-		var t := str(ships)
-		var ts := _f_mono.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, 12)
-		draw_string(_f_mono, bp + Vector2(-ts.x * 0.5, 4.5), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, H.VOID)
-	# An open explore contract: an amber flag.
-	if not _contracts_for(id).is_empty():
-		var fp := p + Vector2(-r * 0.95, -r * 0.7)
-		draw_line(fp, fp + Vector2(0, -26), H.ACCENT, 2.0)
-		draw_colored_polygon(PackedVector2Array([fp + Vector2(0, -26), fp + Vector2(16, -20), fp + Vector2(0, -14)]), H.ACCENT)
-	# A gate raid forming there (warned).
-	var g := _gate_raids()
-	if g and g.is_warned() and StringName(g.pending["source"]) == id:
-		draw_arc(p, r + 11.0, 0.0, TAU, 48, Color(H.BAD, 0.6 + 0.4 * sin(Time.get_ticks_msec() / 200.0)), 2.0, true)
+## The forward station site in [param id] ({} at home and without one).
+static func _station_site(id: StringName) -> Dictionary:
+	return ClusterGraph.station_site(id)
+
+
+## "Station: Eris Station (founded 1:00), bays 1/2, 3 structures; upkeep 40
+## cr/min, water 2/min (ok)", "" without a station.
+func station_text(id: StringName) -> String:
+	var vm := hud.view_manager if hud else null
+	var w := vm.world(id) if vm else null
+	var site := _station_site(id)
+	if id != ClusterNetwork.HOME_ID and site.is_empty():
+		return ""
+	var mgr := w.buildings if w else null
+	var st := mgr.station_node() if mgr else null
+	var text := "Station: %s" % (st.station_name if st else String(site.get("name", "Station")))
+	if not site.is_empty():
+		text += " (founded %s)" % Fmt.clock(float(site.get("founded_at", 0.0)))
+	if mgr:
+		text += ", bays %d/%d, %d structure%s" % [mgr.used_bays(), mgr.bay_count, mgr.buildings.size(), "" if mgr.buildings.size() == 1 else "s"]
+	var supply := w.supply if w else null
+	if supply:
+		text += "; " + supply.status_text()
+	return text + "."
 
 
 func _gate_raids() -> GateRaidSource:
-	var w := hud.view_manager.home if hud and hud.view_manager else null
-	return w.combat.gate_raids if w and w.combat else null
+	return _graph.gate_raids()
 
 
 # --- Info panel ---------------------------------------------------------------------------
@@ -444,6 +320,9 @@ func _fill_info() -> void:
 			var st := Sector.state(id)
 			if st and not st.revealed.is_empty():
 				lines.append("Partly charted: " + contents_text(id) + ".")
+	var station := station_text(id)
+	if not station.is_empty():
+		lines.append(station)
 	var ships := _ships_in(id) if not home else PackedStringArray()
 	if not ships.is_empty():
 		lines.append("Your ships there: " + ", ".join(ships) + ".")
@@ -462,6 +341,7 @@ func _fill_info() -> void:
 	_view.tooltip_text = "Switch the view to %s" % _name_of(id) if not _view.disabled else (
 			"You are viewing it" if vm and vm.viewed_id() == id else "Only charted systems, or one your ship is in, can be viewed")
 	_fill_post(id, via)
+	_fill_dest(id)
 
 
 ## The shortcut: an explore contract on the charted gate that leads to
@@ -500,3 +380,23 @@ func _on_post() -> void:
 		return
 	ContractBoard.post_explore(_post_from, _post_gate, _post_reward)
 	_refresh()
+
+
+## A mobile station (the selected one, or one parked or waiting at home)
+## may fly to [param id]: the button views it and starts the site picker.
+func _fill_dest(id: StringName) -> void:
+	var ms := StationPanel.pick_mobile(get_tree(), hud.selection.selected if hud and hud.selection else null)
+	_dest.visible = ms != null and id != ClusterNetwork.HOME_ID
+	if not _dest.visible:
+		return
+	var why := ForwardStations.target_problem(get_tree(), id, ms)
+	_dest.disabled = not why.is_empty()
+	_dest.tooltip_text = why if not why.is_empty() else "View %s and click a planet there for %s" % [_name_of(id), ms.get_display_name()]
+
+
+func _on_dest() -> void:
+	var ms := StationPanel.pick_mobile(get_tree(), hud.selection.selected if hud and hud.selection else null)
+	if ms == null or hud == null or hud.placement == null:
+		return
+	close_map()
+	hud.placement.arm_site(ms, selected)

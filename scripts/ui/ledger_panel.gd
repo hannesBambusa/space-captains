@@ -247,11 +247,16 @@ func _fill_row(row: HBoxContainer, e: Dictionary) -> void:
 	(cells[0] as Label).text = _time_text(float(e["t"]))
 	(cells[1] as Label).text = String(e["cat"])
 	var entry := cells[2] as Label
-	entry.text = String(e["label"]) + ("  x%d" % n if n > 1 else "")
-	var tip := "%s, %s" % [String(e["cat"]), String(e["label"])]
+	# Lines about a forward station's system: "[Ostra] Upkeep: Eris Station".
+	var tag := EventLog.tag(StringName(e.get("sys", "")))
+	var label := (tag + " " if not tag.is_empty() else "") + String(e["label"])
+	entry.text = label + ("  x%d" % n if n > 1 else "")
+	var tip := "%s, %s" % [String(e["cat"]), label]
 	if n > 1:
 		tip += "\n%d changes from %s to %s" % [n, _time_text(float(e["t0"])), _time_text(float(e["t"]))]
-	if held > 0:
+	if held > 0 and String(e["cat"]) == Ledger.HAULING:
+		tip += "\nOre the haulers kept, worth about %s cr at the Factory price: your credits did not change." % Fmt.amount(held)
+	elif held > 0:
 		tip += "\nPaid %s cr out of credits reserved earlier (the Escrow line when it was posted): your credits did not change now." % Fmt.amount(held)
 	entry.tooltip_text = tip
 	var amt := cells[3] as Label

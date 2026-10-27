@@ -25,12 +25,15 @@ extends RefCounted
 ## again; shuttles keep their cargo, and one on or near a pad flies its
 ## approach again. A ship on a gate trip keeps its [GateTransit] ("transit");
 ## hired ships may be created in a system other than their home's (the
-## space of [param ctx]).
+## space of [param ctx]). A mobile station (F6, [MobileStation], kind
+## "mobile") carries the escorts riding with it in its dict ("escorts",
+## hired dicts); they are not saved on their own.
 
 const KIND_HIRED := "hired"
 const KIND_POD := "pod"
 const KIND_SHUTTLE := "shuttle"
 const KIND_SCAVENGER := "scavenger"
+const KIND_MOBILE := "mobile"
 
 const SLOTS: Array[int] = [ShipModule.Slot.TOOL, ShipModule.Slot.CARGO, ShipModule.Slot.DEFENSE, ShipModule.Slot.ENGINE, ShipModule.Slot.SENSOR]
 
@@ -50,6 +53,9 @@ static func save_all(ctx: Node, contracts: Array[Contract]) -> Array:
 		var s := n as Ship
 		if s == null or s.dead or s.is_queued_for_deletion() or not s.is_inside_tree():
 			continue
+		if MobileStation.carrier_of(s):
+			# Saved inside its mobile station's dict.
+			continue
 		var d := save_ship(s, contracts)
 		if not d.is_empty():
 			out.append(d)
@@ -64,6 +70,8 @@ static func save_ship(s: Ship, contracts: Array[Contract]) -> Dictionary:
 		_save_scavenger(s as ScavengerShip, d)
 	elif s is CargoShuttle:
 		_save_shuttle(s as CargoShuttle, d)
+	elif s is MobileStation:
+		_save_mobile(s as MobileStation, d, contracts)
 	elif s is EscapePod:
 		d["kind"] = KIND_POD
 		d["captain"] = SaveIds.of(s.captain)
@@ -121,6 +129,19 @@ static func _save_shuttle(s: CargoShuttle, d: Dictionary) -> void:
 	d["shuttle"] = SaveUtil.props(s, ["phase", "cargo", "supplies", "number", "min_station_distance", "total_delivered", "_timer"])
 
 
+static func _save_mobile(s: MobileStation, d: Dictionary, contracts: Array[Contract]) -> void:
+	d["kind"] = KIND_MOBILE
+	d["mobile"] = s.save_fields()
+	var esc := []
+	for e in s.carried():
+		var ed := save_ship(e, contracts)
+		if not ed.is_empty():
+			esc.append(ed)
+	d["escorts"] = esc
+	if s.contract and not s.contract.is_finished() and not contracts.has(s.contract):
+		contracts.append(s.contract)
+
+
 static func _save_scavenger(s: ScavengerShip, d: Dictionary) -> void:
 	d["kind"] = KIND_SCAVENGER
 	d["den"] = SaveIds.of(s.den) if is_instance_valid(s.den) else 0
@@ -163,6 +184,8 @@ static func create(ctx: Node, d: Dictionary, refs: SaveRefs) -> Ship:
 			s = _create_shuttle(ctx, d, refs)
 		KIND_SCAVENGER:
 			s = _create_scavenger(ctx, d, refs)
+		KIND_MOBILE:
+			s = MobileStation.create_from(ctx, d, refs)
 	if s == null:
 		return null
 	refs.add(int(d["id"]), s)
@@ -191,7 +214,9 @@ static func _create_hired(ctx: Node, d: Dictionary, refs: SaveRefs) -> Ship:
 	s.loadout = _loadout(Ship.ROLE_NAMES[s.role], d.get("modules", []), dropped)
 	for m in dropped:
 		cap.wallet += m.cost
-		cap.add_history("%s taken off (not for a %s), refunded %s cr" % [m.display_name, Ship.ROLE_NAMES[s.role].to_lower(), Fmt.amount(m.cost)])
+		cap.add_history("%s taken off (wrong slot), refunded %s cr" % [m.display_name, Fmt.amount(m.cost)])
+	# Modules this hull has no use for (older saves) go back for a refund.
+	Outfitter.sell_back_unneeded(s)
 	if s is MercenaryShip:
 		(s as MercenaryShip).attack_side = float(d.get("attack_side", 1.0))
 	var docked := bool(d.get("docked", true))
@@ -206,8 +231,9 @@ static func _create_hired(ctx: Node, d: Dictionary, refs: SaveRefs) -> Ship:
 
 
 ## The role's stock loadout with the saved modules fitted (by module id).
-## Saved modules made for another role (or slot) are left off and go into
-## [param dropped], so the caller can refund them.
+## Saved modules for another slot are left off and go into [param dropped],
+## so the caller can refund them; ones the role has no use for are fitted
+## and sold back by the caller (Outfitter.sell_back_unneeded).
 static func _loadout(role_name: String, ids: Array, dropped: Array[ShipModule] = []) -> ShipLoadout:
 	var l := ShipLoadout.default_for(role_name)
 	var catalog := ModuleCatalog.shared()
@@ -220,8 +246,8 @@ static func _loadout(role_name: String, ids: Array, dropped: Array[ShipModule] =
 			l.set_module(SLOTS[i], null)
 			continue
 		var m := catalog.find(id)
-		if m and (m.slot != SLOTS[i] or not l.fits_hull(m)):
-			push_warning("ShipCodec: %s does not fit a %s, keeping the stock part" % [id, role_name])
+		if m and m.slot != SLOTS[i]:
+			push_warning("ShipCodec: %s does not fit the %s slot of a %s, keeping the stock part" % [id, ShipModule.SLOT_NAMES[SLOTS[i]], role_name])
 			dropped.append(m)
 		elif m:
 			l.set_module(SLOTS[i], m.duplicate() as ShipModule)
@@ -337,6 +363,8 @@ static func finish(s: Ship, d: Dictionary, refs: SaveRefs) -> void:
 		_restore_brain(s, d.get("brain", {}), bool(d.get("docked", true)), refs)
 	if d.has("transit"):
 		GateTransit.restore(s, d["transit"])
+	if s is MobileStation:
+		(s as MobileStation).finish_restore(d, refs)
 	if s is ScavengerShip and (s as ScavengerShip).ai:
 		var sd: Dictionary = d.get("scavenger", {})
 		var lead_id := int(sd.get("lead", 0))

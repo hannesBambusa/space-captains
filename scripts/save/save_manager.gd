@@ -239,18 +239,24 @@ func load_game(slot: String, backup: bool = false) -> String:
 		return String(file["error"])
 	_busy = true
 	var cover := await LoadingScreen.cover(get_tree(), "Loading %s" % slot_name(slot))
-	await _leave_scene()
-	_reset_globals()
 	current_slot = slot
-	var data: Dictionary = file["data"]
-	GameSnapshot.apply_globals(data)
-	_enter_game(data)
+	await load_snapshot(file["data"])
 	_busy = false
 	cover.reveal()
 	if backup:
 		# The backup is now the game: save it back as the main file.
 		save_game()
 	return ""
+
+
+## Replaces the running game with [param data] (a GameSnapshot.capture),
+## the load path without a file or a cover (load_game; tests reload from
+## memory with it).
+func load_snapshot(data: Dictionary) -> void:
+	await _leave_scene()
+	_reset_globals()
+	GameSnapshot.apply_globals(data)
+	_enter_game(data)
 
 
 ## Saves, then shows the main menu.

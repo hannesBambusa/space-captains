@@ -233,8 +233,9 @@ func shortfall_text(cost_credits: int, cost_ore: PackedInt32Array = PackedInt32A
 
 
 ## Deducts the cost. Returns false (and changes nothing) when unaffordable.
-## [param category] and [param label] go to the [member ledger].
-func spend(cost_credits: int, cost_ore: PackedInt32Array = PackedInt32Array(), category: String = Ledger.OTHER, label: String = "") -> bool:
+## [param category] and [param label] go to the [member ledger]
+## ([param sys]: the system it is about, "" = home).
+func spend(cost_credits: int, cost_ore: PackedInt32Array = PackedInt32Array(), category: String = Ledger.OTHER, label: String = "", sys: StringName = &"") -> bool:
 	if cost_credits < 0 or not can_afford(cost_credits, cost_ore):
 		return false
 	for i in mini(cost_ore.size(), ore.size()):
@@ -243,7 +244,7 @@ func spend(cost_credits: int, cost_ore: PackedInt32Array = PackedInt32Array(), c
 	credits -= cost_credits
 	for i in mini(cost_ore.size(), ore.size()):
 		ore[i] -= cost_ore[i]
-	ledger.record(-cost_credits, category, label, credits)
+	ledger.record(-cost_credits, category, label, credits, sys)
 	changed.emit(credits, materials)
 	return true
 

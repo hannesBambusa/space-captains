@@ -1,15 +1,24 @@
 class_name BuildMenu
 extends VBoxContainer
-## Bottom build bar: square [BuildTile]s (rendered structure icon, name,
-## hotkey F1.., built count, compact cost) in groups ECONOMY, DEFENCE (with
-## the "Defence zone" tool, ZonePlacement) and ADDONS (station addons,
-## BuildingDef.station_addon: picking one enters bay-pick mode). Tiles dim
-## with the short resource in red when unaffordable, show a lock at the
+## Bottom build bar, centred: small icon-only [BuildTile]s (rendered
+## structure icon, a tiny hotkey badge F1.., the built count "0/2") in groups
+## ECONOMY, DEFENCE (with the "Defence zone" tool, ZonePlacement) and ADDONS
+## (station addons, BuildingDef.station_addon: picking one enters bay-pick
+## mode), each group named by a small vertical tag on its left. Tiles dim
+## (the short resource's icon in red) when unaffordable, show a lock at the
 ## limit or with no free addon bay, and light up while placing. Hovering a
-## tile shows the [BuildInfoCard] (cost, build time, what it does, the
-## DefenseStats numbers, why it cannot be built, e.g. "Needs research: X"). Clicking or the hotkey
-## arms placement; while placing, a hint line above the bar shows the
-## controls and why a spot is invalid.
+## tile shows the [BuildInfoCard] (name, what it does, cost, build time,
+## the limit, the DefenseStats numbers, why it cannot be built, e.g. "Needs
+## research: X"). Clicking or the hotkey arms placement; while placing, a
+## hint line above the bar shows the controls and why a spot is invalid.
+##
+## Shown only while a station is selected (its hub, its row in the left
+## panel, HOME / H: a [HomeStation] in [member SelectionController.selected])
+## or while placing; the F keys only work while it shows. The bar is that
+## station's, the viewed system's ([method HUD.local_manager]): at a forward
+## station only the defs it allows (BuildingDef.allowed_forward) show, their
+## counts and limits are that station's (BuildingManager.max_count_for),
+## the addon bays are its station's, and the hotkeys number the shown tiles.
 
 const VALID_COLOR := Color(0.45, 1.0, 0.6)
 const INVALID_COLOR := Color(1.0, 0.45, 0.38)
@@ -23,7 +32,7 @@ const GROUP_ICONS: Array[StringName] = [&"econ", &"defence", &"addon"]
 const GROUP_TIPS: PackedStringArray = [
 	"Outposts that hire captains and bring in ore",
 	"Turrets, the shield bubble and defence zones mercenaries patrol",
-	"Station addons: built onto one of the Home Station's %d addon bays",
+	"Station addons: built onto one of the station's %d addon bays",
 ]
 
 var hud: HUD
@@ -39,6 +48,14 @@ var _hint_status: Label
 var _info: BuildInfoCard
 var _hovered: BuildTile
 var _icon_check := 0.0
+## Group column -> its tiles (hidden when none shows).
+var _columns: Dictionary = {}
+var _heads: Array[Control] = []
+## The selected station the bar is for (null: hidden unless placing).
+var _station: HomeStation
+## The manager and zones whose signals are linked ([method _bind_view]).
+var _mgr: BuildingManager
+var _zones: DefenseZones
 
 
 func _ready() -> void:
@@ -64,6 +81,7 @@ func _ready() -> void:
 	_bar = PanelContainer.new()
 	_bar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	add_child(_bar)
+	visible = false
 
 
 func setup(owner_hud: HUD) -> void:
@@ -72,7 +90,7 @@ func setup(owner_hud: HUD) -> void:
 	_info.name = "BuildInfo"
 	hud.get_node(^"Root").add_child.call_deferred(_info)
 	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 10)
+	h.add_theme_constant_override("separation", 6)
 	_bar.add_child(h)
 	var groups: Array[Array] = [[], [], []]
 	if hud.manager:
@@ -86,19 +104,18 @@ func setup(owner_hud: HUD) -> void:
 			continue
 		if h.get_child_count() > 0:
 			h.add_child(VSeparator.new())
-		var col := VBoxContainer.new()
-		col.add_theme_constant_override("separation", 6)
+		var col := HBoxContainer.new()
+		col.add_theme_constant_override("separation", 3)
 		h.add_child(col)
-		var head := HBoxContainer.new()
-		head.add_theme_constant_override("separation", 5)
-		head.mouse_filter = Control.MOUSE_FILTER_PASS
-		head.tooltip_text = GROUP_TIPS[gi] % BuildingManager.BAY_COUNT if gi == 2 else GROUP_TIPS[gi]
-		head.add_child(H.icon_rect(GROUP_ICONS[gi], 13.0, H.HOLO))
-		head.add_child(UIUtil.label(GROUPS[gi], &"HeaderLabel"))
+		var head := GroupTag.new()
+		head.text = GROUPS[gi]
+		head.set_meta(&"group", gi)
+		_heads.append(head)
 		col.add_child(head)
 		var tiles := HBoxContainer.new()
-		tiles.add_theme_constant_override("separation", 6)
+		tiles.add_theme_constant_override("separation", 4)
 		col.add_child(tiles)
+		_columns[col] = tiles
 		for def: BuildingDef in defs:
 			var t := BuildTile.new()
 			t.setup_def(def, "F%d" % key, GROUP_ICONS[gi])
@@ -124,18 +141,95 @@ func setup(owner_hud: HUD) -> void:
 	if hud.zone_placement:
 		hud.zone_placement.armed_changed.connect(_on_zone_armed)
 		hud.zone_placement.validity_changed.connect(_on_zone_validity)
-		var zones := DefenseZones.of(self)
-		if zones:
-			zones.zones_changed.connect(_refresh)
 	Economy.changed.connect(func(_c: int, _m: int) -> void: _refresh())
 	Research.changed.connect(_refresh)
-	if hud.manager:
-		hud.manager.building_added.connect(func(_b: Building) -> void: _refresh())
-		hud.manager.building_changed.connect(func(_b: Building) -> void: _refresh())
+	hud.view_rebound.connect(func(_w: SystemWorld) -> void: _bind_view())
 	if hud.placement:
 		hud.placement.armed_changed.connect(_on_armed)
 		hud.placement.validity_changed.connect(_on_validity)
+	if hud.selection:
+		hud.selection.selection_changed.connect(func(t: Node3D) -> void:
+			_station = t as HomeStation
+			_sync_visible())
+	_bind_view()
+	_sync_visible()
+
+
+## Shown while a station is selected, or while placing (the hint line
+## lives in the bar).
+func _sync_visible() -> void:
+	var placing := (hud.placement != null and hud.placement.def != null) or (hud.zone_placement != null and hud.zone_placement.is_armed())
+	var show := placing or (is_instance_valid(_station) and hud.local_manager() != null)
+	if visible != show:
+		visible = show
+		if not show and is_instance_valid(_info):
+			_hovered = null
+			_info.visible = false
+
+
+## The viewed system's manager and zones: signals moved over, tiles it
+## does not allow hidden, hotkeys renumbered.
+func _bind_view() -> void:
+	var mgr := hud.local_manager()
+	if mgr != _mgr:
+		if is_instance_valid(_mgr):
+			if _mgr.building_added.is_connected(_on_building):
+				_mgr.building_added.disconnect(_on_building)
+			if _mgr.building_changed.is_connected(_on_building):
+				_mgr.building_changed.disconnect(_on_building)
+		_mgr = mgr
+		if _mgr:
+			_mgr.building_added.connect(_on_building)
+			_mgr.building_changed.connect(_on_building)
+	var zones := DefenseZones.of(self) if mgr else null
+	if zones != _zones:
+		if is_instance_valid(_zones) and _zones.zones_changed.is_connected(_refresh):
+			_zones.zones_changed.disconnect(_refresh)
+		_zones = zones
+		if _zones:
+			_zones.zones_changed.connect(_refresh)
+	var key := 1
+	for t in _order:
+		var shown := t == _zone_button or (mgr != null and mgr.allows(t.def))
+		t.visible = shown
+		if shown:
+			t.hotkey = "F%d" % key
+			key += 1
+			t.queue_redraw()
+	for col: Control in _columns:
+		var any := false
+		for t in (_columns[col] as Control).get_children():
+			any = any or (t as Control).visible
+		col.visible = any
+	# Separators sit between shown columns only.
+	var row := _bar.get_child(0) as HBoxContainer if _bar.get_child_count() > 0 else null
+	if row:
+		var seen := false
+		var kids := row.get_children()
+		for i in kids.size():
+			var sep := kids[i] as VSeparator
+			if sep == null:
+				seen = seen or (kids[i] as Control).visible
+				continue
+			var next := i + 1 < kids.size() and (kids[i + 1] as Control).visible
+			sep.visible = seen and next
+	for head in _heads:
+		var gi := int(head.get_meta(&"group"))
+		head.tooltip_text = GROUP_TIPS[gi] % (mgr.bay_count if mgr else 0) if gi == 2 else GROUP_TIPS[gi]
 	_refresh()
+
+
+func _on_building(_b: Building) -> void:
+	_refresh()
+
+
+## The shown tiles in hotkey order.
+func shown_tiles() -> Array[BuildTile]:
+	var out: Array[BuildTile] = []
+	for t in _order:
+		if t.visible:
+			out.append(t)
+	return out
 
 
 ## 0 economy, 1 defence, 2 station addons.
@@ -196,13 +290,14 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
 	if k == null or not k.pressed or k.echo or k.ctrl_pressed or k.meta_pressed or k.alt_pressed:
 		return
-	# Hidden while another system is viewed (no station there).
+	# Hidden unless a station is selected (or while placing).
 	if not is_visible_in_tree():
 		return
+	var shown := shown_tiles()
 	var i := k.keycode - KEY_F1
-	if i < 0 or i >= _order.size() or k.keycode > KEY_F12:
+	if i < 0 or i >= shown.size() or k.keycode > KEY_F12:
 		return
-	var t := _order[i]
+	var t := shown[i]
 	if t.disabled and t.state != BuildTile.State.PLACING:
 		return
 	t.pressed.emit()
@@ -213,17 +308,17 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 func _block_reason(def: BuildingDef) -> String:
 	var why := Economy.shortfall_text(def.cost_credits, def.cost_ore())
-	if hud.manager:
-		var block := hud.manager.addon_block_reason(def) if def.station_addon else hud.manager.limit_reason(def)
+	if _mgr:
+		var block := _mgr.addon_block_reason(def) if def.station_addon else _mgr.limit_reason(def)
 		if not block.is_empty():
 			why = block
 	return why
 
 
 func _locked(def: BuildingDef) -> bool:
-	if hud.manager == null:
+	if _mgr == null:
 		return false
-	var block := hud.manager.addon_block_reason(def) if def.station_addon else hud.manager.limit_reason(def)
+	var block := _mgr.addon_block_reason(def) if def.station_addon else _mgr.limit_reason(def)
 	return not block.is_empty()
 
 
@@ -233,10 +328,10 @@ static func cost_entries(def: BuildingDef) -> Array[Dictionary]:
 	out.append({"icon": &"credits", "text": _short_num(def.cost_credits), "short": Economy.credits < def.cost_credits,
 			"color": H.CREDITS, "have": UIUtil.amount(Economy.credits), "full": "%s credits" % UIUtil.amount(def.cost_credits)})
 	var ore := def.cost_ore()
-	var icons: Array[StringName] = [&"iron", &"titanium", &"crystal"]
-	for i in mini(ore.size(), 3):
+	# Every resource the def needs (the Forward Station also takes water).
+	for i in mini(ore.size(), Economy.COUNT):
 		if ore[i] > 0:
-			out.append({"icon": icons[i], "text": str(ore[i]), "short": Economy.ore[i] < ore[i], "color": Economy.ORE_COLORS[i],
+			out.append({"icon": Economy.ORE_ICONS[i], "text": str(ore[i]), "short": Economy.ore[i] < ore[i], "color": Economy.ORE_COLORS[i],
 					"have": UIUtil.amount(Economy.ore[i]), "full": "%d %s" % [ore[i], Economy.ore_name(i)]})
 	return out
 
@@ -256,14 +351,14 @@ func _refresh() -> void:
 		t.disabled = not why.is_empty() and not armed
 		t.set_pressed_no_signal(armed)
 		t.state = BuildTile.State.PLACING if armed else (BuildTile.State.LOCKED if _locked(def) else (BuildTile.State.UNAFFORDABLE if not why.is_empty() else BuildTile.State.READY))
-		var n := hud.manager.count_of(def) if hud.manager else 0
-		t.count_text = "%d/%d" % [n, def.max_count] if def.max_count > 0 else ""
+		var n := _mgr.count_of(def) if _mgr else 0
+		var most := _mgr.max_count_for(def) if _mgr else def.max_count
+		t.count_text = "%d/%d" % [n, most] if most > 0 else ""
 		t.set_costs(cost_entries(def))
 		# Keyboard users and screen readers still get the plain text.
 		t.tooltip_text = ""
 	if _zone_button:
-		var zones := DefenseZones.of(self)
-		var n := zones.count() if zones else 0
+		var n := _zones.count() if is_instance_valid(_zones) else 0
 		var zarmed := hud.zone_placement.is_armed()
 		_zone_button.disabled = n >= DefenseZones.MAX_ZONES and not zarmed
 		_zone_button.set_pressed_no_signal(zarmed)
@@ -289,16 +384,17 @@ func _info_for(t: BuildTile) -> Dictionary:
 			"hint": "Click or %s: place the zone centre" % t.hotkey,
 		}
 	var def := t.def
-	var n := hud.manager.count_of(def) if hud.manager else 0
+	var n := _mgr.count_of(def) if _mgr else 0
+	var most := _mgr.max_count_for(def) if _mgr else def.max_count
 	var count := ""
 	if def.station_addon:
-		count = "Station addon: %d of %d bays used" % [hud.manager.used_bays() if hud.manager else 0, BuildingManager.BAY_COUNT]
-		if def.max_count > 0:
-			count += ", %d of %d built" % [n, def.max_count]
-	elif def.max_count > 0:
-		count = "%d of %d built" % [n, def.max_count]
-	elif n > 0:
-		count = "%d built" % n
+		count = "Station addon: %d of %d bays used" % [_mgr.used_bays() if _mgr else 0, _mgr.bay_count if _mgr else 0]
+		if most > 0:
+			count += ", %d of %d built" % [n, most]
+	elif most > 0:
+		count = "%d of %d built" % [n, most]
+	else:
+		count = "%d built, no limit" % n
 	var hire := ""
 	if def.can_hire():
 		hire = "Hires %s: %s cr each, up to %d berths." % [UIUtil.plural(def.hire_role).to_lower(), UIUtil.amount(def.hire_cost_credits), def.max_hires]
@@ -326,6 +422,7 @@ func _info_for(t: BuildTile) -> Dictionary:
 
 func _on_zone_armed(on: bool) -> void:
 	_hint.visible = on or (hud.placement != null and hud.placement.def != null)
+	_sync_visible()
 	if on:
 		_hint_title.text = "PLACING A DEFENCE ZONE"
 		_hint_status.text = ZONE_HINT
@@ -351,6 +448,7 @@ func _on_pressed(def: BuildingDef) -> void:
 
 func _on_armed(def: BuildingDef) -> void:
 	_hint.visible = def != null or (hud.zone_placement != null and hud.zone_placement.is_armed())
+	_sync_visible()
 	if def:
 		_hint_title.text = (("Installing %s" if def.station_addon else "Placing %s") % def.display_name).to_upper()
 		_hint_status.text = _hint_for(def)
@@ -371,3 +469,27 @@ func _on_validity(valid: bool, reason: String) -> void:
 
 static func _hint_for(def: BuildingDef) -> String:
 	return ADDON_HINT if def and def.station_addon else HINT
+
+
+## A group's name, small and vertical, left of its tiles (its tooltip says
+## what the group holds).
+class GroupTag:
+	extends Control
+
+	const FONT_SIZE := 11
+
+	var text := ""
+	var _font: Font
+
+	func _init() -> void:
+		mouse_filter = Control.MOUSE_FILTER_PASS
+		custom_minimum_size = Vector2(14.0, BuildTile.SIZE.y)
+		_font = HudStyle.font("SemiBold", true, false, 1)
+
+	func _draw() -> void:
+		draw_line(Vector2(size.x - 1.0, 4.0), Vector2(size.x - 1.0, size.y - 4.0), HudStyle.HAIRLINE_STRONG, 1.0)
+		var w := _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE).x
+		# Reads bottom to top, centred on the tiles.
+		draw_set_transform(Vector2(size.x * 0.5 + _font.get_ascent(FONT_SIZE) * 0.5 - 1.0, (size.y + w) * 0.5), -PI * 0.5)
+		draw_string(_font, Vector2.ZERO, text, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE, HudStyle.HOLO)
+		draw_set_transform(Vector2.ZERO)

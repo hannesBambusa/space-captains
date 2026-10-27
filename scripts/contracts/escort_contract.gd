@@ -10,6 +10,11 @@ extends Contract
 ## escort near), paid from the player's credits on delivery. Like Majesty's
 ## protect flag. Cancelled automatically when the ward is lost or the mining
 ## contract ends.
+## A third use (F6): the ward is a [MobileStation] flying to its new
+## system; one trip = the whole flight, paid on the founding
+## (MobileStation.finish_convoy). While the convoy is data the ward is
+## null and [member ward_id] holds its save id (saved, linked again when it
+## is built live).
 
 ## Escorts farther than this from their miner at delivery are not paid, metres.
 const PAY_DISTANCE := 3000.0
@@ -17,6 +22,10 @@ const PAY_DISTANCE := 3000.0
 var ward: Ship
 var mining_contract: MiningContract
 var max_escorts: int = 2
+## Save id of a ward that is data now (a mobile station in the jump or in
+## a system not live), 0 = none; [member ward_name] for the rows meanwhile.
+var ward_id: int = 0
+var ward_name: String = ""
 var trips_completed: int = 0
 ## escort Ship -> miner Ship
 var assignments: Dictionary = {}
@@ -111,6 +120,8 @@ func remove_taker(ship: Node) -> void:
 
 
 func get_target_name() -> String:
+	if ward_id != 0 and not is_instance_valid(ward):
+		return ward_name if not ward_name.is_empty() else "?"
 	if ward:
 		return ward.get_display_name() if is_instance_valid(ward) else "?"
 	if mining_contract:
@@ -131,11 +142,24 @@ func get_progress_text() -> String:
 
 
 func get_danger() -> int:
+	if is_instance_valid(ward) and ward is MobileStation:
+		return (ward as MobileStation).route_danger()
 	if mining_contract:
 		return mining_contract.get_danger()
 	if is_instance_valid(ward) and ward.brain and ward.brain.trip and ward.brain.trip.contract:
 		return ward.brain.trip.contract.get_danger()
 	return 1
+
+
+## A mobile station waiting with nobody on its contract.
+func get_warning_text() -> String:
+	if is_instance_valid(ward) and ward is MobileStation and (ward as MobileStation).state == MobileStation.State.WAITING and escorts_of(ward).is_empty():
+		return "No escort: %s is waiting" % ward.get_display_name()
+	return ""
+
+
+func get_warning_hint() -> String:
+	return "Hire mercenaries or raise escort pay" if not get_warning_text().is_empty() else ""
 
 
 func get_site_position(from: Vector3 = Vector3.ZERO) -> Vector3:

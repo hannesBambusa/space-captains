@@ -19,10 +19,10 @@ var _timer := 0.0
 
 
 ## True when [param n] (a planet, moon, cluster, base or gate) may be shown:
-## always at home, else when its name is revealed. Other nodes: true.
+## always in a station system (home, forward), else when its name is revealed. Other nodes: true.
 static func is_revealed(n: Node) -> bool:
 	var w := SystemWorld.of(n)
-	if w == null or w.is_home or w.system_id.is_empty():
+	if w == null or w.has_station or w.system_id.is_empty():
 		return true
 	var key := key_of(n)
 	return key.is_empty() or Sector.is_revealed(w.system_id, key)

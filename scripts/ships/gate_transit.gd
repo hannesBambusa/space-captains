@@ -25,6 +25,9 @@ extends RefCounted
 ## The captain, home building and contract objects stay the same (the dict
 ## links them by save id, SystemHost.known_refs); while the ship is data,
 ## Captain.away_slot keeps its berth and Captain.away_in says where it is.
+## A [MobileStation] (no captain, no brain) takes trips too: its carried
+## escorts go through each portal inside its dict, and after the last hop
+## it takes itself back (MobileStation.on_trip_done, end_transit_data).
 
 enum Phase { UNDOCK, APPROACH, ENTER, ARRIVE, DWELL, PARK }
 
@@ -61,10 +64,12 @@ var _held := false
 # --- Start, save --------------------------------------------------------------
 
 ## Puts [param s] on a trip through [param gate_hops]. Hired ships (a
-## captain and a home) only; null otherwise or when the first gate is not
-## in its system.
+## captain and a home) and mobile stations only; null otherwise or when the
+## first gate is not in its system.
 static func start(s: Ship, gate_hops: PackedStringArray, dwell_time: float = 0.0) -> GateTransit:
-	if s == null or s.dead or s.captain == null or s.brain == null or not is_instance_valid(s.home) or gate_hops.is_empty():
+	if s == null or s.dead or gate_hops.is_empty():
+		return null
+	if not (s is MobileStation) and (s.captain == null or s.brain == null or not is_instance_valid(s.home)):
 		return null
 	if _find_gate(s, gate_hops[0]) == null:
 		return null
@@ -75,7 +80,8 @@ static func start(s: Ship, gate_hops: PackedStringArray, dwell_time: float = 0.0
 	t.speed = s.max_speed
 	t.gate_name = gate_hops[0]
 	s.transit = t
-	s.brain.begin_transit()
+	if s.brain:
+		s.brain.begin_transit()
 	if s.is_docked():
 		t.phase = Phase.UNDOCK
 		s.start_undock()
@@ -228,16 +234,27 @@ func _arrive(dt: float) -> bool:
 
 func _after_arrival() -> void:
 	var w := SystemWorld.of(ship)
+	if hops.is_empty() and ship is MobileStation:
+		_release(true)
+		(ship as MobileStation).on_trip_done()
+		return
 	if not hops.is_empty():
 		wait = dwell
 		_set_phase(Phase.DWELL)
-	elif w and w.is_home:
+	elif w and w.system_id == _home_system_id():
 		_release()
 	elif ship.brain and ship.brain.takes_ship_back():
 		# An explorer at its target: the survey takes over.
 		_release(true)
 	else:
 		_set_phase(Phase.PARK)
+
+
+## The system of the ship's home building (where the brain docks it), home
+## when the building is not live.
+func _home_system_id() -> StringName:
+	var hw := SystemWorld.of(ship.home) if is_instance_valid(ship.home) else null
+	return hw.system_id if hw else ClusterNetwork.HOME_ID
 
 
 func _next_hop() -> void:
@@ -282,6 +299,9 @@ func _jump(g: JumpGate) -> void:
 	RemoteSim.enqueue(d, to_id, gate_name)
 	var to_name := Sector.system_def(to_id).system_name if Sector.system_def(to_id) else String(to_id)
 	EventLog.post("%s jumped through %s" % [ship.get_display_name(), g.def.name], EventLog.Kind.INFO, null, g.global_position)
+	if ship is MobileStation:
+		# Its escorts ride in its dict (ShipCodec): through the portal together.
+		(ship as MobileStation).release_carried("the jump to %s" % to_name)
 	detach(ship, "the jump to %s" % to_name)
 
 
@@ -371,7 +391,8 @@ static func step_data(sim: RemoteSim, sid: StringName, d: Dictionary, dt: float)
 			if not d.has("trip"):
 				if bool(td.get("out", false)):
 					td.erase("out")
-					_after_arrival_data(td)
+					if not MobileStation.end_transit_data(sid, d):
+						_after_arrival_data(td)
 				else:
 					var gd := _gate_def(def, String(td.get("gate", "")))
 					var c := JumpGate.position_for(gd, SimClock.time) if gd else d["position"] as Vector3
@@ -456,6 +477,8 @@ static func arrive_data(sid: StringName, d: Dictionary, exit_gate: String) -> vo
 	td.erase("out")
 	d["transit"] = td
 	st.ships.append(d)
+	if MobileStation.is_mobile(d):
+		MobileStation.on_data_arrival(sid, d)
 
 
 # --- Helpers ------------------------------------------------------------------------

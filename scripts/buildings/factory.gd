@@ -92,8 +92,15 @@ var total_built: int = 0
 var _glow: Array[Dictionary] = []
 
 
+## The Factory of [param ctx]'s system; in a forward station system (no
+## Factory of its own) home's, whose warehouse its Outfitter sells from.
 static func find(ctx: Node) -> Factory:
-	return Building.first_active_service(ctx, GROUP) as Factory
+	var f := Building.first_active_service(ctx, GROUP) as Factory
+	if f == null and ctx and ctx.is_inside_tree():
+		var w := SystemWorld.of(ctx)
+		if w and w.has_station and not w.is_home:
+			f = Building.first_active_service(SystemWorld.home(ctx.get_tree()), GROUP) as Factory
+	return f
 
 
 static func ore_cost(m: ShipModule) -> PackedInt32Array:

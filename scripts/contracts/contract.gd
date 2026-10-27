@@ -28,6 +28,10 @@ var id: int = 0
 var type: Type = Type.MINING
 ## What the contract is about (an asteroid cluster, an enemy, a ship to escort).
 var target: Node3D
+## The system the work is in (ClusterNetwork id; set from the target's
+## system when posted, explore contracts: their from_system). Not saved
+## yet (forward plan F3): a load puts every contract at home.
+var system_id: StringName = ClusterNetwork.HOME_ID
 ## Credits per unit of work (per load, per kill, per trip).
 var reward: int = 0
 var status: Status = Status.OPEN

@@ -6,6 +6,7 @@
 [resource]
 script = ExtResource("1_bdef")
 id = &"explorer_outpost"
+allowed_forward = true
 display_name = "Explorer Outpost"
 short_label = "Explorer Outpost"
 description = "Hangar for long-range scouts. Explorers hired here take explore contracts on jump gates, fly through to the system beyond, survey it and bring the charts home."

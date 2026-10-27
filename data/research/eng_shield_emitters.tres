@@ -13,4 +13,5 @@ cost_iron = 60
 research_time = 90.0
 unlock_modules = Array[StringName]([&"shield_projector_1", &"deflector_1"])
 tags = PackedStringArray("defence")
+benefit = "The first shields: ships take hits before their hull does."
 description = "Compact shield emitters for small hulls. The Factory can make the first shield modules for miners, salvagers and mercenaries."

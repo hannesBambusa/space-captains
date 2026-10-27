@@ -26,7 +26,8 @@ extends RoleEvaluator
 ##              (brave or foolish), they keep the whole bounty
 ##   call       Teamwork at least [constant CALL_TEAMWORK] (or Grudge against
 ##              scavengers) and the free mercs together strong enough
-##              (MercFleet.assess: combined power, not each ship alone):
+##              (MercFleet.assess: combined power, not each ship alone,
+##              with the caller's margin over the need, MercFleet.share_for):
 ##              pay and danger are scored per head of the fleet wanted;
 ##              taking it calls the fleet. Too few free mercs: refused,
 ##              [constant FLEET_SHORT] ("Needs about 5 mercenaries, 3
@@ -133,6 +134,7 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 				e.terms["fleet_text"] = String(a["text"])
 				e.terms["fleet_power"] = float(a["power"])
 				e.terms["fleet_goal"] = float(a["goal"])
+				e.terms["fleet_share"] = float(a["share"])
 				e.terms["fleet_available"] = int(a["available"])
 				e.terms["fleet_estimate"] = int(a["estimate"])
 				e.terms["fleet_size"] = size
@@ -196,7 +198,8 @@ func evaluate_fleet_join(brain: CaptainBrain, fleet: MercFleet) -> Evaluation:
 	var dang := danger_term(brain, bounty.get_danger()) / heads
 	# Combined power: a fleet that covers the need (with this ship) weighs less.
 	var with_me := fleet.power() + MercFleet.power_of(brain.ship)
-	var cover := clampf(MercFleet.target_need(bounty.target) * MercFleet.FLEET_POWER_SHARE / maxf(with_me, 0.1), JOIN_COVER.x, JOIN_COVER.y)
+	var goal := fleet.goal()
+	var cover := clampf(goal / maxf(with_me, 0.1), JOIN_COVER.x, JOIN_COVER.y)
 	dang *= cover
 	var grudge := cap != null and cap.has_trait(CaptainTraits.GRUDGE) and _scavenger_target(bounty)
 	if grudge:
@@ -209,13 +212,13 @@ func evaluate_fleet_join(brain: CaptainBrain, fleet: MercFleet) -> Evaluation:
 		chance += JOIN_PERSONALITY[cap.personality]
 	chance += clampf((pay - 1.0) * 0.05, -0.2, 0.2) - JOIN_PER_KM * km
 	# This ship would make the fleet strong enough to set out.
-	var completes := not fleet.strong_enough() and with_me >= MercFleet.target_need(bounty.target) * MercFleet.FLEET_POWER_SHARE
+	var completes := fleet.is_short() and with_me >= goal
 	if completes:
 		chance += JOIN_COMPLETES
 	e.terms = {"pay": pay, "distance": dist, "danger": dang, "km": km, "join_chance": chance, "join_fleet": true, "loyal": loyal, "noise": noise,
 			"share": fleet.share_for_next(), "heads": heads, "reward": bounty.reward, "danger_level": bounty.get_danger(), "base_danger": bounty.get_danger(),
 			"grudge": grudge, "leader": fleet.leader_name, "cover": cover, "completes": completes, "warp_s": trip.x, "flight_s": trip.y, "pay_div": BOUNTY_PAY_SCALE, "time_div": MERC_TRAVEL_SCALE_S,
-			"covers": with_me / maxf(MercFleet.target_need(bounty.target) * MercFleet.FLEET_POWER_SHARE, 0.1)}
+			"covers": with_me / maxf(goal, 0.1), "fleet_share": fleet.share}
 	_note_wants(e, pay, fleet.share_for_next(), prof.accept_threshold)
 	if RepairBay.should_repair(brain.ship, MIN_HULL):
 		e.reason = NEEDS_REPAIRS

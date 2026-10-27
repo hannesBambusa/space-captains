@@ -11,7 +11,8 @@ extends Ship
 ## takes the pad (one shuttle per pad; the others hold beside the approach
 ## point, or fly round to the other pad when it is free and that beats the
 ## wait), descends onto it, unloads (the ore is credited to the player now,
-## Economy.receive_cargo) and flies back with supplies (cosmetic). The whole
+## Economy.receive_cargo; at a forward station less the hauling fee,
+## StationSupply.take_hauling_fee) and flies back with supplies (cosmetic). The whole
 ## trip is flown in the station's non-rotating "Structures" frame, where the
 ## outposts and the pads stand still: a short hop ([method _route]: straight
 ## lines, bent round the station hub and any structure in the way),
@@ -58,6 +59,7 @@ const OUT_HEIGHT := 12.0
 const BACK_HEIGHT := -6.0
 ## Keep-out circles the route bends round: the station hub (addons, solar
 ## wings) and every structure's footprint plus [constant STRUCTURE_MARGIN], m.
+## HUB_CLEARANCE is the fallback; the station's is HomeStation.hub_clearance.
 const HUB_CLEARANCE := 120.0
 const STRUCTURE_MARGIN := 16.0
 ## Route waypoints sit this much outside a keep-out circle; arc step round it, radians.
@@ -87,7 +89,8 @@ const SWITCH_MARGIN := 8.0
 const LANDING_TIME := 14.0
 const LIFTOFF_TIME := 8.0
 
-## Docking pad index -> the shuttle holding it.
+## Docking pad key ([method _pad_key]: system id and pad index) -> the
+## shuttle holding it. Every station has its own pads.
 static var _pads: Dictionary = {}
 
 var depot: CargoDepot
@@ -96,6 +99,8 @@ var phase: Phase = Phase.PARKED
 var cargo := Economy.zero_ore()
 ## Carrying supplies (cosmetic).
 var supplies: bool = false
+## System of this shuttle's station (cached by [method _pad_key]; shuttles never change systems).
+var _pad_system: StringName = &""
 ## Docking pad in use or headed for (-1 = none).
 var pad: int = -1
 var number: int = 1
@@ -350,7 +355,7 @@ func _fly_to_pad() -> void:
 			phase = Phase.OUTBOUND
 			_set_route(goal, OUT_HEIGHT)
 		return
-	var other := 1 - pad
+	var other := (pad + 1) % maxi(_pad_count(), 1)
 	if not _pad_taken(other) and _route_length(position, _approach_local(other)) / ROUTE_ARC_SPEED + SWITCH_MARGIN < _pad_free_in(pad):
 		# The other pad is free and getting there beats waiting: fly round
 		# the hub to it (held from here on, so the shuttles waiting here do
@@ -418,14 +423,17 @@ func _enter_frame() -> bool:
 func _deliver() -> void:
 	var n := cargo_total()
 	if n > 0:
-		Economy.receive_cargo(cargo, get_display_name())
+		# A forward station: the haulers keep their share (StationSupply).
+		var supply := StationSupply.of(self)
+		var landed := supply.take_hauling_fee(cargo) if supply else cargo
+		Economy.receive_cargo(landed, get_display_name())
 		total_delivered += n
 		show_toast("+%s" % load_text(), TOAST_DELIVERY)
 		if is_instance_valid(home) and home.get_service() is SalvageYard:
 			# Bought ore is held back from Factory auto-sell.
 			var f := Factory.find(self)
 			if f:
-				f.market.hold(cargo)
+				f.market.hold(landed)
 			# Ore the player bought: say that it arrived (mining loads land too often to log).
 			EventLog.post("Ore bought from %s landed at the station: %s" % [home.display_name, load_text()], EventLog.Kind.INFO, self)
 	if depot and is_instance_valid(depot):
@@ -477,12 +485,24 @@ func _station_world() -> Vector3:
 	return sys.home_station.global_position if sys and sys.home_station else Vector3.INF
 
 
+## Docking pads on this system's station (HomeStation.dock_pad_count).
+func _pad_count() -> int:
+	var st := _station()
+	return st.dock_pad_count if st else HomeStation.DOCK_PAD_FALLBACK.size()
+
+
+## Keep-out radius round the station hub (HomeStation.hub_clearance).
+func _hub_clearance() -> float:
+	var st := _station()
+	return st.hub_clearance if st else HUB_CLEARANCE
+
+
 ## Pad [param index] in frame space (its origin).
 func _pad_local(index: int) -> Vector3:
 	var st := _station()
 	var frame := _frame()
 	if st == null or frame == null:
-		return HomeStation.DOCK_PAD_FALLBACK[index]
+		return HomeStation.DOCK_PAD_FALLBACK[clampi(index, 0, HomeStation.DOCK_PAD_FALLBACK.size() - 1)]
 	return frame.to_local(st.to_global(st.dock_pad(index)))
 
 
@@ -506,7 +526,7 @@ func _pick_pad() -> int:
 	var best_d := INF
 	var nearest := 0
 	var nearest_d := INF
-	for i in HomeStation.DOCK_PAD_FALLBACK.size():
+	for i in _pad_count():
 		var d := _route_length(here, _approach_local(i))
 		if d < nearest_d:
 			nearest_d = d
@@ -525,7 +545,7 @@ func _pick_pad() -> int:
 func _pad_free_in(index: int) -> float:
 	if not _pad_taken(index):
 		return 0.0
-	var s := _pads[index] as CargoShuttle
+	var s := _pads[_pad_key(index)] as CargoShuttle
 	match s.phase:
 		Phase.LANDING:
 			return LANDING_TIME * 0.5 + UNLOAD_TIME + LIFTOFF_TIME
@@ -538,20 +558,28 @@ func _pad_free_in(index: int) -> float:
 
 
 func _pad_taken(index: int) -> bool:
-	var s: Variant = _pads.get(index)
+	var s: Variant = _pads.get(_pad_key(index))
 	return s != null and is_instance_valid(s) and s != self and not (s as CargoShuttle).dead
 
 
 func _claim_pad(index: int) -> bool:
 	if index < 0 or _pad_taken(index):
 		return false
-	_pads[index] = self
+	_pads[_pad_key(index)] = self
 	return true
 
 
 func _release_pad() -> void:
-	if pad >= 0 and _pads.get(pad) == self:
-		_pads.erase(pad)
+	if pad >= 0 and _pads.get(_pad_key(pad)) == self:
+		_pads.erase(_pad_key(pad))
+
+
+## [member _pads] key of pad [param index] at this system's station.
+func _pad_key(index: int) -> String:
+	if _pad_system.is_empty():
+		var w := SystemWorld.of(self)
+		_pad_system = w.system_id if w else ClusterNetwork.HOME_ID
+	return "%s/%d" % [_pad_system, index]
 
 
 ## Frame-space waypoints from the approach point onto the pad, nose to the hub.
@@ -573,7 +601,7 @@ func _liftoff_path() -> Array[ShipMover.Waypoint]:
 	var pts: Array[ShipMover.Waypoint] = []
 	pts.append(ShipMover.Waypoint.new(Vector3(p.x, p.y + 9.0, p.z), 4.0, true, -d, 1.0))
 	pts.append(ShipMover.Waypoint.new(Vector3(p.x, p.y + 9.0, p.z) + d * 25.0, 8.0, true, d, 3.0, true))
-	pts.append(ShipMover.Waypoint.new(d * (HUB_CLEARANCE * ROUTE_SLACK + 15.0) + Vector3.UP * (p.y + 9.0), 30.0, false, Vector3.ZERO, 10.0))
+	pts.append(ShipMover.Waypoint.new(d * (_hub_clearance() * ROUTE_SLACK + 15.0) + Vector3.UP * (p.y + 9.0), 30.0, false, Vector3.ZERO, 10.0))
 	return pts
 
 
@@ -650,7 +678,7 @@ func _keepouts() -> PackedVector3Array:
 	var st := _station_world()
 	if frame and st != Vector3.INF:
 		var c := frame.to_local(st)
-		out.append(Vector3(c.x, c.z, HUB_CLEARANCE))
+		out.append(Vector3(c.x, c.z, _hub_clearance()))
 	var mgr := BuildingManager.of(self)
 	if mgr:
 		for b in mgr.buildings:

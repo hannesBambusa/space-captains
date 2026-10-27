@@ -15,4 +15,5 @@ research_time = 240.0
 prerequisites = Array[StringName]([&"pln_bulk_holds"])
 unlock_modules = Array[StringName]([&"ore_hold_3", &"salvage_hold_3"])
 tags = PackedStringArray("economy")
+benefit = "The biggest holds for miners and salvagers."
 description = "Holds that press cargo into dense blocks: Mk III ore and salvage holds."

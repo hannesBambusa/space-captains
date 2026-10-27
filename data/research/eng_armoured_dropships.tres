@@ -14,4 +14,5 @@ cost_crystal = 40
 research_time = 280.0
 prerequisites = Array[StringName]([&"pln_assault_doctrine"])
 tags = PackedStringArray("defence")
+benefit = "Landers survive raiders on the way down to the planets."
 description = "Armoured dropship hulls: landers get 40% more hull and +60 shields, so they survive raiders on the way to the planets."

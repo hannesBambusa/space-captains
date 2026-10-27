@@ -2,8 +2,11 @@ class_name HUD
 extends CanvasLayer
 ## Game HUD root. Finds the world-side controllers by group and hands itself
 ## to each widget. Tab toggles the system overview; H (or the top bar's
-## HOME button) flies the camera to the home station, or takes the view
-## home while another system is viewed;
+## HOME button) flies the camera to the home station and selects it (the
+## build bar shows for a selected station), or takes the view home while
+## another system is viewed (and selects it there);
+## Shift+1 views home, Shift+2 and Shift+3 the forward stations' systems
+## (ForwardStations.ids order);
 ## M (or the top bar's MAP button) opens the cluster map ([ClusterMap]);
 ## N cycles the ship markers (see [ShipMarkers]).
 ## L (or a click on the top bar's credits) opens the ledger ([LedgerPanel]).
@@ -15,10 +18,15 @@ extends CanvasLayer
 ## Views (ViewManager): [member solar_system] and [member camera] are the
 ## viewed system's, rebound on every switch ([signal view_rebound] for the
 ## widgets that keep signal links); [member manager] stays home's (the
-## economy, the pilots and the build menu are global). Outside home the
-## build menu is hidden and placement cancelled (no station there). The
-## top bar's system name opens the system menu. [method focus] switches
-## the view to the system of what it focuses on.
+## tutorial, research, the Science Lab); [method local_manager] is the
+## viewed system's (home's or a forward station's), what the build menu,
+## the overview's structures and placement use. In a system without a
+## station the build menu is hidden and placement cancelled. The pilot list
+## and the contract strip list every system, home first, the others tagged
+## "[Ostra]" ([method system_tag]). The top bar's system name opens the
+## system menu (stations marked). A click on a forward station opens the
+## [StationPanel]. [method focus] switches the view to the system of what
+## it focuses on.
 
 ## After a view switch, once [member solar_system] and [member camera] point
 ## at the new system.
@@ -51,10 +59,14 @@ var zone_panel: ZonePanel
 var planet_panel: PlanetPanel
 ## Built in code: the selected jump gate (explore contracts).
 var gate_panel: GatePanel
+## Built in code: the selected forward station.
+var station_panel: StationPanel
 ## Built in code: the pilot list under the minimap.
 var pilots: PilotColumn
 ## Built in code: posted contracts, bottom left above the event feed.
 var contracts: ContractStrip
+## Built in code: funded research, bottom left above the contract list.
+var research: ResearchList
 ## Built in code: the first-time tutorial and its card (top left, right of
 ## the left panel).
 var tutorial: Tutorial
@@ -70,6 +82,8 @@ const EDGE := 12.0
 const GAP := 8.0
 const SCROLLBAR_ROOM := 12.0
 var _layout_left := 0.0
+## H / HOME from another system: select the home station once home is on screen.
+var _select_home_on_view := false
 
 
 func _ready() -> void:
@@ -120,6 +134,18 @@ func _ready() -> void:
 	gate_panel.offset_bottom = -12.0
 	gate_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	gate_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	station_panel = StationPanel.new()
+	station_panel.name = "StationPanel"
+	$Root.add_child(station_panel)
+	$Root.move_child(station_panel, gate_panel.get_index() + 1)
+	for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+		station_panel.set_anchor(side, 1.0)
+	station_panel.offset_left = -392.0
+	station_panel.offset_top = -12.0
+	station_panel.offset_right = -12.0
+	station_panel.offset_bottom = -12.0
+	station_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	station_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	pilots = PilotColumn.new()
 	pilots.name = "Pilots"
 	$Root.add_child(pilots)
@@ -129,6 +155,10 @@ func _ready() -> void:
 	contracts.name = "Contracts"
 	$Root.add_child(contracts)
 	$Root.move_child(contracts, event_feed.get_index())
+	research = ResearchList.new()
+	research.name = "Research"
+	$Root.add_child(research)
+	$Root.move_child(research, contracts.get_index())
 	tutorial = Tutorial.new()
 	tutorial.name = "Tutorial"
 	add_child(tutorial)
@@ -145,6 +175,7 @@ func _ready() -> void:
 	zone_panel.setup(self)
 	planet_panel.setup(self)
 	gate_panel.setup(self)
+	station_panel.setup(self)
 	captain_panel.setup(self)
 	target_panel.setup(self)
 	event_feed.setup(self)
@@ -160,6 +191,10 @@ func _ready() -> void:
 		view_manager.view_changed.connect(_on_view_changed)
 	top_bar.research_pressed.connect(select_lab)
 	contracts.setup(self)
+	research.setup(self)
+	# Placed at once when it shows or grows, not on the next layout tick.
+	research.visibility_changed.connect(_layout_bottom_left, CONNECT_DEFERRED)
+	research.minimum_size_changed.connect(_layout_bottom_left, CONNECT_DEFERRED)
 	ledger = LedgerPanel.new()
 	ledger.name = "Ledger"
 	$Root.add_child(ledger)
@@ -176,7 +211,7 @@ func _ready() -> void:
 	_layout_right.call_deferred()
 	if selection:
 		selection.selection_changed.connect(func(t: Node3D) -> void:
-			marker.select_target = t if (t is Building or t is Ship or t is ScavengerDen or t is ScrapField) else null)
+			marker.select_target = t if (t is Building or t is Ship or t is ScavengerDen or t is ScrapField or t is HomeStation) else null)
 
 
 func _process(delta: float) -> void:
@@ -189,7 +224,7 @@ func _process(delta: float) -> void:
 
 ## The bottom-right selection panels (the Factory and Science Lab panels once they exist).
 func selection_panels() -> Array[PanelContainer]:
-	var out: Array[PanelContainer] = [building_panel, belt_panel, captain_panel, target_panel, zone_panel, planet_panel, gate_panel]
+	var out: Array[PanelContainer] = [building_panel, belt_panel, captain_panel, target_panel, zone_panel, planet_panel, gate_panel, station_panel]
 	if building_panel and is_instance_valid(building_panel.factory_panel) and building_panel.factory_panel.is_inside_tree():
 		out.append(building_panel.factory_panel)
 	if building_panel and is_instance_valid(building_panel.lab_panel) and building_panel.lab_panel.is_inside_tree():
@@ -235,7 +270,8 @@ func _layout_right() -> void:
 
 
 ## Bottom left: the event feed at the bottom (room for its full height kept,
-## so nothing jumps), the contract list above it, the left panel above both.
+## so nothing jumps), the contract list above it, the research list above
+## that, the left panel above them all.
 func _layout_bottom_left() -> void:
 	var root := $Root as Control
 	var vp := root.size
@@ -247,10 +283,17 @@ func _layout_bottom_left() -> void:
 		contracts.position = Vector2(EDGE, bottom - h)
 		contracts.size = Vector2(contracts.width, h)
 		used = h + GAP
+	if research.visible:
+		var h := research.get_combined_minimum_size().y
+		research.position = Vector2(EDGE, bottom - used - h)
+		research.size = Vector2(research.width, h)
+		used += h + GAP
 	var margin := vp.y - bottom + used + 4.0
 	if absf(overview.bottom_margin - margin) > 0.5:
 		overview.bottom_margin = margin
 		overview._fit_height()
+	# The tutorial card sits right of the left panel, whose width follows the window.
+	tutorial_card.position.x = overview.position.x + overview.panel_width + EDGE
 
 
 ## The ScrollContainer around a selection panel's content (made on first use).
@@ -292,6 +335,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	elif k and k.pressed and not k.echo and k.physical_keycode == KEY_H and not (k.ctrl_pressed or k.meta_pressed or k.alt_pressed):
 		fly_home()
 		get_viewport().set_input_as_handled()
+	elif k and k.pressed and not k.echo and k.shift_pressed and k.physical_keycode >= KEY_1 and k.physical_keycode <= KEY_3 \
+			and not (k.ctrl_pressed or k.meta_pressed or k.alt_pressed):
+		view_station(k.physical_keycode - KEY_1)
+		get_viewport().set_input_as_handled()
 	elif k and k.pressed and not k.echo and k.physical_keycode == KEY_M and not (k.ctrl_pressed or k.meta_pressed or k.alt_pressed):
 		cluster_map.toggle()
 		get_viewport().set_input_as_handled()
@@ -300,21 +347,40 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
-## Flies the camera to the home station and follows it (its focus distance),
-## like a double click on it.
-## Selects the Science Lab (the top bar's research box).
+## Selects the Science Lab (the top bar's research box, the research
+## list); from another system the view goes home first.
 func select_lab() -> void:
-	var lab := ScienceLab.find(self)
-	if lab and selection:
+	var lab := ScienceLab.find(SystemWorld.home(get_tree()))
+	if lab and selection and show_system_of(lab.building):
 		selection.select(lab.building)
 
 
+## Flies the camera to the home station and follows it, keeping the zoom
+## (distance, so the tilt) and turn it has, and selects it. From another
+## system the view goes home first, then the same with home's camera.
 func fly_home() -> void:
 	if not is_home_view():
+		_select_home_on_view = true
 		view_manager.view_home()
 		return
+	_focus_home_station()
+	select_station()
+
+
+func _focus_home_station() -> void:
 	if camera and solar_system and is_instance_valid(solar_system.home_station):
-		camera.focus_on(solar_system.home_station)
+		camera.focus_on(solar_system.home_station, camera.get_distance())
+
+
+## Selects the viewed system's station (its [HomeStation] node), the one
+## the build bar is for. False without one.
+func select_station() -> bool:
+	var mgr := local_manager()
+	var st := mgr.station_node() if mgr else null
+	if st == null or selection == null:
+		return false
+	selection.select(st)
+	return true
 
 
 # --- Views ----------------------------------------------------------------------
@@ -324,9 +390,67 @@ func is_home_view() -> bool:
 	return view_manager == null or view_manager.viewed == null or view_manager.viewed == view_manager.home
 
 
-## The viewed system's buildings (null outside home).
+## The viewed system's buildings: home's, or a forward station's (null in
+## a system without a station).
 func local_manager() -> BuildingManager:
-	return manager if is_home_view() else null
+	if is_home_view():
+		return manager
+	var w := view_manager.viewed
+	return w.buildings if is_instance_valid(w) and w.has_station else null
+
+
+## The viewed system has a station (home, or a forward station).
+func viewing_station() -> bool:
+	return is_home_view() or (is_instance_valid(view_manager.viewed) and view_manager.viewed.has_station)
+
+
+## Home first, then the forward stations' systems.
+func station_ids() -> Array[StringName]:
+	var out: Array[StringName] = [ClusterNetwork.HOME_ID]
+	var fs := ForwardStations.of(get_tree())
+	if fs:
+		out.append_array(fs.ids())
+	return out
+
+
+## Shift+1..3: the view goes to station system [param index] (0 = home).
+func view_station(index: int) -> void:
+	var ids := station_ids()
+	if index < 0 or index >= ids.size() or view_manager == null:
+		return
+	if ids[index] == view_manager.viewed_id():
+		fly_home()
+		return
+	view_manager.view(ids[index])
+
+
+## "[Ostra]" for a node, captain or contract outside home, "" at home.
+static func system_tag(system_id: StringName) -> String:
+	return EventLog.tag(system_id)
+
+
+## [param list] grouped by system, home first (the order inside a system kept).
+func contracts_by_system(list: Array[Contract]) -> Array[Contract]:
+	var buckets := {}
+	for c in list:
+		var r := system_rank(c.system_id)
+		if not buckets.has(r):
+			buckets[r] = []
+		(buckets[r] as Array).append(c)
+	var ranks := buckets.keys()
+	ranks.sort()
+	var out: Array[Contract] = []
+	for r: int in ranks:
+		for c: Contract in buckets[r]:
+			out.append(c)
+	return out
+
+
+## Sort rank of [param system_id] for lists grouped by system: home 0,
+## then the forward stations in order, then the rest.
+func system_rank(system_id: StringName) -> int:
+	var i := station_ids().find(system_id)
+	return i if i >= 0 else 99
 
 
 ## Camera to [param n] (its focus distance, or [param distance]); first
@@ -357,12 +481,19 @@ func _fill_system_menu() -> void:
 	if view_manager == null:
 		return
 	var items := []
+	var stations := station_ids()
 	for id in view_manager.viewable_ids():
 		var note := ""
-		if id != ClusterNetwork.HOME_ID:
+		var at := stations.find(id)
+		if id == ClusterNetwork.HOME_ID:
+			note = "station (H, Shift+1)"
+		elif at > 0:
+			var st := Sector.state(id)
+			note = "station: %s (Shift+%d)" % [String(st.station.get("name", "?")) if st else "?", at + 1]
+		else:
 			# "danger ? (2 jumps out)" or "danger 3 · seen 12 min ago".
 			note = Sector.danger_text(id)
-		items.append({"id": id, "name": view_manager.system_name(id), "note": note, "current": id == view_manager.viewed_id()})
+		items.append({"id": id, "name": view_manager.system_name(id), "note": note, "current": id == view_manager.viewed_id(), "station": at >= 0})
 	top_bar.set_system_list(items)
 
 
@@ -371,12 +502,18 @@ func _on_view_changed(w: SystemWorld) -> void:
 		return
 	solar_system = w.sys
 	camera = w.camera
-	var home := is_home_view()
-	if placement and not home:
+	# Placement and zone placement follow the view themselves (they go on
+	# in a station system, see PlacementController and ZonePlacement).
+	var station := w.has_station
+	if placement and not station:
 		placement.cancel()
-	if zone_placement and not home:
+	if zone_placement and not station:
 		zone_placement.cancel()
-	build_menu.visible = home
+	# The build bar shows for a selected station (the switch deselects).
+	if _select_home_on_view and w.is_home:
+		_focus_home_station.call_deferred()
+		select_station.call_deferred()
+	_select_home_on_view = false
 	if solar_system and solar_system.system_def:
 		top_bar.set_system_name(solar_system.system_def.system_name)
 	view_rebound.emit(w)

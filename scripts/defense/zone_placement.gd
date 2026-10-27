@@ -9,6 +9,9 @@ extends Node3D
 ## right-click or Escape cancels. Arming one placement mode cancels the
 ## other. Zones are areas ships fly through, so the station keep-outs and
 ## structure gaps do not apply; only the zone limit and the system edge do.
+## Works in every system with a station (the viewed system's zones and
+## station); a view switch while armed re-arms there, or cancels in a
+## system without a station.
 
 signal armed_changed(on: bool)
 signal validity_changed(valid: bool, reason: String)
@@ -42,7 +45,12 @@ func _ready() -> void:
 	set_process(false)
 	var vm := ViewManager.of(get_tree())
 	if vm:
-		vm.view_changed.connect(func(_w: SystemWorld) -> void: cancel())
+		vm.view_changed.connect(func(w: SystemWorld) -> void:
+			if not armed:
+				return
+			cancel()
+			if is_instance_valid(w) and w.has_station:
+				arm())
 	var pc := get_tree().get_first_node_in_group(PlacementController.GROUP) as PlacementController
 	if pc:
 		pc.armed_changed.connect(func(d: BuildingDef) -> void:

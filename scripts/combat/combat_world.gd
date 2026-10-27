@@ -6,9 +6,14 @@ extends Node3D
 ## station shield bubbles the tracers test against. Also the hub for
 ## combat events the UI listens to (spawns, deaths, scrap fields).
 ## Lives in scenes/system.tscn; every lookup is null-safe so scenes without
-## it (the sector prototype) still run. Outside home ([member is_home]
-## false: remote systems, previews) only the pools and scrap exist: no raid
-## or threat director, claims, defence zones or alarm (all null).
+## it (the sector prototype) still run. In a system without a station
+## ([member has_station] false: remote systems, previews) only the pools and
+## scrap exist: no raid or threat director, defence zones or alarm (all
+## null). Planet claims and gate raids are home's only ([member is_home]).
+## At a forward station (F4) the raid director counts from the founding
+## (RaidDirector.start_offset), sends its first raid after
+## [member forward_raid_grace] with waves from the system's danger, and the
+## threat director brings no new bases (ThreatDirector.arrivals off).
 
 signal combatant_spawned(node: Node3D)
 ## A ship or den died. [param killer] may be null.
@@ -23,6 +28,8 @@ const GROUP := "combat_world"
 ## Sim seconds a scrap field lasts (ships / dens).
 @export var ship_scrap_life: float = 180.0
 @export var den_scrap_life: float = 420.0
+## A forward station's first raid: this long after its founding, sim seconds.
+@export var forward_raid_grace: float = 600.0
 
 var projectiles: ProjectilePool
 var fx: CombatFx
@@ -40,6 +47,8 @@ var scrap_root: Node3D
 var shields: Array[StationShield] = []
 ## In the player's home system (set from its SystemWorld when ready).
 var is_home := true
+## In a system with a station (home or forward, SystemWorld.has_station).
+var has_station := true
 
 
 ## The combat world of [param n]'s system (see [method SystemWorld.of]).
@@ -71,23 +80,33 @@ func _ready() -> void:
 	add_child(scrap_root)
 	var w := SystemWorld.of(self)
 	is_home = w == null or w.is_home
-	if not is_home:
+	has_station = w == null or w.has_station
+	if not has_station:
 		return
 	raids = RaidDirector.new()
 	raids.name = "RaidDirector"
-	add_child(raids)
 	threats = ThreatDirector.new()
 	threats.name = "ThreatDirector"
+	if not is_home and w:
+		raids.start_offset = float(w.station_site.get("founded_at", SimClock.time))
+		raids.first_raid_time = forward_raid_grace
+		var def := Sector.system_def(w.system_id)
+		raids.danger = def.danger if def else 1
+		threats.arrivals = false
+	add_child(raids)
 	add_child(threats)
-	claims = PlanetClaims.new()
-	claims.name = "PlanetClaims"
-	add_child(claims)
+	if is_home:
+		claims = PlanetClaims.new()
+		claims.name = "PlanetClaims"
+		add_child(claims)
 	zones = DefenseZones.new()
 	zones.name = "DefenseZones"
 	add_child(zones)
 	alarm = ColonyAlarm.new()
 	alarm.name = "ColonyAlarm"
 	add_child(alarm)
+	if not is_home:
+		return
 	gate_raids = GateRaidSource.new()
 	gate_raids.name = "GateRaidSource"
 	add_child(gate_raids)

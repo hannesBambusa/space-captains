@@ -6,11 +6,15 @@
 [resource]
 script = ExtResource("1_bdef")
 id = &"factory"
+allowed_forward = true
 display_name = "Factory"
 short_label = "Factory"
-description = "Corporate foundry and module works, the station addon in bay 1 from the start. Buys your iron, titanium and crystal at a price that floats with its demand, and makes the modules captains buy at the Outfitter: Mk I from iron, Mk II from titanium, Mk III from crystal."
+description = "Corporate foundry and module works, the station addon in bay 1 from the start (a forward station can build its own). Buys your iron, titanium and crystal at a price that floats with its demand, and makes the modules captains buy at the Outfitter: Mk I from iron, Mk II from titanium, Mk III from crystal."
 model_path = "res://assets/models/station/addons/addon_factory.glb"
-build_time = 1.0
+cost_credits = 1200
+cost_iron = 200
+cost_titanium = 40
+build_time = 30.0
 footprint_radius = 22.0
 max_count = 1
 placeholder_tint = Color(1, 0.62, 0.3, 1)

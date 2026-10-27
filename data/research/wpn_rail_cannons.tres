@@ -14,4 +14,5 @@ cost_titanium = 40
 research_time = 180.0
 unlock_modules = Array[StringName]([&"autocannon_2"])
 tags = PackedStringArray("weapons")
+benefit = "A stronger autocannon: harder hits from further away."
 description = "Magnetic rails on the autocannon barrel: the Mk II autocannon hits harder and reaches further."

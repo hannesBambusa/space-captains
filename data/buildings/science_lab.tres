@@ -6,6 +6,7 @@
 [resource]
 script = ExtResource("1_bdef")
 id = &"science_lab"
+allowed_forward = false
 display_name = "Science Lab"
 short_label = "Science Lab"
 description = "Station addon: research labs. Hire up to 3 researchers and fund projects; the researchers pick what they work on by field and personality. Research unlocks new modules for the Factory and new buildings."

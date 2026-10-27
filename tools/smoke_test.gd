@@ -20,6 +20,36 @@ extends Node
 ## --long (P4): at least [constant LONG_MINUTES] sim minutes on the fixed
 ## network seed [constant LONG_SEED] (systems two jumps out that can raid
 ## home), then a "SMOKE long" block with the gate raids (GateRaidSource).
+## --forward (F1): at minute 1 a forward station on Ostra (s1,
+## ForwardStations.debug_found), a Mining Outpost there, two miners and a
+## mining contract on the s1 cluster nearest it; the view stays home. The
+## run steps every world itself to time them (ms per 0.1 s step, home vs
+## forward), then a few real frames; prints a "SMOKE forward" block, with
+## the forward miners' states and deaths and a check that no captain works
+## another system's contract (fails the run). The network seed is fixed
+## ([constant FORWARD_SEED]: a near cluster, no bases in the way).
+## --forward --save-roundtrip (F3): at minute [constant ROUNDTRIP_MINUTE]
+## GameSnapshot.capture to memory (through var_to_bytes like a save file),
+## SaveManager.load_snapshot (the load path, no file), then the rest of the
+## run; buildings, captains and contracts per system must match, forward ore
+## must keep rising (fails the run otherwise).
+## --forward --long (F4): [constant FORWARD_LONG_MINUTES]+ sim minutes on
+## [constant FORWARD_LONG_SEED] (Ostra with a base), plus a Mercenary
+## Outpost and a merc there and a defence zone over the station; at
+## minute [constant FORWARD_REFILL_MINUTE] water is topped up when the
+## station ran dry. Prints the forward raids (after the grace),
+## alarms, zone fights, upkeep, water, the hauling fee, berths after deaths
+## (forward and home) and the station's feed lines. Every --forward run
+## gets [constant FORWARD_WATER] water at the founding.
+## --colony (F6, with or without --forward): no debug founding. Forward
+## operations researched by script, Ostra and a second target charted, two
+## mercenaries, then two Forward Stations built at home one after the
+## other: the first flies to an Ostra planet with Ostra viewed (live), the
+## second to the other target with the view at home (as data, the ambush
+## rolls). Saves to memory and reloads while parked, while waiting for an
+## escort and in transit. Prints the build, wait, flight and found times,
+## the hops, the escort and convoy feed lines, the stations live; fails
+## when one is not founded or a reload changed the convoy.
 ## The default run never touches them.
 
 const SEED := 12345
@@ -29,6 +59,19 @@ const EXPLORE_MAX := 2400.0
 ## --long: the network seed and the shortest run, sim minutes.
 const LONG_SEED := 3
 const LONG_MINUTES := 40.0
+## --forward --save-roundtrip: the sim minute the game is saved to memory
+## and loaded back.
+const ROUNDTRIP_MINUTE := 5
+## --forward: the network seed (--net-seed=N overrides it, for sweeps).
+const FORWARD_SEED := 24
+## --forward --long: the network seed (a base in Ostra) and the shortest run.
+const FORWARD_LONG_SEED := 7
+const FORWARD_LONG_MINUTES := 26.0
+## The forward feed lines the report keeps (threat, supply, losses).
+const FW_FEED_WORDS: PackedStringArray = ["aid", "water", "Upkeep", "under attack", "entered", "was lost", "ejected", "fleeing", "destroyed"]
+## Water given at the founding, and the minute a dry station gets more (--long).
+const FORWARD_WATER := 40
+const FORWARD_REFILL_MINUTE := 20
 const STALL_TIME := 3.0
 const MAX_REAL_TIME := 300.0
 
@@ -36,6 +79,10 @@ var minutes: float = 10.0
 var multi := false
 var explore := false
 var long_run := false
+var forward := false
+var save_roundtrip := false
+var colony := false
+var net_seed := -1
 var _multi: PackedStringArray = []
 
 var _seeded := 0
@@ -89,6 +136,14 @@ func _ready() -> void:
 			explore = true
 		elif a == "--long":
 			long_run = true
+		elif a == "--forward":
+			forward = true
+		elif a == "--save-roundtrip":
+			save_roundtrip = true
+		elif a == "--colony":
+			colony = true
+		elif a.begins_with("--net-seed="):
+			net_seed = a.trim_prefix("--net-seed=").to_int()
 	_log = SmokeLogger.new()
 	OS.add_logger(_log)
 	seed(SEED)
@@ -131,7 +186,18 @@ func _run() -> void:
 		print("SMOKE FAIL: no home system")
 		tree.quit(1)
 		return
-	if long_run:
+	if colony:
+		Sector.start(net_seed if net_seed >= 0 else FORWARD_SEED)
+		_setup()
+		var why_c := await _colony_run()
+		_colony_print()
+		_finish(Time.get_ticks_msec() - t0, why_c)
+		return
+	if forward:
+		Sector.start(net_seed if net_seed >= 0 else FORWARD_LONG_SEED if long_run else FORWARD_SEED)
+		if long_run:
+			minutes = maxf(minutes, FORWARD_LONG_MINUTES)
+	elif long_run:
 		Sector.start(LONG_SEED)
 		minutes = maxf(minutes, LONG_MINUTES)
 	_setup()
@@ -157,14 +223,31 @@ func _run() -> void:
 	while left > 0.0:
 		if multi:
 			_multi_step(minute)
-		left -= SimStepper.run(tree, minf(60.0, left))
+		if forward:
+			if save_roundtrip and minute == ROUNDTRIP_MINUTE:
+				await _forward_roundtrip()
+			if minute == 1:
+				_forward_setup()
+				for i in 5:
+					await tree.process_frame
+				_forward_hire()
+			if long_run and minute == FORWARD_REFILL_MINUTE:
+				_forward_refill()
+			left -= _forward_run(minf(60.0, left))
+		else:
+			left -= SimStepper.run(tree, minf(60.0, left))
 		minute += 1
 		await tree.process_frame
 	if multi:
 		_multi_report()
-	if long_run:
+	if forward:
+		await _forward_report()
+	if long_run and not forward:
 		_long_report()
-	_finish(Time.get_ticks_msec() - t0)
+	var why := "%d trip checks on another system's contract" % _fw_wrong if _fw_wrong > 0 else ""
+	if save_roundtrip and not _rt_ok:
+		why = "save round trip changed the game (see SMOKE forward reload)"
+	_finish(Time.get_ticks_msec() - t0, why)
 
 
 func _finish(ms: int, why: String = "") -> void:
@@ -187,8 +270,8 @@ func _process(delta: float) -> void:
 		_stall += delta
 	if _stall > STALL_TIME:
 		_finish(int(_real * 1000.0), "run stopped after a script error")
-	elif _real > MAX_REAL_TIME:
-		_finish(int(_real * 1000.0), "timed out after %.0f s" % MAX_REAL_TIME)
+	elif _real > MAX_REAL_TIME * (2.0 if colony else 1.0):
+		_finish(int(_real * 1000.0), "timed out after %.0f s" % (MAX_REAL_TIME * (2.0 if colony else 1.0)))
 
 
 ## Outposts, crews and a mining contract so the run has traffic.
@@ -296,6 +379,664 @@ func _long_report() -> void:
 		src.append("%s (danger %d, %d jumps, via %s)" % [Sector.system_def(c["id"]).system_name, int(c["danger"]), int(c["jumps"]), c["gate"]])
 	print("SMOKE long seed      %d, sources: %s" % [LONG_SEED, ", ".join(src) if not src.is_empty() else "-"])
 	print("SMOKE long gate raids %s" % g.summary())
+
+
+# --- Forward station (F1) ----------------------------------------------------
+
+const FORWARD_ID := &"s1"
+var _fw: SystemWorld
+var _fw_outpost: Building
+var _fw_notes: PackedStringArray = []
+var _fw_miners: Array[Ship] = []
+var _fw_deaths: PackedStringArray = []
+## Trip checks per system, and the ones on another system's contract.
+var _fw_trips := {}
+var _fw_wrong := 0
+var _fw_wrong_first := ""
+## Stepping time per bucket ("home", "forward", "other"), usec, and steps.
+var _fw_usec := {}
+var _fw_steps := 0
+## F4: forward raids launched, alarm sites seen, feed lines of the station
+## system, the zone, the most raiders seen in it, the merc.
+var _fw_raids: PackedStringArray = []
+var _fw_alarms := {}
+var _fw_feed: PackedStringArray = []
+var _fw_zone: DefenseZone
+var _fw_zone_peak := 0
+var _fw_merc: Ship
+var _fw_refill := ""
+
+
+func _forward_setup() -> void:
+	_fw = ForwardStations.debug_found(get_tree(), FORWARD_ID)
+	if _fw == null:
+		_fw_notes.append("found failed")
+		return
+	var site := _fw.station_site
+	_fw_notes.append("seed %d, founded %s on %s at %s" % [Sector.get_seed(), site.get("name", "?"), site.get("planet", "?"), Fmt.clock(SimClock.time)])
+	Economy.add(0, PackedInt32Array([0, 0, 0, 0, FORWARD_WATER]), Ledger.OTHER, "Smoke test water")
+	_fw_bind()
+	EventLog.posted.connect(func(e: Dictionary) -> void:
+		var tr := e.get("target") as WeakRef
+		var t := tr.get_ref() as Node if tr else null
+		var text := String(e.get("text", ""))
+		if is_instance_valid(t) and is_instance_valid(_fw) and SystemWorld.of(t) == _fw and _fw_keeps(text):
+			_fw_feed.append("%s %s" % [Fmt.clock(SimClock.time), text]))
+
+
+func _fw_keeps(text: String) -> bool:
+	for w in FW_FEED_WORDS:
+		if text.contains(w):
+			return true
+	return false
+
+
+## Signal links to the forward world (again after a reload).
+func _fw_bind() -> void:
+	var raids := _fw.combat.raids if is_instance_valid(_fw) and _fw.combat else null
+	if raids:
+		raids.raid_started.connect(func(_d: Node, size: int) -> void: _fw_raids.append("%s x%d" % [Fmt.clock(SimClock.time), size]))
+
+
+## --long: a dry station gets water again (the restored line).
+func _forward_refill() -> void:
+	var sup := _fw.supply if is_instance_valid(_fw) else null
+	if sup == null or not sup.dry:
+		_fw_refill = "not dry at %s, no refill" % Fmt.clock(SimClock.time)
+		return
+	Economy.add(0, PackedInt32Array([0, 0, 0, 0, 30]), Ledger.OTHER, "Smoke test water")
+	_fw_refill = "dry at %s: +30 water" % Fmt.clock(SimClock.time)
+
+
+func _forward_hire() -> void:
+	var mgr := _fw.buildings if _fw else null
+	if mgr == null or not mgr.has_zone():
+		_fw_notes.append("no forward BuildingManager")
+		return
+	var def := mgr.def_by_id(&"mining_outpost")
+	_fw_outpost = _spawn_near_station(mgr, def) if def else null
+	if _fw_outpost == null:
+		_fw_notes.append("could not place the outpost")
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = SEED + 2
+	_fw_outpost.captain_rng = rng
+	var hired := 0
+	for i in 2:
+		var s := _fw_outpost.hire()
+		if s:
+			hired += 1
+			_fw_miners.append(s)
+			s.destroyed.connect(func(_s: Ship, killer: Node3D) -> void:
+				_fw_deaths.append("%s at %s by %s" % [s.captain.captain_name if s.captain else "?", Fmt.clock(SimClock.time),
+						killer.get_display_name() if killer is Ship else String(killer.name) if killer else "-"]))
+	var sys := _fw.sys
+	var station := sys.home_station.global_position
+	var best: AsteroidCluster = null
+	for c in sys.belts:
+		if best == null or c.global_position.distance_to(station) < best.global_position.distance_to(station):
+			best = c
+	var mc := ContractBoard.post_mining(best, 40) if best else null
+	_fw_notes.append("outpost %s, %d miners, contract %s (%s, %.1f km)" % [_fw_outpost.display_name, hired, mc.get_title() if mc else "none",
+			mc.system_id if mc else &"-", best.global_position.distance_to(station) / 1000.0 if best else 0.0])
+	if not long_run:
+		return
+	var md := mgr.def_by_id(&"mercenary_outpost")
+	var mo := _spawn_near_station(mgr, md) if md else null
+	if mo:
+		mo.captain_rng = rng
+		_fw_merc = mo.hire()
+	var zones := _fw.combat.zones if _fw.combat else null
+	if zones:
+		_fw_zone = zones.place(station, 3000.0)
+		if _fw_zone:
+			zones.set_kill_bounty(_fw_zone, 50)
+			zones.add_budget(_fw_zone, 500)
+	_fw_notes.append("merc %s, zone %s" % [_fw_merc.captain.captain_name if _fw_merc else "none", _fw_zone.zone_name if _fw_zone else "none"])
+
+
+## SimStepper.run with the time of each step split by system.
+func _forward_run(seconds: float) -> float:
+	var tree := get_tree()
+	var home_vp := SystemWorld.home(tree).get_viewport()
+	var fw_vp := _fw.get_viewport() if is_instance_valid(_fw) else null
+	var done := 0.0
+	while done < seconds:
+		var h := minf(0.1, seconds - done)
+		SimClock.advance(h)
+		var t := Time.get_ticks_usec()
+		for w in SystemWorld.all(tree):
+			if w.sys:
+				w.sys.update_bodies(SimClock.time)
+		_fw_add("other", t)
+		for g in [Ship.GROUP, SimStepper.GROUP]:
+			for n in tree.get_nodes_in_group(g):
+				if not is_instance_valid(n) or n.is_queued_for_deletion():
+					continue
+				t = Time.get_ticks_usec()
+				n.call(&"sim_step", h)
+				var vp := n.get_viewport() if n.is_inside_tree() else null
+				_fw_add("home" if vp == home_vp else "forward" if vp == fw_vp and fw_vp else "other", t)
+		_fw_steps += 1
+		if _fw_steps % 10 == 0:
+			_fw_check_systems()
+			_fw_watch()
+		done += h
+	return done
+
+
+## F2: a captain on a trip works a contract of its own system only.
+func _fw_check_systems() -> void:
+	for n in get_tree().get_nodes_in_group(Ship.GROUP):
+		var s := n as Ship
+		if s == null or s.dead or s.brain == null or not (s.brain is CaptainBrain) or s.transit:
+			continue
+		var tr := (s.brain as CaptainBrain).trip
+		if tr == null or tr.contract == null or tr.contract is ExploreContract:
+			continue
+		var here := (s.brain as CaptainBrain).system_id()
+		_fw_trips[here] = int(_fw_trips.get(here, 0)) + 1
+		if tr.contract.system_id != here:
+			_fw_wrong += 1
+			if _fw_wrong_first.is_empty():
+				_fw_wrong_first = "%s in %s on %s (%s)" % [s.get_display_name(), here, tr.contract.get_title(), tr.contract.system_id]
+
+
+## F4: alarm sites and raiders in the zone, sampled.
+func _fw_watch() -> void:
+	var alarm := _fw.combat.alarm if is_instance_valid(_fw) and _fw.combat else null
+	if alarm:
+		for k in alarm.alarms:
+			if not _fw_alarms.has(k):
+				_fw_alarms[k] = String((alarm.alarms[k] as Dictionary).get("name", "?"))
+	if is_instance_valid(_fw_zone):
+		_fw_zone_peak = maxi(_fw_zone_peak, _fw_zone.raiders_inside)
+
+
+func _fw_add(bucket: String, since: int) -> void:
+	_fw_usec[bucket] = int(_fw_usec.get(bucket, 0)) + Time.get_ticks_usec() - since
+
+
+func _forward_report() -> void:
+	var tree := get_tree()
+	var vm := ViewManager.of(tree)
+	# Real frames at 1x, both worlds simulating (the view on home).
+	var frames := 120
+	SimClock.speed = 1.0
+	var t0 := Time.get_ticks_usec()
+	for i in frames:
+		await tree.process_frame
+	var frame_ms := float(Time.get_ticks_usec() - t0) / 1000.0 / frames
+	var roles := {}
+	for n in tree.get_nodes_in_group(Ship.GROUP):
+		var s := n as Ship
+		if s and not s.dead and is_instance_valid(_fw) and SystemWorld.of(s) == _fw:
+			var role := String((s.get_script() as Script).get_global_name()).trim_suffix("Ship")
+			roles[role] = int(roles.get(role, 0)) + 1
+	var parts: PackedStringArray = []
+	var keys := roles.keys()
+	keys.sort()
+	for k in keys:
+		parts.append("%s %d" % [k, roles[k]])
+	var depot := _fw_outpost.get_cargo_depot() if is_instance_valid(_fw_outpost) else null
+	var shipped := 0
+	if depot:
+		for x in depot.total_shipped:
+			shipped += x
+	var steps := maxf(_fw_steps, 1.0)
+	print("SMOKE forward -------------------------------------")
+	print("SMOKE forward setup  %s" % "; ".join(_fw_notes))
+	print("SMOKE forward ore delivered %d in %d shuttle trips (waiting in the depot %s)" % [shipped, depot.trips if depot else 0, depot.stock if depot else []])
+	print("SMOKE forward ships  %s" % (", ".join(parts) if not parts.is_empty() else "none"))
+	var states: PackedStringArray = []
+	for s in _fw_miners:
+		if is_instance_valid(s) and not s.dead:
+			states.append("%s (%s): %s, %s" % [s.captain.captain_name, s.captain.get_personality_name(), s.get_status_text(),
+					s.brain.last_decision if s.brain else "-"])
+	print("SMOKE forward miners %s; deaths %s" % ["; ".join(states) if not states.is_empty() else "none alive",
+			", ".join(_fw_deaths) if not _fw_deaths.is_empty() else "-"])
+	print("SMOKE forward systems trip checks %s, on another system's contract %d%s" % [_fw_trips, _fw_wrong,
+			" (first: %s)" % _fw_wrong_first if _fw_wrong > 0 else ""])
+	_forward_supply_report(shipped)
+	if save_roundtrip:
+		var end := _fw_shipped()
+		var rising := end > _rt_ore
+		_rt_ok = _rt_ok and rising
+		for l in _rt:
+			print("SMOKE forward reload %s" % l)
+		print("SMOKE forward reload forward ore %d at the save -> %d at the end (%s)" % [_rt_ore, end, "rising" if rising else "NOT RISING"])
+	print("SMOKE forward live   %s, viewed %s, pinned %s" % [vm.worlds.keys(), vm.viewed_id(), vm.is_pinned(FORWARD_ID)])
+	print("SMOKE forward ms/step home %.3f, forward %.3f, other %.3f (%d steps); ms/frame %.2f over %d real frames" % [
+			_fw_usec.get("home", 0) / 1000.0 / steps, _fw_usec.get("forward", 0) / 1000.0 / steps, _fw_usec.get("other", 0) / 1000.0 / steps,
+			_fw_steps, frame_ms, frames])
+
+
+## F4: threat, upkeep, water, hauling fee, berths.
+func _forward_supply_report(shipped: int) -> void:
+	var raids := _fw.combat.raids if is_instance_valid(_fw) and _fw.combat else null
+	var sup := _fw.supply if is_instance_valid(_fw) else null
+	var founded := float(_fw.station_site.get("founded_at", 0.0)) if is_instance_valid(_fw) else 0.0
+	print("SMOKE forward raids  %d launched: %s; first allowed %s (founded %s + %s grace); bases %s, danger %d" % [_fw_raids.size(),
+			", ".join(_fw_raids) if not _fw_raids.is_empty() else "-", Fmt.clock(founded + (raids.first_raid_time if raids else 0.0)),
+			Fmt.clock(founded), Fmt.clock(raids.first_raid_time if raids else 0.0), _fw_bases(), raids.danger if raids else -1])
+	var al: PackedStringArray = []
+	for k in _fw_alarms:
+		al.append(_fw_alarms[k])
+	print("SMOKE forward alarms %d: %s" % [_fw_alarms.size(), ", ".join(al) if not al.is_empty() else "-"])
+	if is_instance_valid(_fw_zone):
+		print("SMOKE forward zone   %s: raiders inside at most %d, kills %d, paid %d cr, budget left %d" % [_fw_zone.zone_name, _fw_zone_peak,
+				_fw_zone.kills, _fw_zone.paid_total, _fw_zone.budget])
+	if is_instance_valid(_fw_merc) and not _fw_merc.dead:
+		print("SMOKE forward merc   %s: %s, kills %d" % [_fw_merc.captain.captain_name, _fw_merc.get_status_text(), _fw_merc.captain.kills])
+	elif long_run:
+		print("SMOKE forward merc   lost or none")
+	if sup:
+		print("SMOKE forward upkeep paid %d cr, owed %d; water used %d, %s (stock %d)%s" % [sup.upkeep_paid, sup.owed, sup.water_used,
+				"DRY" if sup.dry else "ok", Economy.ore[Economy.Ore.WATER], ", refill: " + _fw_refill if not _fw_refill.is_empty() else ""])
+		var notes := 0
+		for e in Economy.ledger.entries:
+			if e["cat"] == Ledger.HAULING:
+				notes += int(e.get("n", 1))
+		print("SMOKE forward hauling fee %s (worth %d cr at the Factory price, %d ledger notes); ore landed %d of %d shipped" % [
+				Economy.cost_text(sup.hauled_fee) if not Economy.cost_text(sup.hauled_fee).is_empty() else "none", sup.hauled_fee_value, notes,
+				shipped - _sum(sup.hauled_fee), shipped])
+	else:
+		print("SMOKE forward supply MISSING")
+	print("SMOKE forward berths %s" % "; ".join(_berths()))
+	var lines := _fw_feed
+	if lines.size() > 16:
+		lines = lines.slice(lines.size() - 16)
+	for l in lines:
+		print("SMOKE forward feed   %s" % l)
+
+
+func _fw_bases() -> String:
+	var out: PackedStringArray = []
+	var sys := _fw.sys if is_instance_valid(_fw) else null
+	for d in sys.dens if sys else []:
+		if is_instance_valid(d):
+			out.append("%s%s" % [d.get_display_name(), "" if d.is_alive() else " (destroyed)"])
+	return ", ".join(out) if not out.is_empty() else "none"
+
+
+## Hiring buildings in every station system: captains/berths and why one
+## cannot hire now (a dead captain's berth must reopen).
+func _berths() -> PackedStringArray:
+	var out: PackedStringArray = []
+	for w in SystemWorld.all(get_tree()):
+		if not w.has_station or w.buildings == null:
+			continue
+		for b in w.buildings.buildings:
+			if is_instance_valid(b) and b.def.can_hire():
+				var why := b.hire_block_reason()
+				out.append("%s %s %d/%d (%s)" % [w.system_id, b.display_name, b.captains.size(), b.def.max_hires, why if not why.is_empty() else "can hire"])
+	return out
+
+
+static func _sum(a: PackedInt32Array) -> int:
+	var n := 0
+	for x in a:
+		n += x
+	return n
+
+
+# --- Save round trip (F3) ----------------------------------------------------
+
+var _rt: PackedStringArray = []
+var _rt_ok := true
+var _rt_ore := -1
+
+
+func _forward_roundtrip() -> void:
+	var tree := get_tree()
+	var before := _census()
+	_rt_ore = _fw_shipped()
+	var data: Dictionary = bytes_to_var(var_to_bytes(GameSnapshot.capture(tree)))
+	await SaveManager.load_snapshot(data)
+	for i in 5:
+		await tree.process_frame
+	_find_home()
+	var vm := ViewManager.of(tree)
+	_fw = vm.world(FORWARD_ID) if vm else null
+	_fw_outpost = null
+	_fw_miners.clear()
+	if _fw and _fw.buildings:
+		for b in _fw.buildings.buildings:
+			if is_instance_valid(b) and b.def.id == &"mining_outpost":
+				_fw_outpost = b
+		for s in _fw_outpost.ships if _fw_outpost else []:
+			if s is MinerShip:
+				_fw_miners.append(s)
+	_fw_bind()
+	var after := _census()
+	var diffs: PackedStringArray = []
+	for k in before:
+		if before[k] != after.get(k):
+			diffs.append("%s: %s -> %s" % [k, before[k], after.get(k, "missing")])
+	for k in after:
+		if not before.has(k):
+			diffs.append("%s: new %s" % [k, after[k]])
+	_rt_ok = diffs.is_empty() and _fw != null
+	_rt.append("at %s: %d forward ore, keys %s, %s" % [Fmt.clock(SimClock.time), _rt_ore, before.keys(),
+			"identical after load" if diffs.is_empty() else "DIFF " + "; ".join(diffs)])
+	var st := Sector.state(FORWARD_ID)
+	if st and not st.ships.is_empty():
+		_rt_ok = false
+	_rt.append("live %s, pinned %s, forward world %s, stale data ships %d; %s" % [vm.worlds.keys() if vm else [], vm.is_pinned(FORWARD_ID) if vm else false,
+			"ok" if _fw else "MISSING", st.ships.size() if st else -1, after.get("%s ships" % FORWARD_ID, "-")])
+
+
+## Forward ore shipped so far (the outpost's depot).
+func _fw_shipped() -> int:
+	var depot := _fw_outpost.get_cargo_depot() if is_instance_valid(_fw_outpost) else null
+	var n := 0
+	if depot:
+		for x in depot.total_shipped:
+			n += x
+	return n
+
+
+## Per station system: buildings (name, state, berths), captains (name,
+## rank, wallet), contracts (title, status, system), as comparable strings.
+func _census() -> Dictionary:
+	var out := {}
+	for w in SystemWorld.all(get_tree()):
+		if not w.has_station or w.buildings == null:
+			continue
+		var bl: PackedStringArray = []
+		var cl: PackedStringArray = []
+		for b in w.buildings.buildings:
+			if not is_instance_valid(b):
+				continue
+			bl.append("%s/%d/%d" % [b.display_name, b.state, b.captains.size()])
+			for c in b.captains:
+				cl.append("%s r%d %d cr" % [c.captain_name, c.rank, c.wallet])
+		bl.sort()
+		cl.sort()
+		var kl: PackedStringArray = []
+		for c in ContractBoard.contracts:
+			if c.system_id == w.system_id:
+				kl.append("%s/%d/%s" % [c.get_title(), c.status, c.system_id])
+		kl.sort()
+		var sl: PackedStringArray = []
+		for n in SystemWorld.nodes_in(w, Ship.GROUP):
+			var sh := n as Ship
+			if sh and not sh.dead:
+				var tr := (sh.brain as CaptainBrain).trip if sh.brain is CaptainBrain else null
+				sl.append("%s%s" % [sh.get_display_name(), " on " + tr.contract.get_title() if tr and tr.contract else ""])
+		sl.sort()
+		out["%s ships" % w.system_id] = ", ".join(sl)
+		out["%s buildings" % w.system_id] = ", ".join(bl)
+		out["%s captains" % w.system_id] = ", ".join(cl)
+		out["%s contracts" % w.system_id] = ", ".join(kl)
+	return out
+
+
+# --- Colony (F6) -------------------------------------------------------------
+
+## Longest wait for one step of a convoy, sim seconds.
+const COLONY_STEP_MAX := 1500.0
+var _col: PackedStringArray = []
+var _col_feed: PackedStringArray = []
+var _col_ok := true
+
+
+func _colony_run() -> String:
+	var tree := get_tree()
+	Research.grant(TechCatalog.shared().find(&"eng_forward_operations"))
+	Economy.add(0, PackedInt32Array([900, 400, 0, 0, 800]), Ledger.OTHER, "Smoke test ore and water")
+	var net := Sector.network
+	var t1: StringName = net.gate_target(ClusterNetwork.HOME_ID, "Ostra Gate")["system"]
+	var t2: StringName = &""
+	for id in net.remote_ids():
+		var e := net.entry(id)
+		if id != t1 and e.danger <= ForwardStations.MAX_DANGER and (t2.is_empty() or e.depth > net.entry(t2).depth):
+			t2 = id
+	for id in [t1, t2]:
+		Sector.mark_surveyed(id, SimClock.time)
+	_col.append("seed %d, targets %s (danger %d, %d jump), %s (danger %d, %d jumps)" % [Sector.get_seed(), _sys_name(t1), net.entry(t1).danger, net.entry(t1).depth,
+			_sys_name(t2), net.entry(t2).danger, net.entry(t2).depth])
+	EventLog.posted.connect(func(e: Dictionary) -> void:
+		var text := String(e.get("text", ""))
+		if text.contains("Forward Station") or text.contains("Forward station") or text.contains("escort") or text.contains("ambush") or text.contains("Station founded"):
+			_col_feed.append("%s %s" % [Fmt.clock(SimClock.time), text]))
+	var mo := _find_outpost(&"mercenary_outpost")
+	if mo:
+		mo.hire()
+	var mercs := 0
+	for s in mo.ships if mo else []:
+		if s is MercenaryShip:
+			mercs += 1
+	_col.append("mercenaries %d" % mercs)
+	# Station 1: Ostra, viewed (live).
+	var ms := await _colony_build(1)
+	if ms == null:
+		return "station 1 was not built"
+	await _colony_roundtrip("parked")
+	ms = _mobile(1)
+	if not await _colony_send(ms, t1):
+		return "station 1: no destination"
+	await _colony_roundtrip("waiting")
+	ms = _mobile(1)
+	var vm := ViewManager.of(tree)
+	vm.view_now(t1)
+	if not await _colony_fly(1, t1, false):
+		return "station 1 not founded in %s" % _sys_name(t1)
+	vm.view_now(ClusterNetwork.HOME_ID)
+	# Station 2: the other target, the view at home (data), a reload in transit.
+	ms = await _colony_build(2)
+	if ms == null:
+		return "station 2 was not built"
+	if not await _colony_send(ms, t2):
+		return "station 2: no destination"
+	if not await _colony_fly(2, t2, true):
+		return "station 2 not founded in %s" % _sys_name(t2)
+	var fs := ForwardStations.of(tree)
+	if fs.count() != 2:
+		return "%d stations founded" % fs.count()
+	return "" if _col_ok else "a reload changed the convoy (see SMOKE colony reload)"
+
+
+func _colony_print() -> void:
+	var tree := get_tree()
+	var vm := ViewManager.of(tree)
+	var fs := ForwardStations.of(tree)
+	var live: PackedStringArray = []
+	for id in fs.ids() if fs else []:
+		var w := vm.world(id)
+		live.append("%s: %s (%s, pinned %s, supply %s)" % [_sys_name(id), Sector.state(id).station.get("name", "?"), "live" if w else "NOT LIVE",
+				vm.is_pinned(id), "yes" if w and w.supply else "no"])
+	print("SMOKE colony --------------------------------------")
+	for l in _col:
+		print("SMOKE colony %s" % l)
+	print("SMOKE colony stations %s" % ("; ".join(live) if not live.is_empty() else "none"))
+	print("SMOKE colony slots left %d, mobile left %d" % [ForwardStations.free_slots(tree), MobileStation.count_all(tree)])
+	for l in _col_feed:
+		print("SMOKE colony feed  %s" % l)
+
+
+func _sys_name(id: StringName) -> String:
+	var d := Sector.system_def(id)
+	return d.system_name if d else String(id)
+
+
+func _find_outpost(id: StringName) -> Building:
+	for b in _mgr.buildings:
+		if is_instance_valid(b) and b.def.id == id:
+			return b
+	return null
+
+
+func _mobile(n: int) -> MobileStation:
+	for node in get_tree().get_nodes_in_group(MobileStation.MOBILE_GROUP):
+		var ms := node as MobileStation
+		if ms.number == n and not ms.dead:
+			return ms
+	return null
+
+
+## Places a Forward Station at home (paid, real construction) and runs
+## until it is a mobile station.
+func _colony_build(n: int) -> MobileStation:
+	var tree := get_tree()
+	var def := _mgr.def_by_id(ForwardStations.BUILD_ID)
+	var why := _mgr.limit_reason(def)
+	var b: Building = null
+	for ring in range(1, 14):
+		var r := 420.0 + ring * 110.0
+		for k in 16:
+			var a := TAU * float(k) / 16.0
+			var off := Vector3(cos(a) * r, 0.0, sin(a) * r)
+			if b == null and why.is_empty() and _mgr.plan_placement(def, off).is_valid():
+				b = _mgr.place(def, off)
+	if b == null:
+		if why.is_empty():
+			why = Economy.shortfall_text(def.cost_credits, def.cost_ore())
+		if why.is_empty():
+			why = "no spot"
+		_col.append("build %d: could not place (%s)" % [n, why])
+		return null
+	var t0 := SimClock.time
+	SimStepper.run(tree, def.build_time + 5.0, 0.1, func() -> bool: return _mobile(n) != null)
+	for i in 3:
+		await tree.process_frame
+	var ms := _mobile(n)
+	_col.append("build %d: %s, %s cr + %s, done in %s -> %s" % [n, def.display_name, Fmt.amount(def.cost_credits), Economy.cost_text(def.cost_ore()),
+			Fmt.clock(SimClock.time - t0), ms.get_display_name() if ms else "NOTHING"])
+	return ms
+
+
+## Views the target, picks the first valid planet (the site picker's
+## rule), sets the destination, views home again.
+func _colony_send(ms: MobileStation, target: StringName) -> bool:
+	var tree := get_tree()
+	var vm := ViewManager.of(tree)
+	var w := vm.view_now(target)
+	for i in 3:
+		await tree.process_frame
+	var pick: PlanetBody = null
+	var refused: PackedStringArray = []
+	for p in w.sys.planets:
+		var why := ms.destination_problem(target, p)
+		if why.is_empty() and pick == null:
+			pick = p
+		elif not why.is_empty():
+			refused.append("%s: %s" % [p.def.name, why])
+	var ok := pick != null and ms.set_destination(target, pick)
+	_col.append("send %d: %s in %s%s; refused %s" % [ms.number, pick.def.name if pick else "no planet", _sys_name(target), "" if ok else " FAILED",
+			"; ".join(refused) if not refused.is_empty() else "-"])
+	vm.view_now(ClusterNetwork.HOME_ID)
+	for i in 3:
+		await tree.process_frame
+	return ok
+
+
+## Runs until station [param n] founded [param target]; times the wait for
+## an escort, the flight and the deploy. [param reload]: a save and load
+## once it is out of home.
+func _colony_fly(n: int, target: StringName, reload: bool) -> bool:
+	var tree := get_tree()
+	var t0 := SimClock.time
+	var marks := {}
+	var reloaded := false
+	var hops := ""
+	while SimClock.time - t0 < COLONY_STEP_MAX * 2.0 and Sector.state(target).station.is_empty():
+		SimStepper.run(tree, 2.0)
+		var ms := _mobile(n)
+		if ms and ms.state == MobileStation.State.TRAVEL and not marks.has("left"):
+			marks["left"] = SimClock.time - t0
+			hops = ", ".join(ms.transit.hops) if ms.transit else "?"
+			marks["escorts"] = ", ".join(ms.escorts().map(func(e: Ship) -> String: return e.get_display_name()))
+		if ms and ms.state == MobileStation.State.CRUISE and not marks.has("cruise"):
+			marks["cruise"] = SimClock.time - t0
+		if ms and ms.state == MobileStation.State.DEPLOY and not marks.has("deploy"):
+			marks["deploy"] = SimClock.time - t0
+		var data := _mobile_dict(n)
+		if not data.is_empty():
+			marks["data"] = String(data.get("where", ""))
+			var dst := int((data["d"]["mobile"] as Dictionary).get("state", 0))
+			if dst == MobileStation.State.CRUISE and not marks.has("cruise"):
+				marks["cruise"] = SimClock.time - t0
+			if dst == MobileStation.State.DEPLOY and not marks.has("deploy"):
+				marks["deploy"] = SimClock.time - t0
+			var roll: Variant = (data["d"]["mobile"] as Dictionary).get("last_roll", null)
+			if roll is Dictionary:
+				marks["roll"] = "%s chance %d%%, roll %d%%" % [_sys_name(StringName(roll["system"])), roundi(float(roll["chance"]) * 100.0), roundi(float(roll["roll"]) * 100.0)]
+		if reload and not reloaded and marks.has("left") and (not data.is_empty() or (ms and SystemWorld.of(ms) and not SystemWorld.of(ms).is_home)):
+			reloaded = true
+			await _colony_roundtrip("in transit (%s)" % ("data: " + String(data.get("where", "")) if not data.is_empty() else "live"))
+		await tree.process_frame
+	var done := not Sector.state(target).station.is_empty()
+	var w := ViewManager.of(tree).world(target)
+	_col.append("fly %d to %s: waited %s for %s, hops %s, data %s, arrived %s, deploy %s, founded %s%s; roll %s" % [n, _sys_name(target),
+			Fmt.clock(float(marks.get("left", -1.0))), marks.get("escorts", "-"), hops, marks.get("data", "never"),
+			Fmt.clock(float(marks.get("cruise", -1.0))), Fmt.clock(float(marks.get("deploy", -1.0))),
+			Fmt.clock(SimClock.time - t0) if done else "NOT", (": " + String(Sector.state(target).station.get("name", "?")) + (" live" if w else " NOT LIVE")) if done else "",
+			marks.get("roll", "-")])
+	if done:
+		# The escorts fly home through the gates.
+		SimStepper.run(tree, 240.0)
+		var where: PackedStringArray = []
+		var mo := _find_outpost(&"mercenary_outpost")
+		for c in mo.captains if mo else []:
+			var s := c.ship
+			where.append("%s %s" % [c.captain_name, ("%s: %s" % [SystemWorld.of(s).system_id if s and SystemWorld.of(s) else "?", s.get_status_text()]) if is_instance_valid(s) else (c.away_in if not c.away_in.is_empty() else "no ship")])
+		_col.append("escorts 4 min later: %s, wallets %s" % ["; ".join(where), ", ".join((mo.captains if mo else []).map(func(c: Captain) -> String: return str(c.wallet)))])
+	return done
+
+
+## Station [param n] as data: {d, where} or {}.
+func _mobile_dict(n: int) -> Dictionary:
+	for id: StringName in Sector.states:
+		for d: Dictionary in (Sector.states[id] as RemoteSystemState).ships:
+			if MobileStation.is_mobile(d) and int(d["mobile"]["number"]) == n:
+				return {"d": d, "where": _sys_name(id)}
+	for t: Dictionary in Sector.transits:
+		if MobileStation.is_mobile(t["ship"]) and int(t["ship"]["mobile"]["number"]) == n:
+			return {"d": t["ship"], "where": "the jump to %s" % _sys_name(t["to"])}
+	return {}
+
+
+## Save to memory, load, compare the convoys.
+func _colony_roundtrip(label: String) -> void:
+	var tree := get_tree()
+	var before := _convoy_census()
+	var data: Dictionary = bytes_to_var(var_to_bytes(GameSnapshot.capture(tree)))
+	await SaveManager.load_snapshot(data)
+	for i in 5:
+		await tree.process_frame
+	_find_home()
+	var after := _convoy_census()
+	var same := before == after
+	_col_ok = _col_ok and same
+	_col.append("reload %s at %s: %s" % [label, Fmt.clock(SimClock.time), ("identical: " + before) if same else "DIFF %s -> %s" % [before, after]])
+
+
+## Every mobile station and its escort contract, comparable.
+func _convoy_census() -> String:
+	var parts: PackedStringArray = []
+	for node in get_tree().get_nodes_in_group(MobileStation.MOBILE_GROUP):
+		var ms := node as MobileStation
+		if ms.dead:
+			continue
+		var c := ms.contract
+		parts.append("%s %s in %s dest %s hull %d, contract %s, escorts %d" % [ms.get_display_name(), MobileStation.STATE_NAMES[ms.state],
+				SystemWorld.of(ms).system_id if SystemWorld.of(ms) else &"?", ms.dest, roundi(ms.durability.hull),
+				("%d cr x%d" % [c.reward, c.max_escorts]) if c and not c.is_finished() else "none", ms.escorts().size()])
+	for id: StringName in Sector.states:
+		for d: Dictionary in (Sector.states[id] as RemoteSystemState).ships:
+			if MobileStation.is_mobile(d):
+				parts.append("Forward Station %d as data in %s, %d escorts" % [int(d["mobile"]["number"]), id, (d.get("escorts", []) as Array).size()])
+	for t: Dictionary in Sector.transits:
+		if MobileStation.is_mobile(t["ship"]):
+			parts.append("Forward Station %d in the jump to %s, %d escorts" % [int(t["ship"]["mobile"]["number"]), t["to"], (t["ship"].get("escorts", []) as Array).size()])
+	var open := 0
+	for c in ContractBoard.contracts:
+		if c is EscortContract:
+			open += 1
+	parts.append("%d escort contracts" % open)
+	parts.sort()
+	return "; ".join(parts)
 
 
 # --- Explore (P3) ------------------------------------------------------------

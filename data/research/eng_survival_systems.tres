@@ -13,4 +13,5 @@ cost_iron = 50
 research_time = 80.0
 unlock_modules = Array[StringName]([&"survival_cell_1", &"ejection_rig_1"])
 tags = PackedStringArray("defence")
+benefit = "Captains eject more often when their ship is lost, so you keep them and their skills."
 description = "Armoured cockpits with escape pods. Captains with them eject far more often when their ship is lost."

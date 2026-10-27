@@ -20,10 +20,14 @@ extends Node
 ## (link_point) toward it.
 ##
 ## Station addons (BuildingDef.station_addon) skip all of that: they sit on
-## one of the station core's [constant BAY_COUNT] addon bays ([method
+## one of the station core's [member bay_count] addon bays ([method
 ## bay_transform]), one building per bay. The Factory
 ## ([member factory_def]) is the default addon, installed finished in bay 1
 ## at the start; it is not in the build menu and never built again (max 1).
+## Null factory_def (a forward station, SystemHost) = no default addon.
+## A forward station's manager ([member forward], set by SystemHost) builds
+## only the defs with BuildingDef.allowed_forward, up to their
+## forward_max_count ([method max_count_for], [method limit_reason]).
 
 signal building_added(building: Building)
 signal building_changed(building: Building)
@@ -31,7 +35,8 @@ signal building_changed(building: Building)
 signal layout_changed
 
 const GROUP := "building_manager"
-## Addon bays on the Home Station core, numbered 1..BAY_COUNT.
+## Addon bays on the Home Station core when the station node is missing
+## ([member bay_count] is this system's station).
 const BAY_COUNT := 6
 ## Bay empties in the station model: "addon_bay_1".."addon_bay_6".
 const BAY_NODE := "addon_bay_%d"
@@ -109,10 +114,18 @@ var keepouts: StationKeepouts
 ## The station's own hull (created with the frame).
 var station_hull: StructureHull
 var rng := RandomNumberGenerator.new()
+## A forward station's buildings (set by SystemHost before it enters the tree).
+var forward := false
 var _counts: Dictionary = {}
 ## Bay number -> the addon Building in it.
 var _bays: Dictionary = {}
 var _infos: Dictionary = {}
+
+## Addon bays on this system's station (HomeStation.bay_count), numbered 1..
+var bay_count: int:
+	get:
+		var st := station_node()
+		return st.bay_count if st else BAY_COUNT
 
 
 ## The manager of [param n]'s system (see [method SystemWorld.of]).
@@ -210,11 +223,16 @@ func moon_sweeping(pos: Vector3, reach: float) -> PlanetBody:
 
 # --- Station addon bays ---------------------------------------------------------
 
-## Frame-local transform of addon bay [param bay] (1..BAY_COUNT): origin at
+## The station of this system (the [HomeStation] node), or null.
+func station_node() -> HomeStation:
+	return solar_system.home_station.get_node_or_null(^"Station") as HomeStation if solar_system and solar_system.home_station else null
+
+
+## Frame-local transform of addon bay [param bay] (1..bay_count): origin at
 ## the bay collar's outer face, +Z radially outward, +Y up. From the
 ## station model's "addon_bay_N" empty, or the computed fallback ring.
 func bay_transform(bay: int) -> Transform3D:
-	var station := solar_system.home_station.get_node_or_null(^"Station") as HomeStation if solar_system and solar_system.home_station else null
+	var station := station_node()
 	var model := station.get_model() if station else null
 	var n := model.find_child(BAY_NODE % bay, true, false) as Node3D if model else null
 	if n and frame:
@@ -222,7 +240,7 @@ func bay_transform(bay: int) -> Transform3D:
 		var xf := frame.transform.affine_inverse() * ModelLoader.relative_transform(solar_system.home_station, n)
 		xf.basis = xf.basis.orthonormalized()
 		return xf
-	var a := deg_to_rad(bay_angle_offset_deg + 360.0 / BAY_COUNT * (bay - 1))
+	var a := deg_to_rad(bay_angle_offset_deg + 360.0 / bay_count * (bay - 1))
 	var basis := Basis(Vector3.UP, a)
 	return Transform3D(basis, basis.z * bay_radius)
 
@@ -236,14 +254,14 @@ func addon_in_bay(bay: int) -> Building:
 ## Bay numbers with no addon, ascending.
 func free_bays() -> Array[int]:
 	var out: Array[int] = []
-	for i in range(1, BAY_COUNT + 1):
+	for i in range(1, bay_count + 1):
 		if addon_in_bay(i) == null:
 			out.append(i)
 	return out
 
 
 func used_bays() -> int:
-	return BAY_COUNT - free_bays().size()
+	return bay_count - free_bays().size()
 
 
 ## "" when [param def] can go onto some free bay (cost aside), else the reason.
@@ -265,7 +283,7 @@ func addon_problem(def: BuildingDef, bay: int, check_cost: bool = true) -> Strin
 	var why := addon_block_reason(def)
 	if not why.is_empty():
 		return why
-	if bay < 1 or bay > BAY_COUNT:
+	if bay < 1 or bay > bay_count:
 		return "No such addon bay"
 	if addon_in_bay(bay):
 		return "Bay %d holds the %s" % [bay, addon_in_bay(bay).display_name]
@@ -475,16 +493,39 @@ func count_of(def: BuildingDef) -> int:
 	return n
 
 
-## "" unless the player already owns the most allowed of this type, the
-## type still needs research (Research), or it is not in service yet.
+## Most of [param def] allowed here (0 = no limit): a forward station's
+## own limit (BuildingDef.forward_max_count) when it has one. The Forward
+## Station: the ones under construction plus the free station slots
+## (ForwardStations.free_slots).
+func max_count_for(def: BuildingDef) -> int:
+	if def.id == ForwardStations.BUILD_ID and is_inside_tree():
+		return count_of(def) + ForwardStations.free_slots(get_tree())
+	if forward and def.forward_max_count >= 0:
+		return def.forward_max_count
+	return def.max_count
+
+
+## True when [param def] may be built at this station at all.
+func allows(def: BuildingDef) -> bool:
+	return def != null and (not forward or def.allowed_forward)
+
+
+## "" unless the type is not built at this station (a forward one), the
+## player already owns the most allowed of this type here, the type still
+## needs research (Research), or it is not in service yet.
 func limit_reason(def: BuildingDef) -> String:
+	if not allows(def):
+		return "Home station only: not built at a forward station"
 	var locked := Research.building_lock_reason(def.id)
 	if not locked.is_empty():
 		return locked
 	if not def.in_service:
 		return "Not in service yet: the %s comes in a later update" % def.display_name
-	if def.max_count > 0 and count_of(def) >= def.max_count:
-		return "Only %d %s allowed" % [def.max_count, def.display_name if def.max_count == 1 else Fmt.plural(def.display_name)]
+	var most := max_count_for(def)
+	if def.id == ForwardStations.BUILD_ID and count_of(def) >= most:
+		return "At most %d forward stations (built, on the way or under construction)" % ForwardStations.MAX_STATIONS
+	if most > 0 and count_of(def) >= most:
+		return "Only %d %s allowed%s" % [most, def.display_name if most == 1 else Fmt.plural(def.display_name), " per forward station" if forward and def.forward_max_count >= 0 else ""]
 	return ""
 
 
@@ -569,18 +610,39 @@ func _on_building_exiting(b: Building) -> void:
 
 
 func _make_frame() -> void:
+	if solar_system.home_station == null:
+		return
+	_apply_station_profile()
 	frame = Node3D.new()
 	frame.name = "Structures"
 	# The station orbiter only translates, never rotates, so a plain child keeps
 	# a fixed orientation while following the orbit.
 	solar_system.home_station.add_child(frame)
-	keepouts = StationKeepouts.build(solar_system.home_station.get_node_or_null(^"Station") as HomeStation, station_clearance,
+	keepouts = StationKeepouts.build(station_node(), station_clearance,
 			bay_keepout_length, bay_keepout_half_width, solar_wing_dirs, solar_wing_span, solar_wing_half_width)
 	if station_hull_points > 0.0:
 		station_hull = StructureHull.new()
-		station_hull.setup("Home Station", station_hull_points, 45.0, 6.0)
+		var st := station_node()
+		station_hull.setup(st.station_name if st else "Home Station", station_hull_points, st.hull_radius if st and st.hull_radius > 0.0 else 45.0, 6.0)
 		frame.add_child(station_hull)
 	_install_factory()
+
+
+## The station's own keep-outs and edges (a forward station's are smaller)
+## over this manager's (home's) values.
+func _apply_station_profile() -> void:
+	var st := station_node()
+	if st == null:
+		return
+	if st.structure_clearance >= 0.0:
+		station_clearance = st.structure_clearance
+	if st.edge_radius >= 0.0:
+		station_radius = st.edge_radius
+	if not st.solar_wing_dirs.is_empty():
+		solar_wing_dirs = st.solar_wing_dirs
+		solar_wing_span = st.solar_wing_span
+	if st.solar_wing_half_width >= 0.0:
+		solar_wing_half_width = st.solar_wing_half_width
 
 
 ## The default addon (the Factory), finished in bay 1.

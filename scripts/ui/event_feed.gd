@@ -123,9 +123,11 @@ func _on_pressed(e: Dictionary) -> void:
 		return
 	var p: Vector3 = e["position"]
 	if p != Vector3.INF and is_instance_valid(_anchor):
-		# Events without a node are home's: show home first.
-		if not hud.is_home_view() and hud.view_manager:
-			hud.view_manager.view_now(ClusterNetwork.HOME_ID)
+		# Show the entry's system first (home for events without one).
+		var sys := StringName(e.get("system", ClusterNetwork.HOME_ID))
+		if hud.view_manager and hud.view_manager.viewed_id() != sys:
+			if hud.view_manager.view_now(sys).system_id != sys:
+				return
 		_anchor.global_position = Vector3(p.x, 0.0, p.z)
 		hud.camera.focus_on(_anchor, 700.0)
 

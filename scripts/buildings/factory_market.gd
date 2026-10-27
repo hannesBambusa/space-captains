@@ -16,7 +16,8 @@ extends Node
 ## the Factory buys over time, [member max_buy_per_min] while the ask is at or
 ## below [member eager_ratio] of its willingness, slower as the ask climbs
 ## above it, nothing past [member refuse_ratio]. It never takes the player
-## below the reserve for that type. Every sale pays the ask per unit, as
+## below the reserve for that type (water: never below what the forward
+## stations use in 10 min, [method kept]). Every sale pays the ask per unit, as
 ## income ("Factory" in the top bar); the event feed gets one summary line
 ## per [member report_interval]. [method sell_now] sells at once at the
 ## Factory's current willingness instead.
@@ -162,7 +163,20 @@ func expected_rate(ore: int) -> float:
 
 ## Player ore above the reserve and the held yard ore.
 func surplus(ore: int) -> int:
-	return maxi(Economy.ore[ore] - reserve[ore] - mini(held[ore], Economy.ore[ore]), 0)
+	return maxi(Economy.ore[ore] - kept(ore) - mini(held[ore], Economy.ore[ore]), 0)
+
+
+## What selling leaves in stock: the reserve, and for water at least what
+## the forward stations use in StationSupply.WATER_RESERVE_MINUTES.
+func kept(ore: int) -> int:
+	return maxi(reserve[ore], station_water(ore))
+
+
+## The forward stations' water reserve when [param ore] is water, else 0.
+func station_water(ore: int) -> int:
+	if ore != Economy.Ore.WATER or not is_inside_tree():
+		return 0
+	return StationSupply.water_reserve(get_tree())
 
 
 ## Ore bought at the Salvage Yard landed: auto-sell leaves it alone.

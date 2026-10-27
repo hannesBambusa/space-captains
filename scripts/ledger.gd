@@ -45,10 +45,13 @@ const BUILDINGS := "Buildings"
 const RESEARCH := "Research"
 const ZONES := "Zones"
 const UPKEEP := "Upkeep"
+## Ore kept by the haulers at a forward station (StationSupply): a note
+## line, its worth at the Factory price in brackets, no credits move.
+const HAULING := "Hauling"
 const OTHER := "Other"
 ## Every category, in the order the breakdown lists them.
 const CATEGORIES: PackedStringArray = [FACTORY, GRANT, FEES, DISCOVERY, SALVAGE, REPAIRS, SHIP_SALES, OUTFITTER,
-		RESEARCH_REFUND, CONTRACT_PAY, BOUNTIES, ESCROW, HIRES, SHIPS, BUILDINGS, RESEARCH, ZONES, UPKEEP, OTHER]
+		RESEARCH_REFUND, CONTRACT_PAY, BOUNTIES, ESCROW, HIRES, SHIPS, BUILDINGS, RESEARCH, ZONES, UPKEEP, HAULING, OTHER]
 ## Categories merged over a minute (steady trickles).
 const LONG_MERGE: PackedStringArray = [FACTORY, FEES, GRANT, UPKEEP, REPAIRS, OTHER]
 

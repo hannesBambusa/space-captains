@@ -39,6 +39,16 @@ const DEFAULT_PATHS := {
 }
 ## Dropship research (Research autoload) for landers: more cargo per raid,
 ## tougher hulls.
+## Stats each role's work uses ([method ShipModule.stat_keys] keys). An
+## explorer's loot hold is fixed (DerelictLoot.HOLD), so no cargo; it has
+## no drill and no guns. Landers do not use sensors or yield.
+const ROLE_USES := {
+	"Miner": ["drill", "hull", "shields", "eject", "speed", "cargo", "sensor", "yield"],
+	"Salvager": ["drill", "hull", "shields", "eject", "speed", "cargo", "sensor", "yield"],
+	"Lander": ["drill", "hull", "shields", "eject", "speed", "cargo"],
+	"Mercenary": ["guns", "hull", "shields", "eject", "speed", "sensor", "fire_rate", "accuracy"],
+	"Explorer": ["hull", "shields", "eject", "speed", "sensor"],
+}
 const HEAVY_DROPSHIPS := &"pln_heavy_dropships"
 const ARMOURED_DROPSHIPS := &"eng_armoured_dropships"
 const HEAVY_CARGO_BONUS := 0.4
@@ -85,11 +95,12 @@ func upgrades_fitted() -> int:
 	return n
 
 
-## True when [param m] may go in now: an upgrade over what its slot holds,
-## and a free unlocked slot unless it replaces a bought module. Never a
-## module made for another role (see [method fits_hull]).
-func can_fit(m: ShipModule) -> bool:
-	if m == null or not fits_hull(m):
+## True when [param m] may go in now on a ship of [param role] (the ship's
+## actual role, Ship.get_role_name): a module that role needs (see [method
+## needs]), an upgrade over what its slot holds, and a free unlocked slot
+## unless it replaces a bought module.
+func can_fit(m: ShipModule, role: String) -> bool:
+	if not needs(m, role):
 		return false
 	var cur := get_module(m.slot)
 	var cur_tier := cur.tier if cur else 0
@@ -98,9 +109,61 @@ func can_fit(m: ShipModule) -> bool:
 	return cur_tier >= 1 or upgrades_fitted() < unlocked_slots
 
 
-## True when [param m] is made for this hull's role (stock parts always are).
-func fits_hull(m: ShipModule) -> bool:
-	return m != null and (m.tier <= 0 or role_name.is_empty() or m.fits_role(role_name))
+## True when [param m] belongs on this hull flown as [param role] (stock
+## parts always do). Same rule as [method needs].
+func fits_hull(m: ShipModule, role: String) -> bool:
+	return needs(m, role)
+
+
+## The one rule for what a ship of [param role] needs: a stock part, or a
+## bought module made for that role (its roles list names it; an empty list
+## counts for nobody), for a slot the hull has, that changes a stat the role
+## uses ([constant ROLE_USES]) and brings no tool the role has no use for
+## (no drill or guns on an explorer). An empty role needs nothing bought.
+func needs(m: ShipModule, role: String) -> bool:
+	return m != null and (m.tier <= 0 or unneeded_reason(m, role).is_empty())
+
+
+## Why a ship of [param role] has no use for bought module [param m]
+## ("not for an explorer", "no tool slot"), or "" when it needs it.
+func unneeded_reason(m: ShipModule, role: String) -> String:
+	if m == null:
+		return "nothing"
+	if m.tier <= 0:
+		return ""
+	if role.is_empty() or not m.roles.has(role) or not ROLE_USES.has(role):
+		return "not for %s" % with_article(role.to_lower() if not role.is_empty() else "this ship")
+	if get_module(m.slot) == null:
+		return "no %s slot" % ShipModule.SLOT_NAMES[m.slot].to_lower()
+	var uses: Array = ROLE_USES[role]
+	var keys := m.stat_keys()
+	for tool_key in ["drill", "guns"]:
+		if keys.has(tool_key) and not uses.has(tool_key):
+			return "not for %s" % with_article(role.to_lower())
+	for k in keys:
+		if uses.has(k):
+			return ""
+	return "no use to %s" % with_article(role.to_lower())
+
+
+## Bought modules a ship of [param role] has no use for (wrongly fitted).
+func unneeded(role: String) -> Array[ShipModule]:
+	var out: Array[ShipModule] = []
+	for m in modules():
+		if not needs(m, role):
+			out.append(m)
+	return out
+
+
+## The stock part of [param role]'s hull for [param slot] (a fresh copy), or null.
+static func stock_part(role: String, slot: ShipModule.Slot) -> ShipModule:
+	var m := default_for(role).get_module(slot)
+	return m.duplicate() as ShipModule if m else null
+
+
+## "an explorer", "a miner".
+static func with_article(word: String) -> String:
+	return ("an " if not word.is_empty() and "aeiou".contains(word[0]) else "a ") + word
 
 
 func modules() -> Array[ShipModule]:

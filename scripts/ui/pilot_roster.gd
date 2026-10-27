@@ -4,9 +4,16 @@ extends VBoxContainer
 ## waiting for a ship included) as a [PilotCard]. A summary line counts who
 ## is fighting, damaged, working and docked; role chips filter (All, Miners,
 ## Mercs, Salvagers: the roles hired so far) and the sort button cycles role,
-## status, hull, wallet and rank. In role order mercenaries flying together
-## sit under one fleet line, leader first. Cards are pooled per captain and
-## refreshed on a timer, never every frame.
+## status, hull, wallet and rank. In role order the fleets come first: a
+## [FleetRow] (target, state, mean hull) in the fleet's accent colour with
+## its members indented under it on a tree line, leader first with a crown;
+## escorts hang under the miner they cover. Cards and fleet rows are pooled
+## and refreshed on a timer, never every frame; a new order moves the rows
+## in place (open tooltips stay). Click: captain panel (fleet row: the
+## target), right click: camera to the ship (the fleet), zoom kept.
+## Every station's captains: home's first, then each forward station's
+## (cards tagged "[Ostra]"); the sort works inside each system. A click on
+## a card from another system switches the view there (HUD.focus).
 
 signal count_changed(total: int, in_combat: int)
 
@@ -15,6 +22,8 @@ enum Sort { ROLE, STATUS, HULL, WALLET, RANK }
 const SORT_NAMES: PackedStringArray = ["Role", "Status", "Hull", "Wallet", "Rank"]
 const ROLE_ORDER: PackedStringArray = ["Miner", "Mercenary", "Salvager", "Lander", "Explorer"]
 const H := preload("res://scripts/ui/theme/hud_style.gd")
+## Fleet accents, handed out in turn (each fleet keeps its own).
+const FLEET_COLORS: Array[Color] = [Color(1.0, 0.85, 0.42), Color(0.55, 0.9, 1.0), Color(0.95, 0.6, 1.0), Color(0.6, 1.0, 0.65)]
 
 @export var refresh_interval: float = 0.25
 @export var layout_interval: float = 1.0
@@ -35,8 +44,11 @@ var _list: VBoxContainer
 var _empty: Label
 ## Captain -> PilotCard.
 var _cards: Dictionary = {}
-## Fleet -> header Label (pooled).
+## Fleet -> FleetRow (pooled).
 var _fleet_heads: Dictionary = {}
+## Fleet -> accent Color (kept for the fleet's life).
+var _fleet_colors: Dictionary = {}
+var _next_color := 0
 var _refresh_left := 0.0
 var _layout_left := 0.0
 var _layout_key := ""
@@ -163,19 +175,43 @@ func _process(delta: float) -> void:
 
 # --- Data -----------------------------------------------------------------------
 
-## {captain, target} for every hired captain still alive.
+## {captain, target, system (id), rank (HUD.system_rank)} for every hired
+## captain still alive, at every station.
 func _entries() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
-	if hud == null or hud.manager == null:
+	if hud == null:
 		return out
-	for b in hud.manager.buildings:
-		if not is_instance_valid(b):
-			continue
-		for c in b.captains:
-			if not c.alive:
+	for m in managers():
+		var w := SystemWorld.of(m)
+		var sys := w.system_id if w else ClusterNetwork.HOME_ID
+		var rank := hud.system_rank(sys)
+		for b in m.buildings:
+			if not is_instance_valid(b):
 				continue
-			var t: Node3D = c.ship if is_instance_valid(c.ship) else b
-			out.append({"captain": c, "target": t})
+			for c in b.captains:
+				if not c.alive:
+					continue
+				var t: Node3D = c.ship if is_instance_valid(c.ship) else b
+				out.append({"captain": c, "target": t, "system": sys, "rank": rank})
+	return out
+
+
+## Home's manager, then each forward station's (live, pinned).
+func managers() -> Array[BuildingManager]:
+	var out: Array[BuildingManager] = []
+	if hud == null:
+		return out
+	if hud.manager:
+		out.append(hud.manager)
+	var vm := hud.view_manager
+	if vm == null:
+		return out
+	for id in hud.station_ids():
+		if id == ClusterNetwork.HOME_ID:
+			continue
+		var w := vm.world(id)
+		if w and w.buildings:
+			out.append(w.buildings)
 	return out
 
 
@@ -186,21 +222,23 @@ static func fleet_of(c: Captain) -> MercFleet:
 	return mb.fleet if mb and mb.fleet and mb.fleet.state != MercFleet.State.DONE else null
 
 
+## System first (home, then the forward stations), then the sort mode.
 func _sort_key(e: Dictionary) -> Array:
 	var c := e["captain"] as Captain
 	var ship := c.ship if is_instance_valid(c.ship) else null
 	var role_i := ROLE_ORDER.find(c.role)
+	var rank := int(e.get("rank", 0))
 	match sort_mode:
 		Sort.STATUS:
 			var st := int(ship.brain.state) if ship and ship.brain else 99
-			return [st, role_i, c.captain_name]
+			return [rank, st, role_i, c.captain_name]
 		Sort.HULL:
-			return [ship.hull_fraction() if ship else 2.0, c.captain_name]
+			return [rank, ship.hull_fraction() if ship else 2.0, c.captain_name]
 		Sort.WALLET:
-			return [-c.wallet, c.captain_name]
+			return [rank, -c.wallet, c.captain_name]
 		Sort.RANK:
-			return [-c.rank, -c.reputation, c.captain_name]
-	return [role_i, c.captain_name]
+			return [rank, -c.rank, -c.reputation, c.captain_name]
+	return [rank, role_i, c.captain_name]
 
 
 static func _less(a: Array, b: Array) -> bool:
@@ -236,13 +274,14 @@ func _relayout(force: bool) -> void:
 			shown.append(e)
 	shown.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return _less(_sort_key(a), _sort_key(b)))
 	if sort_mode == Sort.ROLE:
-		shown = _group_fleets(shown)
-	# Signature: order, targets and fleets.
+		shown = _group(shown)
+	# Signature: order, targets, fleets and the tree.
 	var parts: PackedStringArray = []
 	for e in shown:
 		var c := e["captain"] as Captain
-		var f := fleet_of(c)
-		parts.append("%d:%d:%d:%d" % [c.get_instance_id(), (e["target"] as Node).get_instance_id(), f.get_instance_id() if f else 0, f.members.size() if f else 0])
+		var f := e.get("fleet") as MercFleet
+		parts.append("%d:%d:%d:%d:%d" % [c.get_instance_id(), (e["target"] as Node).get_instance_id(), f.get_instance_id() if f else 0,
+				int(e.get("branch", 0)), 1 if e.get("leader", false) else 0])
 	var key := ",".join(parts)
 	if key == _layout_key and not force:
 		_count_only(all)
@@ -256,15 +295,15 @@ func _relayout(force: bool) -> void:
 		if not live.has(c):
 			(_cards[c] as PilotCard).queue_free()
 			_cards.erase(c)
-	for c in _list.get_children():
-		_list.remove_child(c)
+	var rows: Array[Control] = []
 	var used_heads := {}
 	var last_fleet: MercFleet = null
 	for e in shown:
 		var c := e["captain"] as Captain
-		var f := fleet_of(c)
-		if sort_mode == Sort.ROLE and f and f != last_fleet:
-			_list.add_child(_fleet_head(f))
+		var f := e.get("fleet") as MercFleet
+		var tag := HUD.system_tag(StringName(e.get("system", ClusterNetwork.HOME_ID)))
+		if f and f != last_fleet:
+			rows.append(_fleet_row(f, tag))
 			used_heads[f] = true
 		last_fleet = f
 		var card := _cards.get(c) as PilotCard
@@ -273,73 +312,145 @@ func _relayout(force: bool) -> void:
 			card.compact = compact
 			card.clicked.connect(_on_card_clicked)
 			card.double_clicked.connect(_on_card_double)
+			card.right_clicked.connect(_on_card_right)
 			_cards[c] = card
-		card.fleet_tag = ("%s's fleet (%d) for %s, %s" % [f.leader_name, f.members.size(), f.contract.get_target_name() if f.contract else "?",
-				"leader" if f.members.find(c.ship) == 0 else "wingman"]) if f else ""
-		card.bind(c, e["target"] as Node3D)
-		_list.add_child(card)
+		var cf := fleet_of(c)
+		card.fleet_tag = ("%s's fleet (%d) for %s, %s" % [cf.leader_name, cf.members.size(), cf.contract.get_target_name() if cf.contract else "?",
+				"leader" if cf.members.find(c.ship) == 0 else "wingman"]) if cf else ""
+		card.branch = int(e.get("branch", 0)) as PilotCard.Branch
+		card.branch_color = e.get("accent", H.TEXT_DIM)
+		card.leader = bool(e.get("leader", false))
+		card.system_tag = tag
+		if card.captain != c or card.target != e["target"]:
+			card.bind(c, e["target"] as Node3D)
+		else:
+			card.refresh()
+		rows.append(card)
+	_empty.visible = shown.is_empty()
+	_empty.text = "No pilots yet. Build a Mining or Mercenary Outpost and hire captains there." if all.is_empty() else "No pilots in this role."
+	rows.append(_empty)
+	_place_rows(rows)
 	for f: MercFleet in _fleet_heads.keys():
 		if not used_heads.has(f):
 			(_fleet_heads[f] as Control).queue_free()
 			_fleet_heads.erase(f)
-	_empty.visible = shown.is_empty()
-	_empty.text = "No pilots yet. Build a Mining or Mercenary Outpost and hire captains there." if all.is_empty() else "No pilots in this role."
-	_list.add_child(_empty)
+	for f: MercFleet in _fleet_colors.keys():
+		if f.state == MercFleet.State.DONE:
+			_fleet_colors.erase(f)
 	_sync_selected()
 	_count_only(all)
 
 
-func _fleet_head(f: MercFleet) -> Control:
-	var head := _fleet_heads.get(f) as PanelContainer
-	if head == null:
-		head = PanelContainer.new()
-		head.theme_type_variation = &"SectionPanel"
-		if compact:
-			var flat := StyleBoxEmpty.new()
-			flat.content_margin_left = 6
-			flat.content_margin_top = 3
-			head.add_theme_stylebox_override("panel", flat)
-		head.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var h := HBoxContainer.new()
-		h.add_theme_constant_override("separation", 6)
-		head.add_child(h)
-		h.add_child(H.icon_rect(&"fleet", 14.0, Color(1.0, 0.85, 0.42)))
-		var l := UIUtil.label("", &"SubHeaderLabel")
-		l.name = "Text"
-		l.add_theme_color_override("font_color", Color(1.0, 0.88, 0.5))
-		l.clip_text = true
-		l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		h.add_child(l)
-		_fleet_heads[f] = head
-		if compact:
-			H.outline_labels(head)
-	var label := head.find_child("Text", true, false) as Label
-	label.text = ("%s's fleet (%d) for %s" % [f.leader_name, f.members.size(), f.contract.get_target_name() if f.contract else "?"]).to_upper()
-	return head
+## Puts [param rows] in the list in that order: rows already there are moved
+## (never taken out, so a hovered row keeps its tooltip), the rest dropped.
+func _place_rows(rows: Array[Control]) -> void:
+	var keep := {}
+	for r in rows:
+		keep[r] = true
+	for child in _list.get_children():
+		if not keep.has(child):
+			_list.remove_child(child)
+	for i in rows.size():
+		var r := rows[i]
+		if r.get_parent() != _list:
+			_list.add_child(r)
+		if r.get_index() != i:
+			_list.move_child(r, i)
 
 
-## Roster entries with each fleet's members together, leader first, in the
-## place of the fleet's first member.
-static func _group_fleets(list: Array[Dictionary]) -> Array[Dictionary]:
-	var out: Array[Dictionary] = []
-	var done := {}
+func _fleet_row(f: MercFleet, tag: String) -> FleetRow:
+	var row := _fleet_heads.get(f) as FleetRow
+	if row == null:
+		row = FleetRow.new()
+		row.clicked.connect(_on_fleet_clicked)
+		row.right_clicked.connect(_on_fleet_right)
+		_fleet_heads[f] = row
+		row.accent = fleet_color(f)
+		row.system_tag = tag
+		row.bind(f)
+	return row
+
+
+## The accent of [param f]: the next of [constant FLEET_COLORS] when first seen.
+func fleet_color(f: MercFleet) -> Color:
+	if not _fleet_colors.has(f):
+		_fleet_colors[f] = FLEET_COLORS[_next_color % FLEET_COLORS.size()]
+		_next_color += 1
+	return _fleet_colors[f]
+
+
+## Role order with the tree: every fleet first (by system, then leader
+## name), its members under it, leader first; then the rest, each escort
+## under the miner it covers (when that miner is shown). Adds "fleet",
+## "branch" (PilotCard.Branch), "leader" and "accent" to the entries.
+func _group(list: Array[Dictionary]) -> Array[Dictionary]:
+	var fleets: Dictionary = {}
+	var by_ship := {}
 	for e in list:
-		var f := fleet_of(e["captain"] as Captain)
-		if f == null:
-			out.append(e)
-			continue
-		if done.has(f):
-			continue
-		done[f] = true
-		var group: Array[Dictionary] = []
-		for g in list:
-			if fleet_of(g["captain"] as Captain) == f:
-				group.append(g)
+		var c := e["captain"] as Captain
+		var f := fleet_of(c)
+		if f:
+			if not fleets.has(f):
+				fleets[f] = []
+			(fleets[f] as Array).append(e)
+		elif is_instance_valid(c.ship):
+			by_ship[c.ship] = e
+	var order: Array = fleets.keys()
+	order.sort_custom(func(a: MercFleet, b: MercFleet) -> bool:
+		var ra := int((fleets[a] as Array)[0].get("rank", 0))
+		var rb := int((fleets[b] as Array)[0].get("rank", 0))
+		return ra < rb if ra != rb else a.leader_name < b.leader_name)
+	var out: Array[Dictionary] = []
+	for f: MercFleet in order:
+		var group: Array = fleets[f]
 		group.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 			return f.members.find((a["captain"] as Captain).ship) < f.members.find((b["captain"] as Captain).ship))
-		out.append_array(group)
+		var col := fleet_color(f)
+		for i in group.size():
+			var g: Dictionary = group[i]
+			g["fleet"] = f
+			g["accent"] = col
+			g["branch"] = PilotCard.Branch.LAST if i == group.size() - 1 else PilotCard.Branch.MID
+			g["leader"] = (g["captain"] as Captain).ship == f.leader
+			out.append(g)
+	# Escorts: miner ship -> its escorts' entries, in list order (hung:
+	# by captain; a Dictionary key would change with the entry).
+	var under := {}
+	var hung := {}
+	for e in list:
+		var ward := escorted_miner(e["captain"] as Captain)
+		if ward and by_ship.has(ward) and not fleets.has(fleet_of(e["captain"] as Captain)):
+			if not under.has(ward):
+				under[ward] = []
+			(under[ward] as Array).append(e)
+			hung[e["captain"]] = true
+	for e in list:
+		if fleet_of(e["captain"] as Captain) or hung.has(e["captain"]):
+			continue
+		e["branch"] = PilotCard.Branch.NONE
+		e["leader"] = false
+		out.append(e)
+		var c := e["captain"] as Captain
+		if is_instance_valid(c.ship) and under.has(c.ship):
+			var esc: Array = under[c.ship]
+			for i in esc.size():
+				var g: Dictionary = esc[i]
+				g["branch"] = PilotCard.Branch.LAST if i == esc.size() - 1 else PilotCard.Branch.MID
+				g["accent"] = H.role_color("Mercenary")
+				g["leader"] = false
+				out.append(g)
 	return out
+
+
+## The miner [param c]'s ship escorts on an escort contract, or null.
+static func escorted_miner(c: Captain) -> Ship:
+	if not is_instance_valid(c.ship) or c.ship.brain == null or c.ship.brain.trip == null:
+		return null
+	var ec := c.ship.brain.trip.contract as EscortContract
+	if ec == null:
+		return null
+	var m := ec.miner_of(c.ship)
+	return m if is_instance_valid(m) and not m.dead else null
 
 
 func _refresh_cards() -> void:
@@ -347,6 +458,10 @@ func _refresh_cards() -> void:
 		var card := _cards[c] as PilotCard
 		if card.is_inside_tree():
 			card.refresh()
+	for f: MercFleet in _fleet_heads:
+		var row := _fleet_heads[f] as FleetRow
+		if row.is_inside_tree():
+			row.refresh()
 	_count_only()
 
 
@@ -386,6 +501,9 @@ func _count_only(all: Array[Dictionary] = []) -> void:
 func _on_card_clicked(card: PilotCard) -> void:
 	if hud == null or not is_instance_valid(card.target):
 		return
+	# A pilot of another system: the view goes there first (it clears the selection).
+	if SystemWorld.of(card.target) != (hud.view_manager.viewed if hud.view_manager else null):
+		hud.focus(card.target)
 	if hud.selection:
 		hud.selection.select(card.target)
 	_sync_selected()
@@ -399,6 +517,38 @@ func _on_card_double(card: PilotCard) -> void:
 	if hud.selection:
 		hud.selection.select(card.target)
 	_sync_selected()
+
+
+## Right click: the camera to the ship (its system first), at the zoom it has now.
+func _on_card_right(card: PilotCard) -> void:
+	if hud == null or not is_instance_valid(card.target):
+		return
+	hud.focus(card.target, _zoom())
+
+
+## Click on a fleet line: selects the fleet's target and centres the camera
+## on it (zoom kept); without a target in reach, the leader.
+func _on_fleet_clicked(row: FleetRow) -> void:
+	if hud == null:
+		return
+	var t := row.target()
+	if t == null or not t.is_visible_in_tree():
+		_on_fleet_right(row)
+		return
+	if hud.focus(t, _zoom()) and hud.selection:
+		hud.selection.select(t)
+
+
+## Right click on a fleet line: the camera to the leader, zoom kept.
+func _on_fleet_right(row: FleetRow) -> void:
+	var lead := row.leader_ship()
+	if hud and lead:
+		hud.focus(lead, _zoom())
+
+
+## The viewed camera's distance now (-1: the target's own focus distance).
+func _zoom() -> float:
+	return hud.camera.get_distance() if hud and hud.camera else -1.0
 
 
 func _sync_selected() -> void:

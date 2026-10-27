@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="TechDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/research/tech_def.gd" id="1_tech"]
+
+[resource]
+script = ExtResource("1_tech")
+id = &"eng_forward_operations"
+display_name = "Forward operations"
+field = 0
+tier = 2
+cost_credits = 900
+cost_titanium = 150
+research_time = 180.0
+prerequisites = Array[StringName]([&"eng_jump_navigation"])
+unlock_buildings = Array[StringName]([&"forward_station"])
+tags = PackedStringArray("building", "economy")
+benefit = "Build a second station and fly it to another system."
+description = "Drive tugs, life support and deployment drills for stations far from home. Unlocks the Forward Station: built beside the home station, then flown with an escort through the gates to a planet in another system, where it starts orbiting and works like a small home station."

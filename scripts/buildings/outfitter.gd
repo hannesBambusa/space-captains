@@ -9,6 +9,9 @@ extends Node
 ## lets it make). Modules not researched yet (Research) are not offered,
 ## except a salvaged rare part in the warehouse. Without an Outfitter
 ## captains cannot buy modules at all.
+## A captain only buys what the ship needs as what it is
+## (ShipLoadout.needs, the ship's own role): an explorer gets no drill and
+## no guns. A module it has no use for is sold back on the next visit.
 ##
 ## What they buy follows personality (slot weights in [constant SLOT_WEIGHTS]):
 ##   Bold      guns and engines
@@ -125,8 +128,9 @@ func choose_for(ship: Ship, in_stock_only: bool = false) -> ShipModule:
 	var weights: Array = SLOT_WEIGHTS[cap.personality]
 	var best: ShipModule = null
 	var best_score := 0.0
+	var role := ship.get_role_name()
 	for m in ModuleCatalog.shared().for_role(cap.role):
-		if not block_reason(cap, m).is_empty() or not ship.loadout.can_fit(m):
+		if not block_reason(cap, m).is_empty() or not ship.loadout.can_fit(m, role):
 			continue
 		if in_stock_only and f.free_stock_for(m, cap) <= 0:
 			continue
@@ -168,7 +172,7 @@ static func shop_status(ship: Ship) -> String:
 	var cheapest: ShipModule = null
 	var blocked: ShipModule = null
 	for m in ModuleCatalog.shared().for_role(cap.role):
-		if not ship.loadout.can_fit(m):
+		if not ship.loadout.can_fit(m, ship.get_role_name()):
 			continue
 		if not o.block_reason(cap, m).is_empty():
 			if blocked == null or m.tier < blocked.tier:
@@ -191,11 +195,12 @@ func visit(ship: Ship) -> ShipModule:
 	var cap := ship.captain
 	if f == null or cap == null:
 		return null
+	sell_back_unneeded(ship)
 	var order := f.order_of(cap)
 	if not order.is_empty():
 		var om := order["module"] as ShipModule
 		var why := block_reason(cap, om)
-		if not ship.loadout.can_fit(om) or not why.is_empty():
+		if not ship.loadout.can_fit(om, ship.get_role_name()) or not why.is_empty():
 			f.cancel_backorder(cap, "%s no longer fits the ship%s" % [om.display_name, " (%s)" % why.to_lower() if not why.is_empty() else ""])
 		elif f.free_stock_for(om, cap) > 0:
 			return sell(ship, om, "The order arrived")
@@ -249,7 +254,7 @@ func _why(cap: Captain, m: ShipModule) -> String:
 func sell(ship: Ship, m: ShipModule, context: String = "") -> ShipModule:
 	var cap := ship.captain
 	var f := factory()
-	if f == null or cap == null or not ship.loadout.can_fit(m) or not block_reason(cap, m).is_empty():
+	if f == null or cap == null or not ship.loadout.can_fit(m, ship.get_role_name()) or not block_reason(cap, m).is_empty():
 		return null
 	var order := f.order_of(cap)
 	var prepaid: bool = not order.is_empty() and order["module"] == m
@@ -283,6 +288,32 @@ func sell(ship: Ship, m: ShipModule, context: String = "") -> ShipModule:
 	sold.emit(sale)
 	changed.emit()
 	return fitted
+
+
+## Takes off every bought module [param ship] has no use for as what it is
+## (ShipLoadout.needs with the ship's own role), puts the hull's stock part
+## back and refunds the list price to the captain ("Sold back Mining Laser
+## Mk I: not for an explorer, +90 cr"). Runs on load (ShipCodec) and on
+## every Outfitter visit. Returns the credits refunded.
+static func sell_back_unneeded(ship: Ship) -> int:
+	if not is_instance_valid(ship) or ship.loadout == null or ship.captain == null:
+		return 0
+	var role := ship.get_role_name()
+	var cap := ship.captain
+	var refunded := 0
+	for m in ship.loadout.unneeded(role):
+		var why := ship.loadout.unneeded_reason(m, role)
+		ship.loadout.set_module(m.slot, ShipLoadout.stock_part(role, m.slot))
+		cap.wallet += m.cost
+		refunded += m.cost
+		var line := "Sold back %s: %s, +%s cr" % [m.display_name, why, Fmt.amount(m.cost)]
+		cap.add_history(line)
+		cap.flight_log.note(CaptainLog.Kind.PURCHASE, CaptainLog.Outcome.DID, line,
+				"A %s has no use for it; the Outfitter takes it back at the list price" % role.to_lower(), "Wallet %s cr" % Fmt.amount(cap.wallet))
+		EventLog.post("%s: %s" % [cap.captain_name, line], EventLog.Kind.INFO, ship if ship.is_inside_tree() else null)
+	if refunded > 0 and ship.is_inside_tree():
+		ship.refit()
+	return refunded
 
 
 # --- Save ---------------------------------------------------------------------

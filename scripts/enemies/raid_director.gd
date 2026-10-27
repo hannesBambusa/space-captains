@@ -24,6 +24,14 @@ extends Node
 ## Only bases that have arrived exist (ThreatDirector), so a faction raids
 ## once its first base is in; a base that just arrived waits
 ## SystemDef.arrival_raid_grace before it sends raiders.
+##
+## A forward station (F4, set up by CombatWorld): every clock reading is
+## time since [member start_offset] (the founding: first raid, pressure,
+## wave growth, FactionDef.raid_after), the first raid comes after the
+## grace (first_raid_time set to CombatWorld.forward_raid_grace), and with a
+## [member danger] above 0 the growing wave starts at [method danger_wave]
+## instead of [member base_wave]. Only the system's own bases raid (no
+## arrivals there, ThreatDirector.arrivals).
 
 signal raid_warned(den: ScavengerDen, size: int, objective_name: String)
 signal raid_started(den: ScavengerDen, size: int)
@@ -53,6 +61,11 @@ enum Aim { NEAREST, STRUCTURE, SHUTTLES, STATION }
 ## The station itself is only a raid objective after this many raids.
 @export var station_after_raids: int = 2
 
+## Sim time the clock counts from (0 at home, founded_at at a forward station).
+@export var start_offset: float = 0.0
+## The system's danger for the wave size (0 = home: [member base_wave]).
+@export var danger: int = 0
+
 var raids_sent: int = 0
 var _next_raid: float = 0.0
 var _rng := RandomNumberGenerator.new()
@@ -67,7 +80,7 @@ var pending_at: float = 0.0
 func _ready() -> void:
 	add_to_group(SimStepper.GROUP)
 	_rng.randomize()
-	_next_raid = SimClock.time + first_raid_time
+	_next_raid = maxf(SimClock.time, start_offset) + first_raid_time
 
 
 func _process(_delta: float) -> void:
@@ -103,9 +116,19 @@ func colony_size() -> int:
 	return world.threats.hired_captains() + world.threats.active_structures()
 
 
+## Sim seconds since [member start_offset] (the game, or the founding).
+func elapsed() -> float:
+	return maxf(SimClock.time - start_offset, 0.0)
+
+
+## First wave of a forward system by its danger: 1 (danger 1-2), 2 (3-4), 3 (5).
+func danger_wave() -> int:
+	return base_wave if danger <= 0 else clampi(ceili(danger / 2.0), 1, 3)
+
+
 ## 0..1: half from game time, half from colony size.
 func pressure() -> float:
-	return clampf(0.5 * SimClock.time / pressure_time, 0.0, 0.5) + clampf(0.5 * float(colony_size()) / pressure_colony, 0.0, 0.5)
+	return clampf(0.5 * elapsed() / pressure_time, 0.0, 0.5) + clampf(0.5 * float(colony_size()) / pressure_colony, 0.0, 0.5)
 
 
 ## Seconds to the next raid now (before jitter).
@@ -114,9 +137,10 @@ func interval() -> float:
 
 
 func wave_size() -> int:
-	var n := base_wave + int(SimClock.time / growth_time) + int(float(maxi(colony_size() - colony_base, 0)) / float(maxi(colony_step, 1)))
+	var first := danger_wave()
+	var n := first + int(elapsed() / growth_time) + int(float(maxi(colony_size() - colony_base, 0)) / float(maxi(colony_step, 1)))
 	if raids_sent < gentle_raids:
-		n = mini(n, raids_sent + 1)
+		n = mini(n, raids_sent + first)
 	return clampi(n, 1, max_wave)
 
 
@@ -146,7 +170,7 @@ func pick_den() -> ScavengerDen:
 		if d == null or not d.is_alive() or not d.is_raid_base() or SimClock.time - d.arrived_at < grace:
 			continue
 		var f := d.faction_def
-		if f.raid_weight <= 0.0 or SimClock.time < f.raid_after:
+		if f.raid_weight <= 0.0 or elapsed() < f.raid_after:
 			continue
 		if not by_faction.has(f):
 			by_faction[f] = [] as Array[ScavengerDen]
@@ -327,7 +351,8 @@ func _toast(text: String) -> void:
 # --- Save ---------------------------------------------------------------------
 
 func save_state() -> Dictionary:
-	var d := {"enabled": enabled, "raids_sent": raids_sent, "next_raid": _next_raid, "rng": SaveUtil.rng_state(_rng)}
+	var d := {"enabled": enabled, "raids_sent": raids_sent, "next_raid": _next_raid, "rng": SaveUtil.rng_state(_rng),
+			"start_offset": start_offset, "danger": danger}
 	if pending_size > 0 and is_instance_valid(pending_den):
 		d["pending"] = {"den": pending_den.def.name if pending_den.def else "", "size": pending_size, "aim": pending_aim, "at": pending_at,
 				"target": -1 if pending_target is StructureHull else (SaveIds.of(pending_target) if is_instance_valid(pending_target) else 0)}
@@ -338,6 +363,8 @@ func save_state() -> Dictionary:
 func load_state(d: Dictionary, refs: SaveRefs = null) -> void:
 	enabled = bool(d.get("enabled", enabled))
 	raids_sent = int(d.get("raids_sent", 0))
+	start_offset = float(d.get("start_offset", start_offset))
+	danger = int(d.get("danger", danger))
 	_next_raid = float(d.get("next_raid", _next_raid))
 	SaveUtil.set_rng(_rng, d.get("rng", {}))
 	_clear_pending()

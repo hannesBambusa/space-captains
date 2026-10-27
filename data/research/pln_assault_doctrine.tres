@@ -15,4 +15,5 @@ research_time = 220.0
 prerequisites = Array[StringName]([&"pln_orbital_survey"])
 unlock_buildings = Array[StringName]([&"raider_dock"])
 tags = PackedStringArray("building")
+benefit = "Raid planets and moons for fuel, water, metals and other goods."
 description = "Drop tactics for landing on hostile worlds. Unlocks the Raider Dock, where pilots fly dropships down to the planets for loot."

@@ -13,4 +13,5 @@ cost_iron = 40
 research_time = 90.0
 tags = PackedStringArray("economy")
 miner_hold = 0.1
+benefit = "Every miner carries more per trip, with no refit needed."
 description = "Standard racks in every miner's hold: miners carry 10% more per trip. Leads to the Bulk cargo holds."

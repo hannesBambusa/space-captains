@@ -15,4 +15,5 @@ research_time = 150.0
 prerequisites = Array[StringName]([&"wpn_ballistic_calibration"])
 unlock_modules = Array[StringName]([&"targeting_array_2"])
 tags = PackedStringArray("weapons")
+benefit = "A better targeting array: mercenaries hit more often."
 description = "Lead-calculating sights: the Mk II targeting array hits more often."

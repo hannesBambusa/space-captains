@@ -15,6 +15,8 @@ extends Resource
 ## Ore cost: mostly iron; advanced structures also need titanium.
 @export var cost_iron: int = 0
 @export var cost_titanium: int = 0
+## Water (a planet good) for structures that carry people (the Forward Station).
+@export var cost_water: int = 0
 @export var build_time: float = 20.0
 ## Clearance radius on the plane, used for placement and picking.
 @export var footprint_radius: float = 35.0
@@ -31,6 +33,11 @@ extends Resource
 ## False: listed in the build bar (locked) but not buildable yet, for
 ## structures a later phase brings in (the Raider Dock).
 @export var in_service: bool = true
+## Buildable at a forward station (BuildingManager.forward). Only the
+## Science Lab (and the Forward Station itself) are home only.
+@export var allowed_forward: bool = true
+## Most of this type per forward station; -1 = [member max_count].
+@export var forward_max_count: int = -1
 
 @export_group("Placement")
 ## Stands on its own (defense turrets): placed anywhere in the build zone
@@ -54,7 +61,7 @@ extends Resource
 @export var shuttle_supply_interval: float = 0.0
 
 @export_group("Station addon")
-## Built onto one of the Home Station's addon bays (BuildingManager.BAY_COUNT)
+## Built onto one of the station's addon bays (BuildingManager.bay_count)
 ## instead of standing on the plane: no footprint or zone checks. The
 ## model's origin is the attach point, its body along +Z (radially outward). The build menu lists addons in their own group.
 @export var station_addon: bool = false
@@ -90,7 +97,11 @@ extends Resource
 
 ## Ore cost in Economy.Ore order.
 func cost_ore() -> PackedInt32Array:
-	return Economy.cost(cost_iron, cost_titanium)
+	var c := Economy.cost(cost_iron, cost_titanium)
+	if cost_water > 0:
+		c = Economy.padded(c)
+		c[Economy.Ore.WATER] = cost_water
+	return c
 
 
 ## The building's model: [member model_path], else (addons) the scaled

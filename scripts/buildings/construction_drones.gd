@@ -397,7 +397,7 @@ func _station_home() -> Vector3:
 	var best := Vector3.ZERO
 	if station:
 		var best_d := INF
-		for i in 2:
+		for i in station.dock_pad_count:
 			var p := to_local(station.global_transform * station.dock_pad(i))
 			if p.length() < best_d:
 				best_d = p.length()

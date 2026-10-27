@@ -13,4 +13,5 @@ cost_iron = 60
 research_time = 90.0
 unlock_buildings = Array[StringName]([&"explorer_outpost"])
 tags = PackedStringArray("building")
+benefit = "Scout other systems through the jump gates."
 description = "Charts and drive tuning for jump gate travel. Unlocks the Explorer Outpost, where scouts take explore contracts through the gates and survey the systems beyond."

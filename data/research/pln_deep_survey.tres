@@ -15,4 +15,5 @@ research_time = 260.0
 prerequisites = Array[StringName]([&"pln_orbital_survey"])
 unlock_modules = Array[StringName]([&"prospector_array_3", &"wreck_scanner_3"])
 tags = PackedStringArray("economy")
+benefit = "The best scanners: the richest rock and wrecks, seen from furthest away."
 description = "Deep scans that see through rock and hull: Mk III prospector arrays and wreck scanners."

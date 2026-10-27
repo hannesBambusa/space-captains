@@ -15,4 +15,5 @@ research_time = 280.0
 prerequisites = Array[StringName]([&"wpn_fire_control", &"wpn_linked_feeds"])
 unlock_modules = Array[StringName]([&"targeting_array_3", &"ammo_rack_3"])
 tags = PackedStringArray("weapons")
+benefit = "The best targeting arrays and ammo racks for mercenaries."
 description = "Targeting that reads a pilot's habits: Mk III targeting arrays and ammo racks."

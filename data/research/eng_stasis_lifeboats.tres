@@ -15,4 +15,5 @@ research_time = 240.0
 prerequisites = Array[StringName]([&"eng_rescue_beacons"])
 unlock_modules = Array[StringName]([&"survival_cell_3", &"ejection_rig_3"])
 tags = PackedStringArray("defence")
+benefit = "The best odds for a captain to survive losing their ship."
 description = "Pods that keep a pilot alive for days: Mk III survival cells and ejection rigs."

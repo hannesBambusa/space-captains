@@ -14,4 +14,5 @@ cost_titanium = 40
 research_time = 170.0
 unlock_modules = Array[StringName]([&"reinforced_plating_2", &"armor_plating_2"])
 tags = PackedStringArray("defence")
+benefit = "Tougher hull plating, so ships last longer in a fight."
 description = "Layered titanium hull plates: Mk II plating and armour."

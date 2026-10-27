@@ -14,4 +14,5 @@ cost_titanium = 30
 research_time = 140.0
 unlock_modules = Array[StringName]([&"ammo_rack_2"])
 tags = PackedStringArray("weapons")
+benefit = "A better ammo rack: mercenaries fire faster."
 description = "Belt-linked feeds that never jam: the Mk II ammo rack fires faster."

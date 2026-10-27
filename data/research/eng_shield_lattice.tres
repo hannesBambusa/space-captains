@@ -15,4 +15,5 @@ research_time = 180.0
 prerequisites = Array[StringName]([&"eng_shield_emitters"])
 unlock_modules = Array[StringName]([&"shield_projector_2", &"deflector_2"])
 tags = PackedStringArray("defence")
+benefit = "Stronger shields that recover faster."
 description = "Overlapping emitter fields that recover faster: Mk II shields."

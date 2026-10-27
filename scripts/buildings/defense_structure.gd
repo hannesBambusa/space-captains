@@ -56,8 +56,8 @@ func setup(owner_building: Building) -> void:
 func _process(delta: float) -> void:
 	if building == null:
 		return
-	if not SimClock.paused:
-		sim_step(delta * SimClock.speed)
+	# Substepped: the guns' fire rate holds at high sim speed.
+	SimClock.substep(sim_step)
 	_animate(delta)
 
 

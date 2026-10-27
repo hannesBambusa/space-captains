@@ -3,10 +3,14 @@ extends PanelContainer
 ## Bottom-right panel for a selected hostile (scavenger ship or Scavenger
 ## Den) or a scrap field. Hostiles: name, status, hull and shield bars, the
 ## bounties posted on them (with cancel) and the "Post bounty" form with a
-## reward stepper. Posting a bounty reserves its reward from the credits
+## reward stepper; one bounty per target, so with one posted the form is
+## "Update bounty" with its reward filled in (a raise reserves the
+## difference, a cut gives it back only while nobody has taken it). Posting a bounty reserves its reward from the credits
 ## (blocked, with the reason, when they do not cover it). Under the form a
-## fleet estimate (MercFleet.assess: "Needs about 5 mercenaries, 3
-## available", "Too dangerous for the current fleet") and why the
+## fleet estimate (MercFleet.assess: "A fleet of 4 can take it", "Needs
+## about 5 mercenaries, 3 available", "Too dangerous for the current
+## fleet"; a forming or flying fleet: "Fleet 3/5 forming, 72% of what
+## Obsidian Syndicate Fortress needs") and why the
 ## mercenaries who looked at it refused (one line each, with the numbers). Scrap fields: scrap amount and time left, the salvage
 ## contracts on it and the "Post salvage contract" form (a per-load bonus on
 ## top of the yard's pay; salvagers also work fields without one). Cargo
@@ -26,6 +30,8 @@ extends PanelContainer
 @export var salvage_max: int = 200
 @export var salvage_step: int = 5
 
+const MINUS_TIP := "Lower the reward (Shift: x5)"
+
 var hud: HUD
 var target: Node3D
 var reward: int = 150
@@ -44,6 +50,7 @@ var _contracts_header: Label
 var _reward_title: Label
 var _bounties: VBoxContainer
 var _reward_value: Label
+var _minus: Button
 var _post: Button
 var _post_hint: Label
 var _fleet_hint: Label
@@ -103,11 +110,11 @@ func _ready() -> void:
 	_reward_title = UIUtil.label("Reward", &"DimLabel")
 	row.add_child(_reward_title)
 	row.add_child(UIUtil.spacer())
-	var minus := UIUtil.button("-", &"IconButton")
-	minus.custom_minimum_size = Vector2(28.0, 24.0)
-	minus.tooltip_text = "Lower the reward (Shift: x5)"
-	minus.pressed.connect(_step_reward.bind(-1))
-	row.add_child(minus)
+	_minus = UIUtil.button("-", &"IconButton")
+	_minus.custom_minimum_size = Vector2(28.0, 24.0)
+	_minus.tooltip_text = MINUS_TIP
+	_minus.pressed.connect(_step_reward.bind(-1))
+	row.add_child(_minus)
 	_reward_value = UIUtil.label("", &"NumberLabel")
 	_reward_value.custom_minimum_size.x = 84.0
 	_reward_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -157,6 +164,9 @@ func show_target(t: Node3D) -> void:
 		reward = den_reward if t is ScavengerDen else (salvage_reward if t is ScrapField else ship_reward)
 		if fac:
 			reward = clampi(roundi(reward * fac.bounty_mult / float(reward_step)) * reward_step, reward_min, reward_max)
+		var have := ContractBoard.bounty_on(t)
+		if have:
+			reward = have.reward
 	_contracts_header.text = "SALVAGE CONTRACTS" if t is ScrapField else "BOUNTIES"
 	_reward_title.text = "Bonus per load" if t is ScrapField else "Reward"
 	_post.text = "Post salvage contract" if t is ScrapField else "Post bounty"
@@ -227,21 +237,36 @@ func _refresh() -> void:
 	if target is ScrapField:
 		var sf := target as ScrapField
 		_fleet_hint.visible = false
+		_minus.disabled = false
+		_minus.tooltip_text = MINUS_TIP
 		var why := ContractBoard.post_problem(reward)
 		_post.disabled = sf.amount <= 0 or not why.is_empty()
 		_post.tooltip_text = why
-		var yard := hud.manager.find_active(&"salvage_yard") if hud and hud.manager else null
+		var mgr := hud.local_manager() if hud else null
+		var yard := mgr.find_active(&"salvage_yard") if mgr else null
 		_post_hint.text = "Optional bonus, paid by you on delivery: %d cr per load on top of the yard's %d. It draws salvagers here first and makes dangerous wrecks worth it. %s" % [reward, SalvageContract.FAIR_REWARD,
 				"Salvagers decide by pay, distance, danger and field size." if yard else "Build a Salvage Yard and hire salvagers to work it."]
 	else:
 		var alive := (target is ScavengerDen or target is ScavengerShip) and Combat.is_live(target)
-		var why := ContractBoard.post_problem(reward, true)
-		_post.disabled = not alive or not why.is_empty()
+		var have := ContractBoard.bounty_on(target)
+		var why := ContractBoard.update_problem(have, reward) if have else ContractBoard.post_problem(reward, true)
+		_post.text = "Update bounty" if have else "Post bounty"
+		_post.disabled = not alive or not why.is_empty() or (have != null and reward == have.reward)
 		_post.tooltip_text = why
+		var locked := have != null and have.is_taken() and reward <= have.reward
+		_minus.disabled = locked
+		_minus.tooltip_text = ContractBoard.UPDATE_TAKEN if locked else MINUS_TIP
 		if not alive:
 			_post_hint.text = "Destroyed."
 		elif not why.is_empty():
 			_post_hint.text = why + "."
+		elif have:
+			var diff := reward - have.reward
+			if diff == 0:
+				_post_hint.text = "One bounty per target: %s cr is posted. Step the reward and update it: a raise is reserved now, a cut comes back while nobody has taken it." % UIUtil.amount(have.reward)
+			else:
+				_post_hint.text = "Update the posted %s cr to %s cr: %s cr %s. Takers and their fleet go on; the split at the kill uses the new reward." % [UIUtil.amount(have.reward),
+						UIUtil.amount(reward), UIUtil.amount(absi(diff)), "more reserved from your credits now" if diff > 0 else "back to your credits"]
 		else:
 			_post_hint.text = "Reserved from your credits now (%s cr held for it), paid on destruction to the mercenaries who fought it, split between them; what is left comes back. Cancel: all of it back while nobody has taken it, half once taken." % UIUtil.amount(reward)
 		_fleet_timer -= 0.2
@@ -261,11 +286,11 @@ func _fleet_text() -> String:
 	for c in ContractBoard.get_for_target(target):
 		if c is BountyContract:
 			bounty = c as BountyContract
-	var probe := bounty if bounty else BountyContract.new(target, reward, MercFleet.MAX_SIZE if target is ScavengerDen else 2)
+	var probe := bounty if bounty else BountyContract.new(target, reward, MercFleet.MAX_SIZE)
 	var lines: PackedStringArray = []
 	var need := MercFleet.target_need(target)
 	if bounty and bounty.fleet and bounty.fleet.state != MercFleet.State.DONE:
-		lines.append("%s, power %.1f of %.1f needed" % [bounty.fleet.get_label(), bounty.fleet.power(), need * MercFleet.FLEET_POWER_SHARE])
+		lines.append("%s (power %.1f of %.1f)." % [bounty.fleet.get_progress_label(), bounty.fleet.power(), bounty.fleet.goal()])
 	elif need <= MercFleet.SOLO_NEED:
 		lines.append("One mercenary can take it on.")
 	else:
@@ -314,6 +339,8 @@ func _on_post() -> void:
 	if target is ScrapField:
 		ContractBoard.post_salvage(target as ScrapField, reward)
 	elif (target is ScavengerDen or target is ScavengerShip) and Combat.is_live(target):
-		ContractBoard.post_bounty(target, reward, MercFleet.MAX_SIZE if target is ScavengerDen else 2)
+		# One bounty per target: posting on one that has a bounty updates it.
+		ContractBoard.post_bounty(target, reward, MercFleet.MAX_SIZE)
+		_refresh()
 
 

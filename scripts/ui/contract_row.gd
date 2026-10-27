@@ -6,7 +6,8 @@ extends OverviewRow
 ## station can't pay" while the credits do not cover one payment, and a
 ## cancel button (its tooltip says what a bounty's escrow does: all back
 ## while nobody has taken it, half back and half to the takers once taken). Click = camera flies to the contract beacon and the target
-## is selected.
+## is selected (the view switches to its system first). Outside home the
+## target is tagged with its system ("[Ostra] Flint Cluster").
 
 var contract: Contract
 var hud: HUD
@@ -92,8 +93,12 @@ static func _focus_target(c: Contract, owner_hud: HUD) -> Node3D:
 	return c.target
 
 
+## The target ("[Ostra] Flint Cluster" outside home) or the reward.
 static func _title_for(c: Contract, show_target: bool) -> String:
-	return c.get_target_name() if show_target else c.get_reward_text()
+	if not show_target:
+		return c.get_reward_text()
+	var tag := HUD.system_tag(c.system_id)
+	return (tag + " " if not tag.is_empty() else "") + c.get_target_name()
 
 
 static func _clock(t: float) -> String:

@@ -37,6 +37,9 @@ const TIER_NAMES: PackedStringArray = ["", "Tier I", "Tier II", "Tier III"]
 ## Prepared for a later phase: not listed, cannot be funded.
 @export var hidden: bool = false
 @export_multiline var description: String = ""
+## One plain line on what the project is good for (the research tooltip's
+## lead line, above the benefits made from the unlocks and numbers).
+@export var benefit: String = ""
 
 
 func cost_ore() -> PackedInt32Array:

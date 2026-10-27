@@ -23,6 +23,8 @@ extends Node
 ## DenDef.claim_lead seconds before its own arrival would be due, so a new
 ## faction shows itself early; its intro posts then. The base itself comes
 ## at its usual time, at least half the claim lead after the claim.
+## A forward station system has [member arrivals] off (F4): only the bases
+## already there; the threat clock still runs.
 
 signal changed
 
@@ -42,6 +44,8 @@ var introduced: Array[StringName] = []
 ## Dens whose planet claim was made: DenDef.name -> SimClock.time of the claim.
 var claimed_for: Dictionary = {}
 var site: DenArrivalSite
+## New bases arrive (false in a forward station system).
+var arrivals := true
 
 var _last_time: float = 0.0
 
@@ -68,6 +72,8 @@ func sim_step(_dt: float) -> void:
 	var crowded := alive >= sd.crowd_bases
 	var rate := 1.0 + sd.cleared_speedup if alive == 0 else (sd.crowd_slowdown if crowded else 1.0)
 	threat_time += dt * rate
+	if not arrivals:
+		return
 	if pending:
 		if SimClock.time >= pending_at:
 			_arrive(sys)
@@ -174,7 +180,7 @@ func active_structures() -> int:
 ## Vague hint for the overview: "Next: unknown signals, ~6 min" ("" while
 ## an arrival is announced or nothing is left to come).
 func outlook_text() -> String:
-	if pending:
+	if pending or not arrivals:
 		return ""
 	var next := next_den()
 	if next == null:
@@ -259,13 +265,14 @@ func save_state() -> Dictionary:
 	for id in introduced:
 		intro.append(String(id))
 	return {"threat_time": threat_time, "arrived": arrived.duplicate(), "pending": pending.name if pending else "", "pending_at": pending_at,
-			"last_arrival": last_arrival, "introduced": intro, "claimed_for": claimed_for.duplicate()}
+			"last_arrival": last_arrival, "introduced": intro, "claimed_for": claimed_for.duplicate(), "arrivals": arrivals}
 
 
 ## Before the dens are loaded: builds the arrived dens (no warp-in; their
 ## state and ships come from the save) and the arrival site of a pending one.
 func load_state(d: Dictionary) -> void:
 	_last_time = SimClock.time
+	arrivals = bool(d.get("arrivals", arrivals))
 	threat_time = float(d.get("threat_time", SimClock.time))
 	arrived = (d.get("arrived", {}) as Dictionary).duplicate()
 	pending_at = float(d.get("pending_at", 0.0))

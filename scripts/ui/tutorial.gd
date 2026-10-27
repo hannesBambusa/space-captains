@@ -68,7 +68,7 @@ func setup(owner_hud: HUD) -> void:
 		hud.manager.building_added.connect(_on_building)
 		hud.manager.building_changed.connect(_on_building)
 	ContractBoard.contract_posted.connect(func(c: Contract) -> void:
-		if step == POST_CONTRACT and c is MiningContract:
+		if step == POST_CONTRACT and c is MiningContract and c.system_id == ClusterNetwork.HOME_ID:
 			advance())
 	Economy.cargo_received.connect(func(ore: PackedInt32Array, _source: String) -> void:
 		if step == SELL_ORE:
@@ -141,7 +141,7 @@ func _is_met(s: int) -> bool:
 			return _has_crew(MINING_ID)
 		POST_CONTRACT:
 			for c in ContractBoard.get_listed():
-				if c is MiningContract:
+				if c is MiningContract and c.system_id == ClusterNetwork.HOME_ID:
 					return true
 			return false
 		SELL_ORE:

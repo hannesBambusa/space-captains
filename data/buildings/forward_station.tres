@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="BuildingDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/building_def.gd" id="1_bdef"]
+[ext_resource type="Script" path="res://scripts/buildings/forward_station_yard.gd" id="2_yard"]
+
+[resource]
+script = ExtResource("1_bdef")
+id = &"forward_station"
+allowed_forward = false
+display_name = "Forward Station"
+short_label = "Forward Station"
+description = "A second station, built here beside the home station. Once finished it is a mobile station: select it, set a destination (a planet in a charted system of danger 4 or less without a station) and it posts an escort contract. It leaves with its escorts, flies through the gates and starts orbiting the planet you picked, where it works like a small home station. At most 2 forward stations."
+model_path = "res://assets/models/station/station_forward.glb"
+cost_credits = 2500
+cost_iron = 400
+cost_titanium = 150
+cost_water = 200
+build_time = 60.0
+footprint_radius = 62.0
+standalone = true
+placeholder_tint = Color(1, 0.78, 0.5, 1)
+service_script = ExtResource("2_yard")

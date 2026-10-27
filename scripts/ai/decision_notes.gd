@@ -242,8 +242,8 @@ static func detail(brain: CaptainBrain, e: RoleEvaluator.Evaluation) -> String:
 	if t.has("need"):
 		lines.append("Strength: target needs %.1f ships like theirs, solo up to %.1f" % [float(t["need"]), MercFleet.SOLO_NEED])
 	if t.has("fleet_text"):
-		lines.append("Fleet: %s; %d free, %d%% of the need must be covered by their combined power" % [String(t["fleet_text"]), int(t.get("fleet_available", 0)),
-				roundi(MercFleet.FLEET_POWER_SHARE * 100.0)])
+		lines.append("Fleet: %s; %d free, their combined power must cover %d%% of the need" % [String(t["fleet_text"]), int(t.get("fleet_available", 0)),
+				roundi(float(t.get("fleet_share", MercFleet.FLEET_POWER_SHARE)) * 100.0)])
 	if t.has("cover"):
 		lines.append("Fleet cover: danger x%.2f (need against the fleet's power with this ship)" % float(t["cover"]))
 	if t.has("daring"):

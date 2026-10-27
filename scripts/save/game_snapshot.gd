@@ -5,9 +5,11 @@ extends RefCounted
 ## [method apply_scene] on the fresh scene, before its first sim step).
 ## Split in two: the globals (autoloads, the tutorial: [method capture_globals])
 ## and one live system ([method capture_system] / [method apply_system]),
-## both in the same flat Dictionary. Only home is saved as a system: the
-## remote ones are data in Sector ("cluster"), live ones sync into it first
-## (ViewManager.sync_states); a load always starts at home.
+## both in the same flat Dictionary. Home is saved as a system, and so is
+## every forward station system (F3: "forward", by id, loaded together
+## with home, [method apply_systems]); the other remote ones are data in
+## Sector ("cluster"), live ones sync into it first (ViewManager.sync_states);
+## a load always starts at home.
 ##
 ## Saved: the sim clock, economy, event log, every captain (all fields,
 ## traits, rank, wallet, career stats, decision log), every building
@@ -55,10 +57,16 @@ extends RefCounted
 ## discoveries under "cluster", captains' survey counts) added keys only.
 ## The credit log (the "ledger" key, Economy.ledger) was added without a
 ## bump: a save without it loads with an empty ledger.
+## F4 (a forward station's "supply": upkeep owed, water state, hauling fee
+## totals and clocks; the directors' start_offset, danger and arrivals)
+## added keys only: a station saved without them starts its clocks fresh.
 const VERSION := 3
 
 
-## The whole game: the globals and the home system.
+## The whole game: the globals, the home system and every forward station
+## system ("forward": {id: its [method capture_system]}). Each contract is
+## saved once, with its system (ContractCodec.system_of); home's part takes
+## the rest (remote systems without a station).
 static func capture(tree: SceneTree) -> Dictionary:
 	# Live remote systems write themselves into Sector first (they stay live).
 	var vm := ViewManager.of(tree)
@@ -66,11 +74,40 @@ static func capture(tree: SceneTree) -> Dictionary:
 		vm.sync_states()
 	var d := capture_globals(tree)
 	var home := SystemWorld.home(tree)
+	var stations := station_worlds(tree)
+	var trips: Array[Contract] = []
 	if home:
-		d.merge(capture_system(home), true)
+		d.merge(capture_system(home, trips, false), true)
+	var fw := {}
+	for id: StringName in stations:
+		fw[String(id)] = capture_system(stations[id], trips, false)
+	if home:
+		d["contracts"] = ContractCodec.save_all(trips, func(c: Contract) -> bool: return not stations.has(ContractCodec.system_of(c)))
+	var systems: Dictionary = (d["cluster"] as Dictionary).get("systems", {})
+	for id: StringName in stations:
+		fw[String(id)]["contracts"] = ContractCodec.save_all(trips, func(c: Contract) -> bool: return ContractCodec.system_of(c) == id)
+		# The live part holds them: no stale data copy.
+		var sd: Dictionary = systems.get(String(id), {})
+		sd["ships"] = []
+		sd["scrap"] = []
+	if not fw.is_empty():
+		d["forward"] = fw
 	# Last: saving hands out ids.
 	d["ids_next"] = SaveIds.next
 	return d
+
+
+## The live forward station systems (pinned, with a station), by id.
+static func station_worlds(tree: SceneTree) -> Dictionary:
+	var out := {}
+	var vm := ViewManager.of(tree)
+	if vm == null:
+		return out
+	for id: StringName in vm.worlds:
+		var w := vm.world(id)
+		if w and not w.is_home and w.has_station and vm.is_pinned(id):
+			out[id] = w
+	return out
 
 
 ## Autoload state and the tutorial (everything outside the systems).
@@ -92,8 +129,9 @@ static func capture_globals(tree: SceneTree) -> Dictionary:
 
 ## One live system: captains, buildings, clusters, dens, scrap, ships and
 ## their contracts, fleets, the raid and threat directors, claims, zones,
-## the camera.
-static func capture_system(w: SystemWorld) -> Dictionary:
+## a forward station's supply (StationSupply), the camera. The contracts the ships are on go into [param trips];
+## without [param with_contracts] the caller saves the contracts.
+static func capture_system(w: SystemWorld, trips: Array[Contract] = [], with_contracts: bool = true) -> Dictionary:
 	var sys := w.sys
 	var mgr := w.buildings
 	var world := w.combat
@@ -112,15 +150,17 @@ static func capture_system(w: SystemWorld) -> Dictionary:
 		for f in world.get_scrap_fields():
 			scrap.append(f.save_state())
 	d["scrap"] = scrap
-	var trip_contracts: Array[Contract] = []
-	d["ships"] = ShipCodec.save_all(w, trip_contracts)
-	d["contracts"] = ContractCodec.save_all(trip_contracts)
+	d["ships"] = ShipCodec.save_all(w, trips)
+	if with_contracts:
+		d["contracts"] = ContractCodec.save_all(trips)
 	d["fleets"] = _save_fleets(w)
 	d["raids"] = world.raids.save_state() if world and world.raids else {}
 	d["threats"] = world.threats.save_state() if world and world.threats else {}
 	d["gate_raids"] = world.gate_raids.save_state() if world and world.gate_raids else {}
 	d["claims"] = world.claims.save_state() if world and world.claims else {}
 	d["zones"] = world.zones.save_state() if world and world.zones else {}
+	if w.supply:
+		d["supply"] = w.supply.save_state()
 	d["camera"] = _save_camera(w)
 	return d
 
@@ -236,17 +276,34 @@ static func apply_globals(d: Dictionary) -> void:
 	SaveUtil.set_rng(Career.rng, rng.get("career", {}))
 
 
-## Everything in the scene: the tutorial, then the home system. The scene
-## is in the tree and built; nothing has stepped yet.
+## Everything in the scene: the tutorial, then the home system and the
+## forward station systems (pinned and built here first, from their
+## RemoteSystemState without its ship and scrap copies, so the deferred
+## ForwardStations pin finds them live). The scene is in the tree and
+## built; nothing has stepped yet.
 static func apply_scene(tree: SceneTree, d: Dictionary) -> void:
 	var tut := Tutorial.of(tree)
 	if tut:
 		tut.load_state(d.get("tutorial", {}))
 	var home := SystemWorld.home(tree)
+	var parts := []
 	if home:
-		apply_system(home, d)
-		if Research.legacy_pending:
-			Research.grant_legacy(home)
+		parts.append([home, d])
+	var vm := ViewManager.of(tree)
+	var fw: Dictionary = d.get("forward", {})
+	for key: String in fw:
+		var id := StringName(key)
+		var st := Sector.state(id)
+		if vm == null or st == null or st.station.is_empty():
+			continue
+		st.ships.clear()
+		st.scrap.clear()
+		var w := vm.pin(id)
+		if w:
+			parts.append([w, fw[key]])
+	apply_systems(parts)
+	if home and Research.legacy_pending:
+		Research.grant_legacy(home)
 	var rs := RemoteSim.of(tree)
 	if rs:
 		rs.after_load()
@@ -255,16 +312,56 @@ static func apply_scene(tree: SceneTree, d: Dictionary) -> void:
 ## One system's part of [param d] (see [method capture_system]) into the
 ## freshly built system [param w].
 static func apply_system(w: SystemWorld, d: Dictionary) -> void:
+	apply_systems([[w, d]])
+
+
+## Several systems' parts ([[SystemWorld, Dictionary], ...]) with one set
+## of refs, stage by stage across all of them (captains, then buildings and
+## bases, then ships, then contracts, then the links), so a ship or
+## contract in one system may point into another.
+static func apply_systems(parts: Array) -> void:
 	var refs := SaveRefs.new()
+	for p: Array in parts:
+		for cd: Dictionary in (p[1] as Dictionary).get("captains", []):
+			# A captain flying in another system is in both parts.
+			if refs.find(int(cd["id"])) == null:
+				refs.add(int(cd["id"]), Captain.from_save(cd))
+	var ctx: Array[Dictionary] = []
+	for p: Array in parts:
+		ctx.append(_apply_bases(p[0] as SystemWorld, p[1] as Dictionary, refs))
+	for c in ctx:
+		for sd: Dictionary in (c["d"] as Dictionary).get("ships", []):
+			var s := ShipCodec.create(c["w"] as SystemWorld, sd, refs)
+			if s:
+				(c["ships"] as Array).append([s, sd])
+	for c in ctx:
+		var mgr := (c["w"] as SystemWorld).buildings
+		if mgr:
+			for bd: Dictionary in ((c["d"] as Dictionary).get("buildings", {}) as Dictionary).get("buildings", []):
+				var b := refs.building(int(bd["id"]))
+				if b:
+					b.load_services(bd, refs)
+		var den_data: Dictionary = c["den_data"]
+		for den: ScavengerDen in den_data:
+			den.restore_ships(den_data[den], refs)
+	for c in ctx:
+		ContractCodec.restore_all((c["d"] as Dictionary).get("contracts", {}), refs, c["belts"], c["w"])
+	for c in ctx:
+		_apply_links(c, refs)
+
+
+## Everything before the ships: buildings, zones, directors' bases,
+## clusters, dens, the gate raids' bases, scrap. Returns the stage context.
+static func _apply_bases(w: SystemWorld, d: Dictionary, refs: SaveRefs) -> Dictionary:
 	var sys := w.sys
 	var mgr := w.buildings
 	var world := w.combat
-	for cd: Dictionary in d.get("captains", []):
-		refs.add(int(cd["id"]), Captain.from_save(cd))
 	if mgr:
 		mgr.load_state(d.get("buildings", {}), refs)
 	if world and world.zones:
 		world.zones.load_state(d.get("zones", {}))
+	if w.supply:
+		w.supply.load_state(d.get("supply", {}))
 	var belts := {}
 	var den_data := {}
 	if world and world.threats:
@@ -299,20 +396,16 @@ static func apply_system(w: SystemWorld, d: Dictionary) -> void:
 	if world:
 		for fd: Dictionary in d.get("scrap", []):
 			refs.add(int(fd["id"]), ScrapField.restore(world, fd))
-	var ships := []
-	for sd: Dictionary in d.get("ships", []):
-		var s := ShipCodec.create(w, sd, refs)
-		if s:
-			ships.append([s, sd])
-	if mgr:
-		for bd: Dictionary in (d.get("buildings", {}) as Dictionary).get("buildings", []):
-			var b := refs.building(int(bd["id"]))
-			if b:
-				b.load_services(bd, refs)
-	for den: ScavengerDen in den_data:
-		den.restore_ships(den_data[den], refs)
-	ContractCodec.restore_all(d.get("contracts", {}), refs, belts, w)
-	for pair in ships:
+	return {"w": w, "d": d, "belts": belts, "den_data": den_data, "ships": []}
+
+
+## After the contracts: ships finish (brains, trips), fleets, claim links,
+## the raid director, the camera.
+static func _apply_links(c: Dictionary, refs: SaveRefs) -> void:
+	var w := c["w"] as SystemWorld
+	var d := c["d"] as Dictionary
+	var world := w.combat
+	for pair: Array in c["ships"]:
 		ShipCodec.finish(pair[0] as Ship, pair[1] as Dictionary, refs)
 	for fd: Dictionary in d.get("fleets", []):
 		ShipCodec.restore_fleet(fd, refs)

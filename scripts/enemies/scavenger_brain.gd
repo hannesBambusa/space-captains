@@ -400,6 +400,9 @@ func _follow_lead() -> bool:
 
 ## Is [param s] prey for this faction?
 func _is_prey(s: Ship) -> bool:
+	if s is MobileStation:
+		# A forward station on its way: every faction goes for it.
+		return true
 	if s is EscapePod:
 		return fac.hunts_pods
 	if s is SalvagerShip:

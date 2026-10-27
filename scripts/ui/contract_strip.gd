@@ -7,7 +7,9 @@ extends VBoxContainer
 ## waiting"). Click = camera flies to the contract's beacon and its target
 ## is selected (as ContractRow); hovering a row shows its cancel button
 ## (tooltip says what happens to a bounty's escrow). At most
-## [member max_rows] rows; "+N more" opens the CONTRACTS tab. The HUD
+## [member max_rows] rows; "+N more" opens the CONTRACTS tab. Home's
+## contracts first, then each forward station's, tagged "[Ostra]"; a click
+## on one of those switches the view there (HUD.focus). The HUD
 ## places it (HUD._layout_left).
 
 const H := preload("res://scripts/ui/theme/hud_style.gd")
@@ -64,7 +66,8 @@ class ContractLine:
 		var c := contract
 		var d := {}
 		d["icon"] = ContractStrip.type_icon(c)
-		d["target"] = c.get_target_name()
+		var tag := HUD.system_tag(c.system_id)
+		d["target"] = (tag + " " if not tag.is_empty() else "") + c.get_target_name()
 		d["reward"] = c.get_reward_text()
 		var n := c.takers.size()
 		var team := c.get_activity_text()
@@ -75,18 +78,32 @@ class ContractLine:
 		d["hover"] = hover
 		if d != _d:
 			_d = d
-			var tip := "%s\n%s\nPaid out: %s cr" % [c.get_title(), c.get_reward_text(), Economy.format_amount(c.credits_paid)]
-			if c is BountyContract:
-				tip += "\nReserved: %s cr" % Economy.format_amount((c as BountyContract).escrow)
-			elif c is ExploreContract:
-				tip += "\nReserved: %s cr" % Economy.format_amount((c as ExploreContract).escrow)
-			if c.is_paused():
-				tip += "\nPaused: the station can't pay one %s cr payment, captains won't take it until credits come in" % Economy.format_amount(c.reward)
-			if not String(d["warn"]).is_empty():
-				tip += "\n%s. %s." % [d["warn"], c.get_warning_hint()]
-			tooltip_text = tip + "\nClick: show it    Hover: cancel"
-			cancel.tooltip_text = ContractBoard.cancel_text(c)
+			# A stable key: the text is read live by the custom tooltip (a
+			# changed tooltip_text makes Godot close it on a mouse move).
+			tooltip_text = c.get_title()
+			var ct := ContractBoard.cancel_text(c)
+			if cancel.tooltip_text != ct:
+				cancel.tooltip_text = ct
 			queue_redraw()
+
+	func _make_custom_tooltip(_for_text: String) -> Object:
+		return RichTooltip.live_label(_tip)
+
+	func _tip() -> String:
+		var c := contract
+		if c == null:
+			return ""
+		var tip := "%s\n%s\nPaid out: %s cr" % [c.get_title(), c.get_reward_text(), Economy.format_amount(c.credits_paid)]
+		if c is BountyContract:
+			tip += "\nReserved: %s cr" % Economy.format_amount((c as BountyContract).escrow)
+		elif c is ExploreContract:
+			tip += "\nReserved: %s cr" % Economy.format_amount((c as ExploreContract).escrow)
+		if c.is_paused():
+			tip += "\nPaused: the station can't pay one %s cr payment, captains won't take it until credits come in" % Economy.format_amount(c.reward)
+		var warn := c.get_warning_text()
+		if not warn.is_empty():
+			tip += "\n%s. %s." % [warn, c.get_warning_hint()]
+		return tip + "\nClick: show it    Hover: cancel"
 
 	func _draw() -> void:
 		if _d.is_empty():
@@ -216,17 +233,26 @@ func _process(delta: float) -> void:
 		_refresh()
 
 
+## Rows are kept for contracts still listed (a row under the mouse keeps
+## its tooltip).
 func _rebuild() -> void:
+	var old := {}
 	for l in _lines:
-		l.queue_free()
+		old[l.contract] = l
 	_lines.clear()
-	var list := ContractBoard.get_listed()
+	var list := hud.contracts_by_system(ContractBoard.get_listed())
 	visible = not list.is_empty()
 	_title.text = "CONTRACTS %d" % list.size()
 	for i in mini(list.size(), max_rows):
-		var l := ContractLine.new(list[i], self)
-		_rows_box.add_child(l)
+		var l := old.get(list[i]) as ContractLine
+		old.erase(list[i])
+		if l == null:
+			l = ContractLine.new(list[i], self)
+			_rows_box.add_child(l)
+		_rows_box.move_child(l, i)
 		_lines.append(l)
+	for c: Variant in old:
+		(old[c] as ContractLine).queue_free()
 	_more.visible = list.size() > max_rows
 	_more.text = "+%d more: open the contracts tab" % (list.size() - max_rows)
 	_refresh()

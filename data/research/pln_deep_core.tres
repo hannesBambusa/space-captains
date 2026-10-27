@@ -14,4 +14,5 @@ cost_titanium = 40
 research_time = 170.0
 unlock_modules = Array[StringName]([&"mining_laser_2", &"salvage_claw_2"])
 tags = PackedStringArray("economy")
+benefit = "Miners and salvagers cut faster, so each trip is shorter."
 description = "Lasers and cutters that bite deeper: Mk II mining lasers and salvage claws."

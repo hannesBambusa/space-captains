@@ -14,4 +14,5 @@ cost_titanium = 30
 research_time = 150.0
 unlock_modules = Array[StringName]([&"ion_drive_2", &"combat_thrusters_2"])
 tags = PackedStringArray("economy")
+benefit = "Faster drives and thrusters, so ships spend less time on the way."
 description = "Hotter, longer-lived drive cores: Mk II drives and combat thrusters."

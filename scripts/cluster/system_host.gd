@@ -2,9 +2,12 @@ class_name SystemHost
 extends SystemView
 ## One live remote system: its own container (a [SystemView]), SubViewport
 ## (own World3D) and scenes/system.tscn built from the generated SystemDef,
-## without Buildings and ContractMarkers (no station there; CombatWorld
-## leaves out the raid and threat directors, claims, zones and the alarm
-## outside home, ClusterSpawner does not respawn). Made and dropped by the
+## without Buildings and ContractMarkers unless the system has a forward
+## station (SystemWorld.has_station; its BuildingManager gets no Factory).
+## Without one CombatWorld leaves out the raid and threat directors, zones
+## and the alarm, ClusterSpawner does not respawn and FogOfWar hides what
+## explorers have not revealed. A forward station system gets its
+## [StationSupply] (upkeep, water, hauling fee). Made and dropped by the
 ## [ViewManager].
 ##
 ## [method materialise] builds the world and applies the system's
@@ -45,11 +48,17 @@ func materialise(id: StringName) -> SystemWorld:
 	var w := (load(SYSTEM_SCENE) as PackedScene).instantiate() as SystemWorld
 	w.system_id = id
 	(w.get_node(^"SolarSystem") as SolarSystem).system_def = def
-	for n: NodePath in [^"Buildings", ^"ContractMarkers"]:
-		var x := w.get_node_or_null(n)
-		if x:
-			w.remove_child(x)
-			x.free()
+	if w.has_station:
+		var mgr := w.get_node_or_null(^"Buildings") as BuildingManager
+		if mgr:
+			mgr.factory_def = null
+			mgr.forward = true
+	else:
+		for n: NodePath in [^"Buildings", ^"ContractMarkers"]:
+			var x := w.get_node_or_null(n)
+			if x:
+				w.remove_child(x)
+				x.free()
 	# The environment (sky seed) is a sub-resource shared by every instance.
 	var env := w.get_node_or_null(^"WorldEnvironment") as WorldEnvironment
 	if env and env.environment:
@@ -57,10 +66,16 @@ func materialise(id: StringName) -> SystemWorld:
 	viewport.add_child(w)
 	world = w
 	apply_state(Sector.state(id))
-	# Only what explorers revealed shows (P3).
-	var fog := FogOfWar.new()
-	fog.name = "FogOfWar"
-	w.add_child(fog)
+	# A forward station's upkeep, water and hauling fee (F4).
+	if w.has_station:
+		var supply := StationSupply.new()
+		supply.name = "StationSupply"
+		w.add_child(supply)
+	# Only what explorers revealed shows (P3); a station system shows all.
+	if not w.has_station:
+		var fog := FogOfWar.new()
+		fog.name = "FogOfWar"
+		w.add_child(fog)
 	_refresh_contract_targets()
 	return w
 
@@ -154,13 +169,16 @@ static func _refresh_contract_targets() -> void:
 			(c as ExploreContract).refresh_target()
 
 
-## Objects a stored ship may link to, by save id: home's buildings, every
-## hired captain (berths and waiting lists), the contracts on the board and
-## the ones it holds for ships far away (ContractBoard.held).
+## Objects a stored ship may link to, by save id: the buildings of every
+## station system (home and the forward stations), every hired captain
+## (berths and waiting lists), the contracts on the board and the ones it
+## holds for ships far away (ContractBoard.held).
 static func known_refs(tree: SceneTree) -> SaveRefs:
 	var refs := SaveRefs.new()
-	var mgr := BuildingManager.of(SystemWorld.home(tree))
-	if mgr:
+	for w in SystemWorld.all(tree):
+		var mgr := w.buildings if w.has_station else null
+		if mgr == null:
+			continue
 		for b in mgr.buildings:
 			if not is_instance_valid(b):
 				continue

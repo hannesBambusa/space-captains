@@ -40,9 +40,9 @@ var enabled := true
 
 func setup(owner_system: SolarSystem) -> void:
 	system = owner_system
-	# Remote systems keep their generated clusters (no mining there yet).
+	# Systems without a station keep their generated clusters (no mining there).
 	var w := SystemWorld.of(owner_system)
-	enabled = w == null or w.is_home
+	enabled = w == null or w.has_station
 	rng.randomize()
 	system.cluster_added.connect(_on_cluster_added)
 	for b in system.belts:

@@ -335,7 +335,7 @@ func setup(owner_hud: HUD) -> void:
 	if hud.selection:
 		hud.selection.selection_changed.connect(func(t: Node3D) -> void:
 			var s := t as Ship
-			show_ship(s if s and not s.is_hostile() and not (s is CargoShuttle) else null))
+			show_ship(s if s and not s.is_hostile() and not (s is CargoShuttle) and not (s is MobileStation) else null))
 	ContractBoard.contract_posted.connect(func(_c: Contract) -> void: _rebuild_escorts())
 	ContractBoard.contract_removed.connect(func(_c: Contract) -> void: _rebuild_escorts())
 

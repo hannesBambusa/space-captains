@@ -284,7 +284,7 @@ func update(dt: float) -> void:
 			_steer_to_job(true)
 			if _check_threats(dt):
 				return
-			if ship.job_work(trip, dt):
+			if ship.job_work(trip, dt * ship.work_speed()):
 				ship.job_end(trip)
 				trip.loaded = true
 				_set_state(State.RETURNING)
@@ -345,8 +345,14 @@ static func lower_first(text: String) -> String:
 ## best refused one, or null when there is nothing for this role).
 func score_contracts(contracts: Array[Contract] = []) -> RoleEvaluator.Evaluation:
 	if contracts.is_empty():
-		contracts = ContractBoard.get_available()
+		contracts = ContractBoard.get_available(-1, system_id())
 	return evaluator.pick(self, contracts)
+
+
+## The system the ship is in (its contracts are there), "" = unknown (any).
+func system_id() -> StringName:
+	var w := SystemWorld.of(ship) if is_instance_valid(ship) else null
+	return w.system_id if w else &""
 
 
 func _decide() -> void:
@@ -355,7 +361,7 @@ func _decide() -> void:
 		note_repairs_first()
 		_back_to_docked()
 		return
-	var contracts := ContractBoard.get_available()
+	var contracts := ContractBoard.get_available(-1, system_id())
 	var e := evaluator.pick(self, contracts)
 	if e == null:
 		last_decision = "No contracts posted"

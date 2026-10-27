@@ -6,15 +6,23 @@ extends Control
 ## and work bars (drilling, hold, repairs). Drawn in [method _draw] so 30+
 ## cards stay cheap; [method refresh] is called on a timer and only redraws
 ## when something shown changed. Red edge while in combat or just hit, amber
-## edge when the hull is low. Click selects, double click also centres the
-## camera.
+## edge when the hull is low. Click selects (the captain panel), right
+## click centres the camera on the ship at the current zoom, double click
+## centres it at the ship's focus distance. Compact rows can hang under a
+## fleet line or a miner (an escort): indented, with a tree line.
 
 signal clicked(card: PilotCard)
 signal double_clicked(card: PilotCard)
+signal right_clicked(card: PilotCard)
+
+## Tree line of an indented compact row: none, a middle child, the last one.
+enum Branch { NONE, MID, LAST }
 
 const HEIGHT := 68.0
 ## Two-row card for the right-hand pilot list.
 const COMPACT_HEIGHT := 22.0
+## Extra left inset of an indented compact row (fleet member, escort).
+const INDENT := 12.0
 const BADGE := 42.0
 const H := preload("res://scripts/ui/theme/hud_style.gd")
 ## Seconds after a hit the card still counts as "in combat".
@@ -24,6 +32,21 @@ var captain: Captain
 ## The ship, or the home building for a captain waiting for a ship.
 var target: Node3D
 var fleet_tag := ""
+## Indented under a fleet line or a miner, with a tree line in [member branch_color].
+var branch: Branch = Branch.NONE:
+	set(v):
+		if branch != v:
+			branch = v
+			queue_redraw()
+var branch_color := Color(1.0, 0.85, 0.42)
+## The fleet's leader: a small crown before the state.
+var leader := false:
+	set(v):
+		if leader != v:
+			leader = v
+			queue_redraw()
+## "[Ostra]" for a captain of a forward station, drawn before the name.
+var system_tag := ""
 ## Two rows: badge, name, wallet; state, tiny hull and shield bars.
 var compact := false:
 	set(v):
@@ -78,12 +101,18 @@ func bind(c: Captain, t: Node3D) -> void:
 
 func _gui_input(event: InputEvent) -> void:
 	var mb := event as InputEventMouseButton
-	if mb and mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
-		if mb.double_click:
-			double_clicked.emit(self)
-		else:
-			clicked.emit(self)
-		accept_event()
+	if mb == null or (mb.button_index != MOUSE_BUTTON_LEFT and mb.button_index != MOUSE_BUTTON_RIGHT):
+		return
+	# Press and release both stay in the list (never the 3D world's).
+	accept_event()
+	if not mb.pressed:
+		return
+	if mb.button_index == MOUSE_BUTTON_RIGHT:
+		right_clicked.emit(self)
+	elif mb.double_click:
+		double_clicked.emit(self)
+	else:
+		clicked.emit(self)
 
 
 func _process(delta: float) -> void:
@@ -102,6 +131,7 @@ func refresh() -> void:
 	d["rank"] = captain.rank
 	d["wallet"] = captain.wallet
 	d["fleet"] = fleet_tag
+	d["tag"] = system_tag
 	var look := state_look(ship)
 	d["icon"] = look["icon"]
 	d["scol"] = look["color"]
@@ -132,8 +162,18 @@ func refresh() -> void:
 		set_process(combat)
 	if d != _data:
 		_data = d
-		tooltip_text = _tooltip(ship)
+		# A stable key: the text itself is read live by the custom tooltip
+		# (a changed tooltip_text makes Godot close it on a mouse move).
+		tooltip_text = captain.captain_name
 		queue_redraw()
+
+
+func _make_custom_tooltip(_for_text: String) -> Object:
+	return RichTooltip.live_label(func() -> String:
+		if captain == null:
+			return ""
+		var ship := captain.ship if is_instance_valid(captain.ship) and not captain.ship.dead else null
+		return _tooltip(ship))
 
 
 func in_combat() -> bool:
@@ -197,7 +237,7 @@ func _tooltip(ship: Ship) -> String:
 	for id in c.trait_ids():
 		names.append(CaptainTraits.trait_name(id))
 	var lines: PackedStringArray = []
-	lines.append("%s, %s %s" % [c.captain_name, c.get_rank_name(), c.role.to_lower()])
+	lines.append("%s, %s %s%s" % [c.captain_name, c.get_rank_name(), c.role.to_lower(), (" " + system_tag) if not system_tag.is_empty() else ""])
 	lines.append("%s: %s" % [c.get_personality_name(), c.get_personality_hint()])
 	lines.append("%d reputation, wallet %s cr" % [roundi(c.reputation), UIUtil.amount(c.wallet)])
 	if not names.is_empty():
@@ -217,7 +257,7 @@ func _tooltip(ship: Ship) -> String:
 			lines.append("Contract: %s, %s" % [ship.brain.trip.contract.get_target_name(), ship.brain.trip.contract.get_reward_text()])
 	if not fleet_tag.is_empty():
 		lines.append(fleet_tag)
-	lines.append("Click: select    Double click: centre the camera")
+	lines.append("Click: captain info    Right click: centre the camera")
 	return "\n".join(lines)
 
 
@@ -334,7 +374,12 @@ func _draw() -> void:
 		draw_rect(fr, Color(1.0, 0.85, 0.42, 0.7), false, 1.0)
 		draw_string(_f_tag, Vector2(fr.position.x + 4, 20), ftxt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.88, 0.5))
 		name_right = fr.position.x - 6
-	draw_string(_f_name, Vector2(x0, 21), _fit(_f_name, String(_data["name"]), 16, name_right - x0), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, H.TEXT_BRIGHT)
+	var tag := String(_data.get("tag", ""))
+	var nx := x0
+	if not tag.is_empty():
+		draw_string(_f_tag, Vector2(nx, 21), tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, H.ACCENT_SOFT)
+		nx += _f_tag.get_string_size(tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 5.0
+	draw_string(_f_name, Vector2(nx, 21), _fit(_f_name, String(_data["name"]), 16, name_right - nx), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, H.TEXT_BRIGHT)
 
 	# Row 2: state icon and text, modules on the right.
 	var mods := String(_data["mods"])
@@ -433,9 +478,16 @@ func _draw_compact() -> void:
 		draw_rect(Rect2(0, 2, 2, hgt - 4), H.BAD.lerp(Color(1, 0.8, 0.7), 0.5 + 0.5 * sin(_pulse * 7.0)))
 	elif is_damaged():
 		draw_rect(Rect2(0, 2, 2, hgt - 4), H.WARN)
+	var ind := 0.0
+	if branch != Branch.NONE:
+		ind = INDENT
+		var tx := 10.0
+		var tc := Color(branch_color, 0.55)
+		draw_line(Vector2(tx, 0), Vector2(tx, mid if branch == Branch.LAST else hgt), tc, 1.0)
+		draw_line(Vector2(tx, mid), Vector2(tx + 8.0, mid), tc, 1.0)
 	# Small role badge.
 	var bs := 15.0
-	var b := Rect2(6, mid - bs * 0.5, bs, bs)
+	var b := Rect2(6 + ind, mid - bs * 0.5, bs, bs)
 	var pts := PackedVector2Array([b.position, Vector2(b.end.x - 4, b.position.y), Vector2(b.end.x, b.position.y + 4), b.end, Vector2(b.position.x, b.end.y)])
 	draw_colored_polygon(pts, Color(role_col.darkened(0.6), 0.85))
 	var ric := H.icon(H.role_icon(String(_data["role"])))
@@ -469,11 +521,21 @@ func _draw_compact() -> void:
 		name_col = Color(1.0, 0.72, 0.66)
 	elif is_damaged():
 		name_col = Color(1.0, 0.88, 0.6)
-	var name_w := minf(_f_name.get_string_size(String(_data["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x, 112.0)
+	var room := 112.0 - ind
+	var tag := String(_data.get("tag", ""))
+	var nx := x
+	if not tag.is_empty():
+		_text(_f_tag, Vector2(nx, base), tag, 11, H.ACCENT_SOFT)
+		var tw := _f_tag.get_string_size(tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 4.0
+		nx += tw
+		room -= tw
+	var name_w := minf(_f_name.get_string_size(String(_data["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x, room)
 	var nm := _fit(_f_name, String(_data["name"]), 13, name_w + 1.0)
-	_text(_f_name, Vector2(x, base), nm, 13, name_col)
-	x += 116.0
-	if not String(_data["fleet"]).is_empty():
+	_text(_f_name, Vector2(nx, base), nm, 13, name_col)
+	x += 116.0 - ind
+	if leader:
+		_crown(Vector2(x - 9, mid), branch_color)
+	elif not String(_data["fleet"]).is_empty() and branch == Branch.NONE:
 		var fic := H.icon(&"fleet")
 		if fic:
 			draw_texture_rect(fic, Rect2(x - 14, mid - 5, 10, 10), false, Color(1.0, 0.85, 0.42))
@@ -492,6 +554,16 @@ func _draw_compact() -> void:
 	if not pct.is_empty():
 		var px := x + _f_small.get_string_size(st, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
 		_text(_f_tag, Vector2(px, base - 0.5), pct, 11, H.ACCENT_SOFT if int(_data["work_kind"]) != 3 else H.WARN)
+
+
+## The fleet leader's mark: a small three-point crown centred on [param at].
+func _crown(at: Vector2, color: Color) -> void:
+	var pts := PackedVector2Array([at + Vector2(-4.5, 3.5), at + Vector2(-4.5, -2.5), at + Vector2(-2.0, 0.5), at + Vector2(0.0, -3.5),
+			at + Vector2(2.0, 0.5), at + Vector2(4.5, -2.5), at + Vector2(4.5, 3.5)])
+	var outline := pts.duplicate()
+	outline.append(pts[0])
+	draw_polyline(outline, Color(0, 0, 0, 0.75), 3.0)
+	draw_colored_polygon(pts, color)
 
 
 ## Text with a soft dark outline, legible over space.

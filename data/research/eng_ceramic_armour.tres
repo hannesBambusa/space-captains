@@ -15,4 +15,5 @@ research_time = 280.0
 prerequisites = Array[StringName]([&"eng_laminated_alloys"])
 unlock_modules = Array[StringName]([&"reinforced_plating_3", &"armor_plating_3"])
 tags = PackedStringArray("defence")
+benefit = "The toughest hull plating for every role."
 description = "Crystal-bonded ceramic plates: Mk III plating and armour."

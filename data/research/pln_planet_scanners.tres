@@ -15,4 +15,5 @@ research_time = 200.0
 prerequisites = Array[StringName]([&"pln_orbital_survey"])
 tags = PackedStringArray("economy")
 hidden = true
+benefit = "See what a planet yields before you raid it. Not in the game yet."
 description = "Orbital scanners that show a planet's yield before a raid. Prepared for a later phase."

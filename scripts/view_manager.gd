@@ -20,6 +20,11 @@ extends Node
 ## with one of the player's ships inside (live or as data) and live ones;
 ## [member debug_view_all] (or the --view-all command line argument)
 ## allows every system.
+##
+## Pinned systems ([method pin], forward stations: [ForwardStations]) stay
+## live for good: never released, not dropped by [method dematerialise]
+## (unpin first); hidden like home while not viewed, simulating at the
+## same rate.
 
 signal view_changed(world: SystemWorld)
 
@@ -40,12 +45,15 @@ var worlds: Dictionary = {}
 ## Debug: every system of the network may be viewed.
 var debug_view_all := false
 var remote_sim: RemoteSim
+var forward: ForwardStations
 
 ## Remote hosts by id, and the real time each is dropped at (INF while viewed).
 var _hosts: Dictionary = {}
 var _release_at: Dictionary = {}
 ## Last build time per system id, ms.
 var _build_ms: Dictionary = {}
+## Pinned system ids (value true).
+var _pinned: Dictionary = {}
 var _busy := false
 var _real := 0.0
 var _fade: ColorRect
@@ -67,6 +75,9 @@ func _enter_tree() -> void:
 	remote_sim = RemoteSim.new()
 	remote_sim.name = "RemoteSim"
 	add_child(remote_sim)
+	forward = ForwardStations.new()
+	forward.name = "ForwardStations"
+	add_child(forward)
 
 
 func _ready() -> void:
@@ -185,7 +196,7 @@ func view_now(id: StringName) -> SystemWorld:
 	var old := viewed
 	viewed = w
 	if is_instance_valid(old) and not old.is_home:
-		_release_at[old.system_id] = _real + GRACE_TIME
+		_release_at[old.system_id] = INF if is_pinned(old.system_id) else _real + GRACE_TIME
 	if not w.is_home:
 		_release_at[id] = INF
 	_apply_shown()
@@ -212,23 +223,52 @@ func materialise(id: StringName) -> SystemWorld:
 		host.queue_free()
 		return null
 	_hosts[id] = host
-	_release_at[id] = _real + GRACE_TIME
+	_release_at[id] = INF if is_pinned(id) else _real + GRACE_TIME
 	if w.camera:
 		w.camera.input_enabled = false
 	return w
 
 
-## Drops live remote system [param id] back into data.
+## Drops live remote system [param id] back into data (not a pinned one).
 func dematerialise(id: StringName) -> void:
 	var host := _hosts.get(id) as SystemHost
-	if host == null:
+	if host == null or is_pinned(id):
 		return
 	if viewed == host.world:
 		view_now(ClusterNetwork.HOME_ID)
 	_hosts.erase(id)
 	_release_at.erase(id)
+	var old := host.world
 	host.dematerialise()
 	host.queue_free()
+	# Not live from now on (the world leaves the tree at the frame's end; a
+	# materialise right after, ForwardStations.found, builds a new one).
+	if worlds.get(id) == old:
+		worlds.erase(id)
+
+
+## Keeps remote system [param id] live for good (materialised now when it
+## is not). Returns the live world, or null.
+func pin(id: StringName) -> SystemWorld:
+	if id == ClusterNetwork.HOME_ID or Sector.system_def(id) == null:
+		return null
+	_pinned[id] = true
+	var w := materialise(id)
+	if w:
+		_release_at[id] = INF
+	return w
+
+
+## Back to the normal rule: released after the grace time out of view.
+func unpin(id: StringName) -> void:
+	if not _pinned.erase(id):
+		return
+	if _hosts.has(id) and viewed_id() != id:
+		_release_at[id] = _real + GRACE_TIME
+
+
+func is_pinned(id: StringName) -> bool:
+	return _pinned.has(id)
 
 
 ## Every live remote system writes its state into Sector (before a save).

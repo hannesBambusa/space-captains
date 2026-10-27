@@ -15,4 +15,5 @@ research_time = 140.0
 prerequisites = Array[StringName]([&"pln_cargo_racks"])
 unlock_modules = Array[StringName]([&"ore_hold_2", &"salvage_hold_2"])
 tags = PackedStringArray("economy")
+benefit = "Bigger holds: miners and salvagers bring more home per trip."
 description = "Folding hold frames: Mk II ore and salvage holds carry bigger loads."

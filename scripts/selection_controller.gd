@@ -14,7 +14,10 @@ extends Node3D
 ## the clump itself selects it and leaves the camera alone. Planets and moons are selected (the planet
 ## panel: loot, raids, the planet raid contract), so are jump gates (the gate
 ## panel: the explore contract); the star is followed but not selected.
-## Things the fog of war hides (FogOfWar) cannot be picked.
+## Things the fog of war hides (FogOfWar) cannot be picked. A station
+## (home's or a forward one) is picked by its hub ([method pick_station]):
+## the [HomeStation] node, for the StationPanel and the build bar (shown
+## only while a station is selected).
 
 signal selection_changed(target: Node3D)
 
@@ -101,6 +104,10 @@ func select(target: Node3D) -> void:
 	elif target is ScrapField:
 		_ring = RingUtil.make_ring((target as ScrapField).radius * 1.15, SCRAP_RING_COLOR, 1.6, 96)
 		target.add_child(_ring)
+	elif target is HomeStation:
+		var st := target as HomeStation
+		_ring = RingUtil.make_ring((st.edge_radius if st.edge_radius > 0.0 else 95.0) * 0.8, RING_COLOR, 2.2, 96)
+		target.add_child(_ring)
 	elif target is DefenseZone:
 		(target as DefenseZone).set_selected(true)
 	elif target is PlanetBody:
@@ -169,6 +176,21 @@ func pick_ship(screen_pos: Vector2) -> Ship:
 			best_score = off / r_px
 			best = s
 	return best
+
+
+## The viewed system's station under [param screen_pos] (its hub, home's
+## or a forward one), or null.
+func pick_station(screen_pos: Vector2) -> HomeStation:
+	var cam := SystemWorld.camera_3d(self)
+	if cam == null or manager == null:
+		return null
+	var st := manager.station_node()
+	if st == null or not st.is_visible_in_tree() or cam.is_position_behind(st.global_position):
+		return null
+	var d := cam.global_position.distance_to(st.global_position)
+	var r := st.hull_radius if st.hull_radius > 0.0 else 40.0
+	var r_px := maxf(r * 1.6 / maxf(d, 1.0) * _px_per_rad(cam), min_pick_px * 1.5)
+	return st if cam.unproject_position(st.global_position).distance_to(screen_pos) <= r_px else null
 
 
 ## Den or scrap field under [param screen_pos], or null.
@@ -271,6 +293,8 @@ func _pick_selectable(screen_pos: Vector2) -> Node3D:
 	var hit: Node3D = pick_ship(screen_pos)
 	if hit == null:
 		hit = pick_building(screen_pos)
+	if hit == null:
+		hit = pick_station(screen_pos)
 	if hit == null:
 		hit = pick_group(screen_pos, ScavengerDen.GROUP)
 	if hit == null:

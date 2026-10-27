@@ -26,12 +26,16 @@ var ships: Array = []
 var scrap: Array = []
 ## Sim seconds until the next raid out of this system, -1 = none planned.
 var raid_timer := -1.0
+## Forward station site, {} = none: {planet, orbit_radius, period, angle
+## (deg), founded_at (SimClock time), name} (SolarSystem.add_station,
+## SystemWorld.has_station).
+var station: Dictionary = {}
 
 
 func to_dict() -> Dictionary:
 	# Deep copies: the snapshot must not change with the live state.
 	return {"known": known, "seen": last_seen, "revealed": revealed.duplicate(), "dens": dens.duplicate(true), "clusters": clusters.duplicate(true),
-			"looted": looted.duplicate(), "ships": ships.duplicate(true), "scrap": scrap.duplicate(true), "raid": raid_timer}
+			"looted": looted.duplicate(), "ships": ships.duplicate(true), "scrap": scrap.duplicate(true), "raid": raid_timer, "station": station.duplicate(true)}
 
 
 static func from_dict(d: Dictionary) -> RemoteSystemState:
@@ -45,4 +49,5 @@ static func from_dict(d: Dictionary) -> RemoteSystemState:
 	s.ships = (d.get("ships", []) as Array).duplicate(true)
 	s.scrap = (d.get("scrap", []) as Array).duplicate(true)
 	s.raid_timer = float(d.get("raid", -1.0))
+	s.station = (d.get("station", {}) as Dictionary).duplicate(true)
 	return s

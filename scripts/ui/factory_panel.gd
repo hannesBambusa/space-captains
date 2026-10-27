@@ -426,14 +426,17 @@ func _refresh_live() -> void:
 		else:
 			rl.text = "~%d/min" % roundi(rate)
 		rl.add_theme_color_override("font_color", PipMeter.GOOD if rate >= m.max_buy_per_min[i] * 0.5 else (PipMeter.MID if rate > 0.0 else PipMeter.BAD))
-		(r["keep"] as Label).text = str(m.reserve[i])
+		var stations := m.station_water(i)
+		(r["keep"] as Label).text = str(m.kept(i)) + ("*" if stations > m.reserve[i] else "")
 		var keep_tip := "Keep %d %s (selling stops below this; building, research and tooling still use it). You have %d." % [
 				m.reserve[i], Economy.ore_name(i), Economy.ore[i]]
+		if stations > 0:
+			keep_tip += "\nForward stations: at least %d kept (%d min of their water use)." % [stations, roundi(StationSupply.WATER_RESERVE_MINUTES)]
 		(r["keep"] as Label).tooltip_text = keep_tip
 		(r["keep_label"] as Label).tooltip_text = keep_tip
 		var tip := "%s: Factory stock %d (target %d), demand %s, pays %.1f cr (%s). Your ask %.1f cr sells ~%.0f/min above %d kept. Export draws %.0f + %d%%/min." % [
 				Economy.ORE_NAMES[i], roundi(m.stock[i]), roundi(m.target_stock[i]), m.demand_name(i).to_lower(), m.willing_price(i), trend,
-				m.ask[i], rate, m.reserve[i], m.export_base_per_min[i], roundi(m.export_share_per_min[i] * 100.0)]
+				m.ask[i], rate, m.kept(i), m.export_base_per_min[i], roundi(m.export_share_per_min[i] * 100.0)]
 		(r["row"] as Control).tooltip_text = tip
 		rl.tooltip_text = "At or below %d%% of what the Factory pays it buys at full pace; past %d%% it stops." % [roundi(m.eager_ratio * 100.0), roundi(m.refuse_ratio * 100.0)]
 

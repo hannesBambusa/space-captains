@@ -71,6 +71,36 @@ func fits_role(role: String) -> bool:
 	return roles.is_empty() or roles.has(role)
 
 
+## The stats it changes, as [constant ShipLoadout.ROLE_USES] keys: "drill" or
+## "guns" for a tool (it replaces the hull's own), then "hull", "shields",
+## "eject", "speed", "cargo", "sensor", "yield", "fire_rate", "accuracy".
+func stat_keys() -> PackedStringArray:
+	var out: PackedStringArray = []
+	if weapon_kind == WeaponKind.DRILL or not is_equal_approx(drill_mult, 1.0):
+		out.append("drill")
+	if weapon_kind == WeaponKind.CANNON or weapon_kind == WeaponKind.MISSILE or weapon_damage > 0.0:
+		out.append("guns")
+	if hull_bonus != 0.0:
+		out.append("hull")
+	if shield_bonus != 0.0 or shield_regen != 0.0:
+		out.append("shields")
+	if eject_bonus != 0.0:
+		out.append("eject")
+	if not (is_equal_approx(speed_mult, 1.0) and is_equal_approx(accel_mult, 1.0) and is_equal_approx(turn_mult, 1.0)):
+		out.append("speed")
+	if cargo_bonus != 0.0:
+		out.append("cargo")
+	if sensor_range > 0.0:
+		out.append("sensor")
+	if not is_equal_approx(yield_mult, 1.0):
+		out.append("yield")
+	if not is_equal_approx(fire_rate_mult, 1.0):
+		out.append("fire_rate")
+	if accuracy_bonus != 0.0:
+		out.append("accuracy")
+	return out
+
+
 ## What it does in numbers: "+80 hull, +260 shields, +16 shield regen/s".
 ## Guns replace the hull's own; the other stats add to it (mults scale it).
 func effect_text() -> String:

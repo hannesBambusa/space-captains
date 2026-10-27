@@ -15,4 +15,5 @@ research_time = 300.0
 prerequisites = Array[StringName]([&"eng_shield_lattice"])
 unlock_modules = Array[StringName]([&"shield_projector_3", &"deflector_3"])
 tags = PackedStringArray("defence")
+benefit = "The strongest shields for every role."
 description = "Shields that shift phase under fire: Mk III shield modules."

@@ -10,13 +10,16 @@ extends RefCounted
 ## the loaded credits (what they cover). Explore contracts (P3) keep their
 ## gate by name, their escrow, explorer and progress; one held off the
 ## board for an explorer still out (ContractBoard.held) comes back held.
+## Each keeps its system (Contract.system_id, "system"; old saves: home);
+## GameSnapshot saves every station system's contracts with that system.
 
 const BASE_FIELDS: PackedStringArray = ["id", "reward", "status", "max_takers", "created_time", "credits_paid", "times_taken"]
 
 
 ## Every contract worth keeping: the board's plus [param extra] (trips) plus
-## the free salvage contracts with takers.
-static func save_all(extra: Array[Contract]) -> Dictionary:
+## the free salvage contracts with takers; with [param keep] (Contract ->
+## bool) only the ones it keeps (one system's part, [method system_of]).
+static func save_all(extra: Array[Contract], keep: Callable = Callable()) -> Dictionary:
 	var all: Array[Contract] = []
 	for c in ContractBoard.contracts:
 		all.append(c)
@@ -32,6 +35,8 @@ static func save_all(extra: Array[Contract]) -> Dictionary:
 			all.append(sc)
 	var list := []
 	for c in all:
+		if keep.is_valid() and not bool(keep.call(c)):
+			continue
 		var d := save_contract(c, ContractBoard.contracts.has(c))
 		if ContractBoard.held.has(c):
 			d["held"] = true
@@ -46,6 +51,7 @@ static func save_contract(c: Contract, listed: bool) -> Dictionary:
 	d["listed"] = listed
 	d["target"] = SaveIds.of(c.target) if is_instance_valid(c.target) else 0
 	d["takers"] = SaveUtil.ids(c.takers)
+	d["system"] = String(system_of(c))
 	if c is MiningContract:
 		var mc := c as MiningContract
 		d["belt"] = mc.belt.def.name if is_instance_valid(mc.belt) else ""
@@ -61,8 +67,12 @@ static func save_contract(c: Contract, listed: bool) -> Dictionary:
 			var m: Variant = ec.assignments[e]
 			if is_instance_valid(e) and is_instance_valid(m):
 				pairs.append([SaveIds.of(e), SaveIds.of(m)])
-		d["escort"] = {"ward": SaveIds.of(ec.ward) if is_instance_valid(ec.ward) else 0, "mining": SaveIds.of(ec.mining_contract) if ec.mining_contract else 0,
+		d["escort"] = {"ward": SaveIds.of(ec.ward) if is_instance_valid(ec.ward) else ec.ward_id, "mining": SaveIds.of(ec.mining_contract) if ec.mining_contract else 0,
 				"max_escorts": ec.max_escorts, "trips_completed": ec.trips_completed, "assignments": pairs}
+		if not is_instance_valid(ec.ward) and ec.ward_id != 0:
+			# A mobile station that is data now (F6).
+			d["escort"]["data_ward"] = true
+			d["escort"]["ward_name"] = ec.ward_name
 	elif c is PlanetRaidContract:
 		var rc := c as PlanetRaidContract
 		d["planet"] = rc.planet.def.name if is_instance_valid(rc.planet) else ""
@@ -76,6 +86,17 @@ static func save_contract(c: Contract, listed: bool) -> Dictionary:
 		d["explore"]["from"] = String(ec.from_system)
 		d["target"] = 0
 	return d
+
+
+## The system [param c] belongs to (Contract.system_id; a free salvage
+## contract, never posted: its scrap field's).
+static func system_of(c: Contract) -> StringName:
+	var sc := c as SalvageContract
+	if sc and sc.free and is_instance_valid(sc.field):
+		var w := SystemWorld.of(sc.field)
+		if w and not w.system_id.is_empty():
+			return w.system_id
+	return c.system_id
 
 
 ## Builds, links and lists every saved contract. Needs the ships, dens,
@@ -95,13 +116,15 @@ static func restore_all(d: Dictionary, refs: SaveRefs, belts: Dictionary, ctx: N
 	for pair in made:
 		var c := pair[0] as Contract
 		var s := pair[1] as Dictionary
-		var listed := bool(s.get("listed", false)) and not c.is_finished() and (is_instance_valid(c.target) or c is ExploreContract)
+		var listed := bool(s.get("listed", false)) and not c.is_finished() and (is_instance_valid(c.target) or c is ExploreContract \
+				or (c is EscortContract and (c as EscortContract).ward_id != 0))
 		if bool(s.get("held", false)):
 			ContractBoard.hold(c)
 		if c is SalvageContract and (c as SalvageContract).free:
 			SalvageContract.restore_free((c as SalvageContract).field, c as SalvageContract)
 			continue
 		ContractBoard.restore(c, listed, next)
+	ContractBoard.merge_duplicate_bounties()
 	SalvageContract._next_free_id = mini(SalvageContract._next_free_id, int(d.get("free_next", -1)))
 
 
@@ -138,10 +161,14 @@ static func _make(s: Dictionary, refs: SaveRefs, belts: Dictionary, ctx: Node) -
 		Contract.Type.ESCORT:
 			var ed: Dictionary = s.get("escort", {})
 			var ward := refs.ship(int(ed.get("ward", 0)))
-			if int(ed.get("ward", 0)) != 0 and ward == null:
+			var data_ward := bool(ed.get("data_ward", false)) and ward == null
+			if int(ed.get("ward", 0)) != 0 and ward == null and not data_ward:
 				# The escorted ship is gone: nothing left to protect.
 				return null
 			var ec := EscortContract.new(ward, null, int(s["reward"]), int(ed.get("max_escorts", 2)))
+			if data_ward:
+				ec.ward_id = int(ed.get("ward", 0))
+				ec.ward_name = String(ed.get("ward_name", ""))
 			ec.trips_completed = int(ed.get("trips_completed", 0))
 			c = ec
 		Contract.Type.PLANET_RAID:
@@ -175,6 +202,8 @@ static func _make(s: Dictionary, refs: SaveRefs, belts: Dictionary, ctx: Node) -
 		if s.has(k):
 			base[k] = s[k]
 	SaveUtil.apply_props(c, base)
+	# Old saves: every contract was home's.
+	c.system_id = StringName(s.get("system", String(ClusterNetwork.HOME_ID)))
 	if c is EscortContract and target and (c as EscortContract).ward == null:
 		c.target = target
 	return c
@@ -204,5 +233,5 @@ static func _link(c: Contract, s: Dictionary, refs: SaveRefs) -> void:
 			var m := refs.ship(int(pair[1]))
 			if e and m:
 				ec.assign(e, m)
-		if ec.ward == null and ec.mining_contract == null:
+		if ec.ward == null and ec.mining_contract == null and ec.ward_id == 0:
 			ec.status = Contract.Status.CANCELLED

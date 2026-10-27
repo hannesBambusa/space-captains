@@ -6,6 +6,7 @@
 [resource]
 script = ExtResource("1_bdef")
 id = &"raider_dock"
+allowed_forward = true
 display_name = "Raider Dock"
 short_label = "Raider Dock"
 description = "Outpost for planet raiders. Landers hired here fly dropships down to planets and moons with a planet raid contract and bring back fuel, water, rare metals, silicates or heavy ore, by planet type. Cargo shuttles fly the loot to the station."

@@ -47,6 +47,9 @@ extends Node
 ## kept in [member held] (saved, and resolvable by save id for ships that
 ## are data) until the explorer is home or lost.
 
+## Lowering a taken bounty (the target panel's tooltip).
+const UPDATE_TAKEN := "Taken: can only raise"
+
 signal contract_posted(contract: Contract)
 signal contract_changed(contract: Contract)
 ## Completed or cancelled: it leaves the lists.
@@ -83,6 +86,7 @@ func post(contract: Contract) -> Contract:
 	_next_id += 1
 	contract.created_time = SimClock.time
 	contract.status = Contract.Status.OPEN
+	contract.system_id = _system_of(contract)
 	contract.changed.connect(_on_contract_changed)
 	contracts.append(contract)
 	contract_posted.emit(contract)
@@ -107,10 +111,15 @@ func post_problem(credits: int, reserved: bool = false) -> String:
 
 
 ## Bounty on a scavenger ship or den. Completes when the target dies. The
-## reward is reserved now (null when the player cannot pay it).
+## reward is reserved now (null when the player cannot pay it). One bounty
+## per target: with one already open this updates its reward instead
+## ([method update_bounty]) and returns it (null when that is refused).
 func post_bounty(on_target: Node3D, credits: int, max_takers: int = 3) -> BountyContract:
 	if not Combat.is_live(on_target):
 		return null
+	var have := bounty_on(on_target)
+	if have:
+		return have if credits == have.reward or update_bounty(have, credits) else null
 	credits = maxi(credits, 0)
 	if not post_problem(credits, true).is_empty() or not Economy.spend(credits, PackedInt32Array(), Ledger.ESCROW, "Reserved: bounty on %s" % _name_of(on_target)):
 		return null
@@ -119,6 +128,98 @@ func post_bounty(on_target: Node3D, credits: int, max_takers: int = 3) -> Bounty
 	post(c)
 	_wire(c)
 	return c
+
+
+## The open bounty on [param target], or null.
+func bounty_on(target: Node) -> BountyContract:
+	for c in contracts:
+		var bc := c as BountyContract
+		if bc and bc.target == target and not bc.is_finished():
+			return bc
+	return null
+
+
+## Why [param bc]'s reward cannot be set to [param credits] now, or "":
+## lowering only while nobody has taken it, raising only with the
+## difference in credits.
+func update_problem(bc: BountyContract, credits: int) -> String:
+	var diff := maxi(credits, 0) - bc.reward
+	if diff < 0 and bc.is_taken():
+		return UPDATE_TAKEN
+	if diff > 0 and Economy.credits < diff:
+		return "Needs %s cr more: the raise is reserved from your credits now (you have %s)" % [Fmt.amount(diff), Fmt.amount(Economy.credits)]
+	return ""
+
+
+## Sets [param bc]'s reward to [param credits]: a raise reserves the
+## difference ("Reserved: bounty raised on Rustjaw Hideout +300"), a cut
+## gives it back (only while nobody has taken it). Takers and its fleet go
+## on; the split at the kill uses the new reward. Mercenaries forget their
+## refusals of it and judge it again with the new pay. False when refused
+## ([method update_problem]) or unchanged.
+func update_bounty(bc: BountyContract, credits: int) -> bool:
+	credits = maxi(credits, 0)
+	var diff := credits - bc.reward
+	if diff == 0 or bc.is_finished() or not update_problem(bc, credits).is_empty():
+		return false
+	var tname := bc.get_target_name()
+	if diff > 0:
+		if not reserve(diff, "bounty raised on %s +%d" % [tname, diff]):
+			return false
+	else:
+		release(-diff, "bounty lowered on %s" % tname)
+	bc.reward = credits
+	bc.escrow += diff
+	EventLog.post("Bounty on %s %s to %s cr" % [tname, "raised" if diff > 0 else "lowered", Fmt.amount(credits)], EventLog.Kind.INFO,
+			bc.target as Node3D if is_instance_valid(bc.target) else null)
+	if bc.fleet:
+		bc.fleet.declined.clear()
+	for n in get_tree().get_nodes_in_group(Ship.GROUP):
+		var mb := (n as Ship).brain as MercenaryBrain if n is Ship else null
+		if mb:
+			mb.refusal_lines.erase(tname)
+	bc.changed.emit(bc)
+	return true
+
+
+## Old saves may hold more than one open bounty on a target: they become
+## one (rewards and escrow added up, takers and their trips kept, the first
+## fleet kept). Returns how many were merged away.
+func merge_duplicate_bounties() -> int:
+	var first := {}
+	var merged := 0
+	for c in contracts.duplicate():
+		var bc := c as BountyContract
+		if bc == null or bc.is_finished() or not is_instance_valid(bc.target):
+			continue
+		var id := bc.target.get_instance_id()
+		if not first.has(id):
+			first[id] = bc
+			continue
+		var keep: BountyContract = first[id]
+		keep.reward += bc.reward
+		keep.escrow += bc.escrow
+		for t in bc.takers:
+			if not keep.takers.has(t):
+				keep.takers.append(t)
+			var brain := (t as Ship).brain if t is Ship else null
+			if brain and brain.trip and brain.trip.contract == bc:
+				brain.trip.contract = keep
+		if keep.fleet == null and bc.fleet:
+			keep.fleet = bc.fleet
+			bc.fleet.contract = keep
+		bc.fleet = null
+		bc.takers.clear()
+		bc.escrow = 0
+		bc.status = Contract.Status.CANCELLED
+		if bc.changed.is_connected(_on_contract_changed):
+			bc.changed.disconnect(_on_contract_changed)
+		contracts.erase(bc)
+		contract_removed.emit(bc)
+		merged += 1
+	for id in first:
+		(first[id] as BountyContract).changed.emit(first[id])
+	return merged
 
 
 ## Credits held for open bounties, explore contracts and defence zone budgets.
@@ -146,10 +247,13 @@ func bounty_escrow_total() -> int:
 	return t
 
 
-## Credits held in defence zone kill budgets (DefenseZones).
+## Credits held in defence zone kill budgets (DefenseZones), every system.
 func zone_escrow_total() -> int:
-	var zones := DefenseZones.of(SystemWorld.home(get_tree()))
-	return zones.budget_total() if zones else 0
+	var t := 0
+	for w in SystemWorld.all(get_tree()):
+		var zones := DefenseZones.of(w)
+		t += zones.budget_total() if zones else 0
+	return t
 
 
 ## Reserves [param credits] from the player's credits into an escrow held
@@ -335,12 +439,21 @@ func _wire(c: Contract) -> void:
 	elif c is EscortContract:
 		var ec := c as EscortContract
 		if is_instance_valid(ec.ward):
-			ec.ward.destroyed.connect(func(_s: Ship, _k: Node3D) -> void: cancel(ec))
+			wire_escort(ec)
 		elif ec.mining_contract:
 			var mc := ec.mining_contract
 			mc.changed.connect(func(_m: Contract) -> void:
 				if mc.is_finished():
 					cancel(ec))
+
+
+## An escort contract ends when its ward is destroyed (again for a ward
+## built anew: a mobile station out of a gate).
+func wire_escort(ec: EscortContract) -> void:
+	if not is_instance_valid(ec.ward):
+		return
+	var cb := func(_s: Ship, _k: Node3D) -> void: cancel(ec)
+	ec.ward.destroyed.connect(cb)
 
 
 # --- Save ---------------------------------------------------------------------
@@ -549,13 +662,23 @@ func _refund_escrow(bc: BountyContract, source: String) -> int:
 	return left
 
 
-## Contracts a new taker could start on now, optionally of one type.
-func get_available(type: int = -1) -> Array[Contract]:
+## Contracts a new taker could start on now, optionally of one type and
+## in one system ([param system_id] "" = any).
+func get_available(type: int = -1, system_id: StringName = &"") -> Array[Contract]:
 	var out: Array[Contract] = []
 	for c in contracts:
-		if (type < 0 or c.type == type) and c.is_available():
+		if (type < 0 or c.type == type) and (system_id.is_empty() or c.system_id == system_id) and c.is_available():
 			out.append(c)
 	return out
+
+
+## The system [param c]'s work is in: its target's, home when unknown.
+static func _system_of(c: Contract) -> StringName:
+	var ec := c as ExploreContract
+	if ec:
+		return ec.from_system
+	var w := SystemWorld.of(c.target) if is_instance_valid(c.target) else null
+	return w.system_id if w and not w.system_id.is_empty() else ClusterNetwork.HOME_ID
 
 
 ## Open and active contracts (what the UI lists).
@@ -808,7 +931,7 @@ func _resolve_fleet_bounty(c: BountyContract, killer: Node3D, d: Durability) -> 
 	var target := c.target
 	EventLog.post("%s's fleet (%d) destroyed %s, %s cr split: %s" % [f.leader_name, f.roster.size(), c.get_target_name(), Fmt.amount(total), ", ".join(lines)],
 			EventLog.Kind.REWARD, null, target.global_position if is_instance_valid(target) else Vector3.INF)
-	f.state = MercFleet.State.DONE
+	f.finish()
 	c.fleet = null
 	_refund_escrow(c, "Bounty leftover")
 	c.mark_completed()

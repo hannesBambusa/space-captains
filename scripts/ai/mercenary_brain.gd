@@ -353,6 +353,8 @@ func update(dt: float) -> void:
 		State.PATROLLING, State.ENGAGING, State.ESCORTING, State.HUNTING:
 			_space_update(dt)
 		State.RETURNING:
+			if _gate_home():
+				return
 			_fire_in_passing(dt)
 			_steer_home()
 		State.DOCKING:
@@ -393,7 +395,7 @@ func _decide_merc() -> void:
 		_set_state(State.REPAIRING)
 		_timer = 1.0
 		return
-	var e := evaluator.pick(self, ContractBoard.get_available())
+	var e := evaluator.pick(self, ContractBoard.get_available(-1, system_id()))
 	if e and e.accept and _take(e.contract, e):
 		return
 	if e and not e.accept:
@@ -567,6 +569,19 @@ func begin_transit() -> void:
 	mode = Mode.NONE
 
 
+## Heading home from another system (an escort after a forward station's
+## flight): through the gates home first. True when a gate trip started.
+func _gate_home() -> bool:
+	if ship.transit or not is_instance_valid(ship.home):
+		return false
+	var here := SystemWorld.of(ship)
+	var hw := SystemWorld.of(ship.home)
+	if here == null or hw == null or here == hw:
+		return false
+	var hops := Sector.hops_between(here.system_id, hw.system_id)
+	return not hops.is_empty() and GateTransit.start(ship, hops) != null
+
+
 func end_transit() -> void:
 	mode = Mode.NONE
 	retreating = false
@@ -715,7 +730,7 @@ func _reconsider_contracts(dt: float) -> void:
 	_timer = rng.randf_range(profile.evaluate_interval.x, profile.evaluate_interval.y)
 	if mode != Mode.PATROL or ship.hull_fraction() < MercenaryEvaluator.MIN_HULL:
 		return
-	var e := evaluator.pick(self, ContractBoard.get_available())
+	var e := evaluator.pick(self, ContractBoard.get_available(-1, system_id()))
 	if e and e.accept:
 		_take(e.contract, e)
 
@@ -799,12 +814,12 @@ func _pick_target() -> Node3D:
 	match mode:
 		Mode.BOUNTY:
 			if fleet:
-				# Forming up or on the way: only fight back. Engaging: the focus.
-				if fleet.state == MercFleet.State.ENGAGING:
-					if Combat.is_live_target(fleet.focus):
-						return fleet.focus
-					if Combat.is_live_target(trip.contract.target):
-						return trip.contract.target
+				# Engaging: the focus. Forming up or on the way: the ship
+				# shooting at the fleet, all together (MercFleet._attacker).
+				if Combat.is_live_target(fleet.focus):
+					return fleet.focus
+				if fleet.state == MercFleet.State.ENGAGING and Combat.is_live_target(trip.contract.target):
+					return trip.contract.target
 				return null
 			var t := trip.contract.target
 			if Combat.is_live_target(t):
@@ -1159,12 +1174,14 @@ func _escort_step(dt: float) -> void:
 	var idx := maxi(ec.escorts_of(w).find(ship), 0)
 	var side := -1.0 if idx % 2 == 0 else 1.0
 	var row := floorf(idx / 2.0)
+	# A forward station is far wider than a miner: the slots move out.
+	var wide := maxf(w.hit_radius - 8.0, 0.0) if w is MobileStation else 0.0
 	var fwd := w.global_basis * Vector3.FORWARD
 	fwd.y = 0.0
 	fwd = fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
 	var right := fwd.cross(Vector3.UP)
 	# 3D slots: the left escort rides above the ward, the right one below.
-	var pos := w.global_position + right * side * (ESCORT_SIDE + row * 26.0) - fwd * (ESCORT_BACK + row * 22.0) \
+	var pos := w.global_position + right * side * (ESCORT_SIDE + wide * 1.6 + row * 26.0) - fwd * (ESCORT_BACK + wide + row * 22.0) \
 			- Vector3.UP * side * (ESCORT_RISE + row * 12.0)
 	var vel := w.get_world_velocity()
 	var face := fwd if ship.global_position.distance_to(pos) < 120.0 else Vector3.ZERO

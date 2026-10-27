@@ -4,7 +4,10 @@ extends PanelContainer
 ## "TRAINING 2/6", the step title, one or two plain sentences, a Skip
 ## tutorial button and a minimise toggle (minimised: one line). While a
 ## step needs a build bar tile (Mining Outpost, Mercenary Outpost, Defence
-## zone) that tile gets a pulsing amber frame ([TutorialPulse]). After the
+## zone) that tile gets a pulsing amber frame ([TutorialPulse]). The build
+## bar only shows while a station is selected, so such a step selects the
+## home station when it starts (home in view, bar hidden); if the player
+## closes the bar later, the card says how to open it again. After the
 ## last step a short done card shows, closing itself after
 ## [member done_seconds] or by its button.
 
@@ -27,6 +30,8 @@ var _close: Button
 var _toggle: Button
 var _pulse: TutorialPulse
 var _done_left := 0.0
+## The step [method _sync] last saw (a new one may open the build bar).
+var _last_step := Tutorial.OFF
 
 
 func _ready() -> void:
@@ -82,6 +87,7 @@ func setup(owner_hud: HUD, t: Tutorial) -> void:
 	_pulse.name = "TutorialPulse"
 	hud.get_node(^"Root").add_child.call_deferred(_pulse)
 	tutorial.changed.connect(_sync)
+	hud.build_menu.visibility_changed.connect(_sync)
 	if hud.manager:
 		hud.manager.building_added.connect(func(_b: Building) -> void: _sync())
 	_sync()
@@ -98,8 +104,13 @@ func _process(delta: float) -> void:
 func _sync() -> void:
 	var s := tutorial.step if tutorial else Tutorial.OFF
 	visible = s != Tutorial.OFF
+	var need := _pulse_target(s)
 	if _pulse:
-		_pulse.target = _pulse_target(s)
+		_pulse.target = need
+	if s != _last_step:
+		_last_step = s
+		if need:
+			_open_build_bar.call_deferred()
 	if not visible:
 		return
 	var text := _text_for(s)
@@ -112,12 +123,21 @@ func _sync() -> void:
 		_done_left = 0.0
 	_title.text = text[0]
 	_body.text = text[1]
+	if need and not hud.build_menu.visible:
+		_body.text = "Select your station (click it or press H) to open the build bar. " + text[1]
 	_body_box.visible = not minimised
 	_skip.visible = s != Tutorial.DONE
 	_close.visible = s == Tutorial.DONE
 	_toggle.icon = H.icon(&"expand" if minimised else &"collapse")
 	_toggle.tooltip_text = "Show the training card" if minimised else "Minimise the training card"
 	_fit.call_deferred()
+
+
+## A step that needs a build bar tile starts with the bar open: selects the
+## home station (only while home is in view and the bar is hidden).
+func _open_build_bar() -> void:
+	if hud and not hud.build_menu.visible and hud.is_home_view():
+		hud.select_station()
 
 
 ## Shrinks to the content (a free-standing panel only grows on its own).

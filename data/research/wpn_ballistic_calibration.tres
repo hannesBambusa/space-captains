@@ -13,4 +13,5 @@ cost_iron = 30
 research_time = 90.0
 tags = PackedStringArray("weapons")
 merc_accuracy = 0.05
+benefit = "Every mercenary hits more often, with no refit needed."
 description = "Range-tested firing tables: every mercenary hits 5% more often. Leads to the Fire control computers."

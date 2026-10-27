@@ -83,9 +83,9 @@ const TOAST_REWARD := Color(1.0, 0.85, 0.4)
 const MAX_STEP := 0.1
 const MAX_SUBSTEPS := 40
 
-enum Role { MINER, MERCENARY, SCAVENGER, SALVAGER, POD, SHUTTLE, LANDER, EXPLORER }
+enum Role { MINER, MERCENARY, SCAVENGER, SALVAGER, POD, SHUTTLE, LANDER, EXPLORER, STATION }
 
-const ROLE_NAMES: PackedStringArray = ["Miner", "Mercenary", "Scavenger", "Salvager", "Pod", "Cargo shuttle", "Lander", "Explorer"]
+const ROLE_NAMES: PackedStringArray = ["Miner", "Mercenary", "Scavenger", "Salvager", "Pod", "Cargo shuttle", "Lander", "Explorer", "Forward station"]
 ## Docked captains look in at the Outfitter this often, sim seconds.
 const IDLE_VISIT_INTERVAL := 45.0
 const TRAIT_INTERVAL := 2.0
@@ -216,6 +216,8 @@ func _ready() -> void:
 	if loadout == null:
 		loadout = ShipLoadout.default_for(ROLE_NAMES[role])
 	if captain and faction == Combat.Faction.PLAYER:
+		# The hull is what this ship is, whatever loadout it was handed.
+		loadout.role_name = ROLE_NAMES[role]
 		loadout.unlocked_slots = Reputation.slots_for(captain.rank)
 	stats = loadout.derive(captain)
 	if faction == Combat.Faction.PLAYER and not Research.tech_completed.is_connected(_on_research_done):
@@ -269,7 +271,7 @@ func sim_step(dt: float) -> void:
 		weapon.step(dt)
 	if is_docked():
 		if durability.hull < durability.max_hull:
-			RepairBay.step(self, dt)
+			RepairBay.step(self, dt * work_speed())
 		elif repairing:
 			repairing = false
 			RepairBay.end_session(self)
@@ -481,6 +483,8 @@ func refit() -> void:
 	if loadout == null:
 		return
 	if captain and faction == Combat.Faction.PLAYER:
+		# The hull is what this ship is, whatever loadout it was handed.
+		loadout.role_name = ROLE_NAMES[role]
 		loadout.unlocked_slots = Reputation.slots_for(captain.rank)
 	var hf := durability.fraction() if durability else 1.0
 	var sf := durability.shield_fraction() if durability else 1.0
@@ -508,10 +512,16 @@ func _on_research_done(t: TechDef) -> void:
 		refit()
 
 
+## Work timer speed (mining, salvage, dock repairs): slower while the
+## home's forward station has no water (StationSupply.work_mult).
+func work_speed() -> float:
+	return StationSupply.work_mult(home if is_instance_valid(home) else self)
+
+
 ## Chance this ship's captain ejects when it is destroyed.
 func eject_chance() -> float:
 	var w := SystemWorld.of(self)
-	if w and not w.is_home:
+	if w and not w.has_station:
 		return 0.0
 	return captain.eject_chance(stats) if captain else 0.0
 

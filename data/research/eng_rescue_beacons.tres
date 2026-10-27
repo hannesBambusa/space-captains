@@ -15,4 +15,5 @@ research_time = 150.0
 prerequisites = Array[StringName]([&"eng_survival_systems"])
 unlock_modules = Array[StringName]([&"survival_cell_2", &"ejection_rig_2"])
 tags = PackedStringArray("defence")
+benefit = "More captains get out alive when their ship is lost."
 description = "Pods that call home on their own: Mk II survival cells and ejection rigs."

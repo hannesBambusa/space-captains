@@ -3,8 +3,12 @@ extends Control
 ## Always-on screen overlay for ships and Scavenger Dens: one constant-size
 ## icon per ship (shape by role, colour by faction), turned to the screen
 ## heading of its nose, with a status glyph (mining, cargo, fighting,
-## fleeing, escorting, spooling or in a warp hop), a hull pip when damaged
-## and a short name label.
+## fleeing, escorting, spooling or in a warp hop), two half arcs over the
+## top (outer shields, inner hull, empty track for what is lost) and a short
+## name label. Zoomed in (below [member bar_zoom]) the arcs give way to two
+## thin bars under the ship (shields over hull), only while it is damaged,
+## recently hit, selected, followed or hovered. Structures (buildings with a
+## hull, enemy bases) never get arcs: the same bars, zoomed in only.
 ## Labels fade with zoom and are decluttered; the selected, followed and
 ## hovered ship always keep theirs. Icons fade out once the real model is
 ## big on screen. Parked ships are hidden and counted in a "n docked" badge
@@ -46,6 +50,16 @@ const DEN_COLOR := Color(1.0, 0.3, 0.24)
 const SELECT_COLOR := Color(1.0, 0.62, 0.26)
 const SHADOW := Color(0.0, 0.0, 0.0, 0.6)
 const FLEET_COLOR := Color(1.0, 0.85, 0.42)
+## Health arcs over ship icons, bars under ships and structures.
+const SHIELD_COLOR := Color(0.38, 0.78, 1.0)
+const HULL_FULL := Color(0.45, 0.92, 0.45)
+const HULL_MID := Color(1.0, 0.78, 0.2)
+const HULL_LOW := Color(1.0, 0.22, 0.15)
+const ARC_TRACK := Color(0.55, 0.6, 0.68)
+const ARC_WIDTH := 2.0
+const ARC_GAP := 3.5
+const BAR_HEIGHT := 3.0
+const BAR_WIDTH_PX := Vector2(28.0, 60.0)
 const GLYPH_COLORS: Array[Color] = [
 	Color.WHITE, Color(0.85, 0.92, 1.0), Color(1.0, 0.84, 0.42), Color(1.0, 0.5, 0.36), Color(1.0, 0.86, 0.25), Color(0.5, 0.95, 1.0),
 	Color(0.7, 0.88, 1.0),
@@ -71,6 +85,13 @@ static var session_mode: Mode = Mode.ALL
 ## Drop lines for every ship beyond this camera distance, metres (closer:
 ## only the selected, followed and hovered ship).
 @export var drop_line_zoom: float = 5000.0
+## Health shows as bars under ships and structures below the first camera
+## distance and as arcs over ships above the second (hysteresis), metres.
+@export var bar_zoom: Vector2 = Vector2(2800.0, 3400.0)
+## Bars also show this long after the last hit, sim seconds.
+@export var bar_hit_window: float = 8.0
+## Arc/bar cross-fade speed, per second.
+@export var bar_fade_rate: float = 5.0
 ## Ships closer than this to their reference plane get no drop line, metres.
 @export var drop_line_min_height: float = 12.0
 ## Near the station (flat distance) the reference plane is the station's, metres.
@@ -87,6 +108,8 @@ var _arrows: Array[Dictionary] = []
 ## Fleet links this frame: {from, to, alpha}; badges: {pos, count, alpha}.
 var _fleet_links: Array[Dictionary] = []
 var _fleet_badges: Array[Dictionary] = []
+## Health bars under buildings this frame: {target, pos, width, hull, shield, alpha}.
+var _structures: Array[Dictionary] = []
 var _hover: Entry
 var _hover_target: Node3D
 var _press_pos := Vector2.INF
@@ -97,6 +120,9 @@ var _tooltip_timer := 0.0
 var _font: Font
 var _px_per_rad := 1.0
 var _zoomed_out := false
+var _bars_near := false
+## 0 = arcs (zoomed out), 1 = bars (zoomed in).
+var _bar_mix := 0.0
 
 
 class Entry:
@@ -109,6 +135,8 @@ class Entry:
 	var alpha := 1.0
 	var glyph: Glyph = Glyph.NONE
 	var hull := 1.0
+	## Shield fraction, -1 when it has no shields.
+	var shield := -1.0
 	var label := ""
 	var label_alpha := 0.0
 	var label_rect := Rect2()
@@ -119,6 +147,8 @@ class Entry:
 	var priority := 0
 	## Screen point of the drop line's foot (INF = no line).
 	var drop := Vector2.INF
+	## Wants health bars when zoomed in (damaged, recently hit, emphasised).
+	var bars := false
 
 
 func _ready() -> void:
@@ -270,6 +300,7 @@ func _process(delta: float) -> void:
 	_arrows.clear()
 	_fleet_links.clear()
 	_fleet_badges.clear()
+	_structures.clear()
 	if cam == null or hud == null or mode == Mode.OFF:
 		_set_hover(null)
 		queue_redraw()
@@ -284,6 +315,11 @@ func _process(delta: float) -> void:
 	var followed := hud.camera.get_follow_target() if hud.camera else null
 	var home := _home_position()
 	_zoomed_out = dist > drop_line_zoom
+	if _bars_near and dist > bar_zoom.y:
+		_bars_near = false
+	elif not _bars_near and dist < bar_zoom.x:
+		_bars_near = true
+	_bar_mix = move_toward(_bar_mix, 1.0 if _bars_near else 0.0, bar_fade_rate * delta)
 	var screen := vp.grow(20.0)
 	for n in SystemWorld.nodes_in(self, Ship.GROUP):
 		var s := n as Ship
@@ -327,7 +363,9 @@ func _process(delta: float) -> void:
 			if not screen.has_point(sp):
 				continue
 			_fill_site(_next_entry(), site, sp, site == followed)
-	if mode == Mode.ALL and hud.manager:
+	if mode == Mode.ALL:
+		_collect_structures(cam, screen, selected)
+	if mode == Mode.ALL and hud.local_manager():
 		_collect_badges(cam, screen, zoom_alpha)
 	if mode == Mode.ALL:
 		_collect_fleets()
@@ -373,6 +411,8 @@ func _fill_ship(e: Entry, s: Ship, cam: Camera3D, sp: Vector2, emphasis: bool) -
 	e.color = color_for(s)
 	e.shape = _shape_for(s)
 	e.hull = s.hull_fraction()
+	e.shield = s.shield_fraction() if s.durability and s.durability.max_shields > 0.0 else -1.0
+	e.bars = _wants_bars(s.durability, emphasis)
 	e.glyph = _glyph_for(s)
 	e.label = short_name(s)
 	var d := maxf(cam.global_position.distance_to(s.global_position), 1.0)
@@ -411,6 +451,8 @@ func _fill_den(e: Entry, d: ScavengerDen, cam: Camera3D, sp: Vector2, emphasis: 
 	e.color = d.faction_def.color
 	e.shape = Shape.DEN
 	e.hull = d.hull_fraction()
+	e.shield = d.durability.shield_fraction() if d.durability.max_shields > 0.0 else -1.0
+	e.bars = _wants_bars(d.durability, emphasis)
 	e.glyph = Glyph.NONE
 	e.label = d.get_display_name()
 	var dist := maxf(cam.global_position.distance_to(d.global_position), 1.0)
@@ -429,6 +471,8 @@ func _fill_site(e: Entry, site: DenArrivalSite, sp: Vector2, emphasis: bool) -> 
 	e.color = site.faction_def.color
 	e.shape = Shape.DEN
 	e.hull = 1.0
+	e.shield = -1.0
+	e.bars = false
 	e.glyph = Glyph.NONE
 	e.label = "Arriving %s" % site.countdown_text()
 	e.model_px = 0.0
@@ -558,7 +602,7 @@ func _arrow_area(vp: Rect2) -> Rect2:
 func _collect_badges(cam: Camera3D, screen: Rect2, zoom_alpha: float) -> void:
 	if zoom_alpha < 0.02:
 		return
-	for b in hud.manager.buildings:
+	for b in hud.local_manager().buildings:
 		if not is_instance_valid(b) or not b.is_inside_tree():
 			continue
 		var parked := 0
@@ -575,7 +619,54 @@ func _collect_badges(cam: Camera3D, screen: Rect2, zoom_alpha: float) -> void:
 			continue
 		var d := maxf(cam.global_position.distance_to(p), 1.0)
 		var r := minf(b.def.footprint_radius / d * _px_per_rad, 70.0)
+		# Below the health bars when they show.
+		for st in _structures:
+			if st["target"] == b:
+				r += 2.0 * BAR_HEIGHT + 4.0
+				break
 		_badges.append({"target": b, "pos": sp + Vector2(0.0, r + 12.0), "text": "%d docked" % parked, "alpha": zoom_alpha})
+
+
+## Health bars under the buildings of the viewed system that can take damage
+## (outposts with a structure hull, defence platforms), zoomed in only.
+func _collect_structures(cam: Camera3D, screen: Rect2, selected: Node3D) -> void:
+	var bm := hud.local_manager()
+	if bm == null or _bar_mix < 0.01:
+		return
+	for b in bm.buildings:
+		if not is_instance_valid(b) or not b.is_inside_tree() or not b.is_visible_in_tree():
+			continue
+		var dur := _building_durability(b)
+		if dur == null or not _wants_bars(dur, b == selected or b == _hover_target):
+			continue
+		var p := b.global_position
+		if cam.is_position_behind(p):
+			continue
+		var sp := cam.unproject_position(p)
+		if not screen.has_point(sp):
+			continue
+		var d := maxf(cam.global_position.distance_to(p), 1.0)
+		var r := clampf(b.def.footprint_radius / d * _px_per_rad, icon_px, 70.0)
+		_structures.append({"target": b, "pos": sp + Vector2(0.0, r + 4.0), "width": clampf(r * 1.6, BAR_WIDTH_PX.x, BAR_WIDTH_PX.y),
+				"hull": dur.fraction(), "shield": dur.shield_fraction() if dur.max_shields > 0.0 else -1.0, "alpha": 0.9 * _bar_mix})
+
+
+## Health bars show (zoomed in) while damaged, hit lately or emphasised.
+func _wants_bars(dur: Durability, emphasis: bool) -> bool:
+	if emphasis:
+		return true
+	if dur == null:
+		return false
+	return dur.fraction() < 0.995 or (dur.max_shields > 0.0 and dur.shield_fraction() < 0.995) \
+			or dur.seconds_since_hit() < bar_hit_window
+
+
+static func _building_durability(b: Building) -> Durability:
+	var service := b.get_service() as DefenseStructure
+	if service and service.durability:
+		return service.durability
+	var hull := b.get_hull()
+	return hull.durability if hull else null
 
 
 # --- Hover, labels, tooltip ------------------------------------------------------
@@ -738,6 +829,8 @@ func _draw() -> void:
 		var a := float(l["alpha"])
 		draw_line(l["from"] as Vector2, l["to"] as Vector2, Color(SHADOW, 0.5 * a), 3.0, true)
 		draw_dashed_line(l["from"] as Vector2, l["to"] as Vector2, Color(FLEET_COLOR, 0.7 * a), 1.3, 5.0, true, true)
+	for st in _structures:
+		_draw_health_bars(st["pos"] as Vector2, float(st["width"]), float(st["hull"]), float(st["shield"]), float(st["alpha"]))
 	for i in _count:
 		_draw_drop(_entries[i])
 	# Friendly first, hostiles over them, the emphasised ones on top.
@@ -782,13 +875,20 @@ func _draw_entry(e: Entry) -> void:
 		_draw_icon(e.shape, e.pos, e.heading, size, e.color, a)
 		if e.emphasis:
 			draw_arc(e.pos, size * 1.75, 0.0, TAU, 32, Color(SELECT_COLOR, 0.9 * a), 1.5, true)
-		if e.hull < 0.5:
-			var pip := Color(1.0, 0.6, 0.15) if e.hull >= 0.25 else Color(1.0, 0.2, 0.15)
-			var pp := e.pos + Vector2(-size - 2.0, size * 0.6)
-			draw_circle(pp, 3.2, Color(SHADOW, 0.8 * a))
-			draw_circle(pp, 2.3, Color(pip, a))
 		if e.glyph != Glyph.NONE:
 			_draw_glyph(e.glyph, e.pos + Vector2(size + 7.0, 0.0), a)
+	var health_a := maxf(a, 0.75 if (hovered or e.emphasis) else 0.6)
+	if e.shape != Shape.DEN and _bar_mix < 0.99:
+		# Over the icon, or over the model once it is big on screen.
+		var ring := icon_px * (1.75 if e.emphasis else 1.2)
+		var r := maxf(ring + 3.0, e.model_px * 0.55)
+		_draw_health_arcs(e.pos, r, e.hull, e.shield, health_a * (1.0 - _bar_mix))
+	if (e.bars or hovered) and _bar_mix > 0.01 and not e.target is DenArrivalSite:
+		# Under the model (or the icon while it shows), as wide as the model.
+		var icon := (den_icon_px if e.shape == Shape.DEN else icon_px) * (1.75 if e.emphasis else 1.2)
+		var below := maxf(icon, e.model_px * 0.5) + 5.0
+		_draw_health_bars(e.pos + Vector2(0.0, below), clampf(e.model_px, BAR_WIDTH_PX.x, BAR_WIDTH_PX.y),
+				e.hull, e.shield, maxf(health_a, 0.85) * _bar_mix)
 	if e.show_label and _font:
 		var la := e.label_alpha * (1.0 if (hovered or e.emphasis) else 0.85)
 		var col := e.color.lerp(Color.WHITE, 0.45)
@@ -797,6 +897,44 @@ func _draw_entry(e: Entry) -> void:
 		var base := e.label_rect.position + Vector2(2.0, 13.0)
 		draw_string_outline(_font, base, e.label, HORIZONTAL_ALIGNMENT_LEFT, -1, label_font_size, 4, Color(0.0, 0.0, 0.0, 0.75 * la))
 		draw_string(_font, base, e.label, HORIZONTAL_ALIGNMENT_LEFT, -1, label_font_size, Color(col, la))
+
+
+## Two half arcs over the top of [param c]: hull at [param r], shields just
+## outside it (skipped when [param shield] < 0). Each fills from the left.
+func _draw_health_arcs(c: Vector2, r: float, hull: float, shield: float, a: float) -> void:
+	_draw_half_arc(c, r, hull, _hull_color(hull), a)
+	if shield >= 0.0:
+		_draw_half_arc(c, r + ARC_GAP, shield, SHIELD_COLOR, a)
+
+
+## Two thin bars centred under [param top]: shields on top (skipped when
+## [param shield] < 0), hull below. Each fills from the left.
+func _draw_health_bars(top: Vector2, w: float, hull: float, shield: float, a: float) -> void:
+	var x := top.x - w * 0.5
+	var y := top.y
+	if shield >= 0.0:
+		_draw_bar(Vector2(x, y), w, shield, SHIELD_COLOR, a)
+		y += BAR_HEIGHT + 1.0
+	_draw_bar(Vector2(x, y), w, hull, _hull_color(hull), a)
+
+
+func _draw_bar(at: Vector2, w: float, frac: float, col: Color, a: float) -> void:
+	var r := Rect2(at, Vector2(w, BAR_HEIGHT))
+	draw_rect(r.grow(1.0), Color(SHADOW, 0.8 * a), true)
+	draw_rect(r, Color(ARC_TRACK, 0.35 * a), true)
+	if frac > 0.005:
+		draw_rect(Rect2(at, Vector2(w * clampf(frac, 0.0, 1.0), BAR_HEIGHT)), Color(col, a), true)
+
+
+static func _hull_color(hull: float) -> Color:
+	return HULL_LOW.lerp(HULL_MID, smoothstep(0.0, 0.5, hull)).lerp(HULL_FULL, smoothstep(0.5, 1.0, hull))
+
+
+func _draw_half_arc(c: Vector2, r: float, frac: float, col: Color, a: float) -> void:
+	draw_arc(c, r, PI, TAU, 24, Color(SHADOW, 0.7 * a), ARC_WIDTH + 2.0, true)
+	draw_arc(c, r, PI, TAU, 24, Color(ARC_TRACK, 0.5 * a), ARC_WIDTH, true)
+	if frac > 0.005:
+		draw_arc(c, r, PI, PI + PI * clampf(frac, 0.0, 1.0), maxi(3, ceili(24.0 * frac)), Color(col, a), ARC_WIDTH, true)
 
 
 func _draw_icon(shape: Shape, c: Vector2, heading: float, s: float, color: Color, a: float) -> void:

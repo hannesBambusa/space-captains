@@ -15,8 +15,10 @@ extends Node3D
 ##
 ## [member system_id] says which system of the gate network this is
 ## ("home", "s1", ..); set before the node enters the tree (SystemHost).
-## Only home has a station, buildings and the raid and threat directors;
-## a remote system is live only while viewed (plus a grace period), see
+## [member has_station]: home, or a system with a forward station site
+## (RemoteSystemState.station); those have a station, buildings and the
+## raid and threat directors (claims and gate raids stay home's). Any other
+## remote system is live only while viewed (plus a grace period), see
 ## [ViewManager] and [SystemHost]. An empty id (SystemPreview) registers
 ## nowhere.
 
@@ -30,6 +32,21 @@ var system_id: StringName = ClusterNetwork.HOME_ID
 var is_home: bool:
 	get:
 		return system_id == ClusterNetwork.HOME_ID
+
+## The system has a station: home, or a forward station site
+## ([member station_site] not empty). Valid before the node enters the tree.
+var has_station: bool:
+	get:
+		return is_home or not station_site.is_empty()
+
+## The forward station site (RemoteSystemState.station), {} at home (its
+## station comes from the SystemDef) and where there is none.
+var station_site: Dictionary:
+	get:
+		if is_home or system_id.is_empty():
+			return {}
+		var st := Sector.state(system_id)
+		return st.station if st else {}
 
 var sys: SolarSystem:
 	get:
@@ -50,6 +67,12 @@ var camera: RTSCamera:
 var contract_markers: ContractMarkers:
 	get:
 		return _member(^"ContractMarkers", ContractMarkers.GROUP) as ContractMarkers
+
+## Upkeep, water and hauling fee of a forward station (null at home and
+## in systems without a station).
+var supply: StationSupply:
+	get:
+		return _member(^"StationSupply", StationSupply.GROUP) as StationSupply
 
 ## The node undocked ships fly under ([method SpaceNav.space_root]).
 var ships_root: Node3D:

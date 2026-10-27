@@ -15,4 +15,5 @@ research_time = 320.0
 prerequisites = Array[StringName]([&"wpn_rail_cannons", &"wpn_fire_control"])
 unlock_modules = Array[StringName]([&"autocannon_3"])
 tags = PackedStringArray("weapons")
+benefit = "The heaviest autocannon for mercenaries."
 description = "Full mass drivers in a gun turret: the Mk III autocannon."

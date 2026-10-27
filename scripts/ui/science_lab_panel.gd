@@ -6,10 +6,14 @@ extends PanelContainer
 ##   Planetary) with its state (locked by a prerequisite, available, funded
 ##   and waiting for a researcher, in progress with who and how far, done),
 ##   cost and time, and a Fund or Cancel button (the cancel tooltip says what
-##   comes back). Hover a project: what it unlocks with the module numbers.
+##   comes back). Hover a project: its rich tooltip (ResearchTip: benefits,
+##   cost, progress, what it needs).
 ## - Staff: hired researchers (field, skill, personality, project and
 ##   progress, why they picked it, Let go), the applicants you can hire, and
 ##   the lab log (choices with their reasons, completions).
+## Rows are rebuilt only when research changes (Research.changed); credits
+## changing only updates the Fund and Hire buttons in place, so the row under
+## the mouse keeps its tooltip.
 
 const FIELD_COLORS: Array[Color] = [Color(0.55, 0.8, 1.0), Color(1.0, 0.56, 0.42), Color(0.6, 0.95, 0.62)]
 const STATE_COLORS := {
@@ -36,13 +40,27 @@ var _staff: VBoxContainer
 var _tab_buttons: Array[Button] = []
 ## 0 = Projects, 1 = Staff.
 var _tab: int = 0
-## Rows updated live: {tech, bar, sub}.
+## Rows updated live: {tech, bar, sub, btn (the Fund button or null)}.
 var _live: Array[Dictionary] = []
 ## Researcher rows updated live: {researcher, sub}.
 var _live_staff: Array[Dictionary] = []
+## Applicant rows' Hire buttons, updated when credits change: {researcher, btn}.
+var _live_hire: Array[Dictionary] = []
 var _applicant_header: Label
 var _tick := 0.0
 var _dirty := false
+## Credits or ore changed: the Fund and Hire buttons need a look.
+var _econ_dirty := false
+
+
+## A project row: its tooltip is the live ResearchTip.
+class ProjectRow:
+	extends VBoxContainer
+
+	var tech: TechDef
+
+	func _make_custom_tooltip(_for_text: String) -> Object:
+		return ResearchTip.make(tech)
 
 
 func _ready() -> void:
@@ -96,7 +114,7 @@ func setup(owner_hud: HUD) -> void:
 	if hud.selection:
 		hud.selection.selection_changed.connect(func(t: Node3D) -> void: show_building(t as Building))
 	Research.changed.connect(func() -> void: _dirty = true)
-	Economy.changed.connect(func(_c: int, _m: int) -> void: _dirty = true)
+	Economy.changed.connect(func(_c: int, _m: int) -> void: _econ_dirty = true)
 
 
 func show_building(b: Building) -> void:
@@ -122,12 +140,34 @@ func get_tab() -> int:
 	return _tab
 
 
+## Projects tab with [param t]'s row scrolled into view and lit up briefly
+## (the HUD research list).
+func show_tech(t: TechDef) -> void:
+	if _tab != 0:
+		set_tab(0)
+	elif _dirty:
+		_dirty = false
+		_rebuild()
+	for e in _live:
+		if e["tech"] == t:
+			var box := (e["sub"] as Control).get_parent() as Control
+			box.modulate = Color(1.6, 1.4, 0.9)
+			box.create_tween().tween_property(box, "modulate", Color.WHITE, 1.2)
+			# After the HUD has sized the panel's scroll (HUD._layout_right).
+			get_tree().create_timer(0.15).timeout.connect(func() -> void:
+				var sc := get_meta(&"hud_scroll") as ScrollContainer if has_meta(&"hud_scroll") else null
+				if sc and is_instance_valid(box) and box.is_inside_tree():
+					sc.ensure_control_visible(box))
+			return
+
+
 func _process(delta: float) -> void:
 	if not visible or lab == null or not is_instance_valid(lab):
 		return
 	_tick -= delta
 	if _dirty:
 		_dirty = false
+		_econ_dirty = false
 		_rebuild()
 	elif _tick <= 0.0:
 		_tick = 0.25
@@ -199,10 +239,12 @@ func _rebuild_projects() -> void:
 
 func _add_tech_row(t: TechDef) -> void:
 	var state := Research.state_of(t)
-	var box := VBoxContainer.new()
+	var box := ProjectRow.new()
+	box.tech = t
 	box.add_theme_constant_override("separation", 0)
 	box.mouse_filter = Control.MOUSE_FILTER_PASS
-	box.tooltip_text = tech_tip(t)
+	# A stable key; the live content is ProjectRow's custom tooltip.
+	box.tooltip_text = t.display_name
 	_projects.add_child(box)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
@@ -223,15 +265,15 @@ func _add_tech_row(t: TechDef) -> void:
 	st.add_theme_color_override("font_color", STATE_COLORS[state])
 	row.add_child(st)
 	var btn: Button
+	var fund_btn: Button = null
 	if state == "funded" or state == "in_progress":
 		btn = UIUtil.button("Cancel", &"IconButton")
 		btn.tooltip_text = Research.cancel_text(t)
 		btn.pressed.connect(func() -> void: Research.cancel(t))
 	else:
 		btn = UIUtil.button("Fund", &"AccentButton")
-		var why := Research.fund_problem(t)
-		btn.disabled = not why.is_empty()
-		btn.tooltip_text = why if not why.is_empty() else "Fund it: %s reserved now. A researcher picks it up when free." % t.cost_text()
+		fund_btn = btn
+		_update_fund(btn, t)
 		btn.pressed.connect(func() -> void: Research.fund(t))
 	btn.custom_minimum_size = Vector2(64.0, 22.0)
 	row.add_child(btn)
@@ -248,7 +290,23 @@ func _add_tech_row(t: TechDef) -> void:
 		bar.custom_minimum_size = Vector2(panel_width - 24.0, 4.0)
 		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		box.add_child(bar)
-	_live.append({"tech": t, "bar": bar, "sub": sub})
+	_live.append({"tech": t, "bar": bar, "sub": sub, "btn": fund_btn})
+
+
+func _update_fund(btn: Button, t: TechDef) -> void:
+	var why := Research.fund_problem(t)
+	btn.disabled = not why.is_empty()
+	var tip := why if not why.is_empty() else "Fund it: %s reserved now. A researcher picks it up when free." % t.cost_text()
+	if btn.tooltip_text != tip:
+		btn.tooltip_text = tip
+
+
+func _update_hire(btn: Button, r: Researcher) -> void:
+	var why := Research.hire_problem(r)
+	btn.disabled = not why.is_empty()
+	var tip := why if not why.is_empty() else "Hire %s for %s cr, then a wage of %s cr per minute from your credits." % [r.researcher_name, UIUtil.amount(r.hire_cost), wage_text(r)]
+	if btn.tooltip_text != tip:
+		btn.tooltip_text = tip
 
 
 ## Sub line of a project row: cost and time, or who works on it and how far.
@@ -268,34 +326,12 @@ static func tech_line(t: TechDef) -> String:
 	return "%s, %s at skill 5 in the field" % [t.cost_text(), UIUtil.clock(t.research_time)]
 
 
-## Description, unlocks with their numbers, prerequisites, cost and time.
-static func tech_tip(t: TechDef) -> String:
-	var lines: PackedStringArray = ["%s (%s, %s)" % [t.display_name, t.field_name(), TechDef.TIER_NAMES[t.tier]], t.description, ""]
-	for id in t.unlock_modules:
-		var m := ModuleCatalog.shared().find(id)
-		if m:
-			lines.append("%s: %s" % [m.display_name, m.effect_text()])
-	var mgr := BuildingManager.of(SystemWorld.home(Engine.get_main_loop() as SceneTree))
-	for id in t.unlock_buildings:
-		var def := mgr.def_by_id(id) if mgr else null
-		lines.append("Unlocks the %s%s" % [def.display_name if def else String(id).capitalize(), " (in service in a later update)" if def and not def.in_service else ""])
-	if not t.prerequisites.is_empty():
-		var pre: PackedStringArray = []
-		for p in t.prerequisites:
-			var pt := Research.catalog().find(p)
-			if pt:
-				pre.append(pt.display_name + (" (done)" if Research.is_done(p) else ""))
-		lines.append("Needs: " + ", ".join(pre))
-	lines.append("Cost %s. Time %s for a skill 5 researcher in the field, %s outside it." % [t.cost_text(), UIUtil.clock(t.research_time),
-			UIUtil.clock(t.research_time / Researcher.OFF_FIELD_SPEED)])
-	return "\n".join(lines)
-
-
 # --- Staff ------------------------------------------------------------------------
 
 func _rebuild_staff() -> void:
 	_clear(_staff)
 	_live_staff.clear()
+	_live_hire.clear()
 	_staff.add_child(HSeparator.new())
 	var rh := UIUtil.label("RESEARCHERS  %d / %d" % [Research.researchers.size(), Research.MAX_RESEARCHERS], &"HeaderLabel")
 	rh.tooltip_text = "Each researcher draws a wage from your credits: %s cr per minute for skill 1, %s for skill 10. When the station cannot pay, they stop working (Unpaid)." % [
@@ -382,9 +418,8 @@ func _person_row(r: Researcher, applicant: bool) -> VBoxContainer:
 	var btn: Button
 	if applicant:
 		btn = UIUtil.button("Hire %s cr" % UIUtil.amount(r.hire_cost), &"AccentButton")
-		var why := Research.hire_problem(r)
-		btn.disabled = not why.is_empty()
-		btn.tooltip_text = why if not why.is_empty() else "Hire %s for %s cr, then a wage of %s cr per minute from your credits." % [r.researcher_name, UIUtil.amount(r.hire_cost), wage_text(r)]
+		_update_hire(btn, r)
+		_live_hire.append({"researcher": r, "btn": btn})
 		btn.pressed.connect(func() -> void: Research.hire(r))
 	else:
 		btn = UIUtil.button("Let go", &"IconButton")
@@ -414,6 +449,13 @@ static func researcher_line(r: Researcher) -> String:
 
 func _refresh_live() -> void:
 	_status.text = lab.status_text() if lab else ""
+	if _econ_dirty:
+		_econ_dirty = false
+		for e in _live:
+			if e["btn"]:
+				_update_fund(e["btn"] as Button, e["tech"] as TechDef)
+		for e in _live_hire:
+			_update_hire(e["btn"] as Button, e["researcher"] as Researcher)
 	for e in _live:
 		var t := e["tech"] as TechDef
 		(e["sub"] as Label).text = tech_line(t)

@@ -25,6 +25,8 @@ extends Node
 ## its route with [method start_trip] and reveals along it with the same
 ## function the live explorer uses; [signal trip_finished] stays the
 ## generic abstract-travel API; a ship dict may carry any extra keys.
+## Mobile stations (F6): their gate hops as GateTransit data, the rest
+## (cruise, deploy, the founding) by MobileStation.step_data.
 
 ## A stored ship [param ship] (its dict) in system [param system_id] reached
 ## the end of its trip.
@@ -75,7 +77,7 @@ static func leg_time(dist: float, ship_speed: float) -> float:
 
 static func has_player_ship(st: RemoteSystemState) -> bool:
 	for d: Dictionary in st.ships:
-		if String(d.get("kind", "")) == ShipCodec.KIND_HIRED:
+		if String(d.get("kind", "")) == ShipCodec.KIND_HIRED or MobileStation.is_mobile(d):
 			return true
 	return false
 
@@ -83,7 +85,7 @@ static func has_player_ship(st: RemoteSystemState) -> bool:
 ## One of the player's ships is in the jump to [param id].
 func player_ship_bound_for(id: StringName) -> bool:
 	for t: Dictionary in Sector.transits:
-		if t["to"] == id and String((t["ship"] as Dictionary).get("kind", "")) == ShipCodec.KIND_HIRED:
+		if t["to"] == id and (String((t["ship"] as Dictionary).get("kind", "")) == ShipCodec.KIND_HIRED or MobileStation.is_mobile(t["ship"])):
 			return true
 	return false
 
@@ -102,6 +104,9 @@ func after_load() -> void:
 
 
 func _mark_away(refs: SaveRefs, d: Dictionary, where: String) -> void:
+	# A mobile station's escorts ride in its dict.
+	for ed: Dictionary in d.get("escorts", []):
+		_mark_away(refs, ed, where)
 	if String(d.get("kind", "")) != ShipCodec.KIND_HIRED:
 		return
 	var c := refs.captain(int(d.get("captain", 0)))
@@ -166,6 +171,9 @@ func _step_system(id: StringName, st: RemoteSystemState, dt: float) -> void:
 					trip_finished.emit(id, d)
 		if d.has("transit") and GateTransit.step_data(self, id, d, dt):
 			st.ships.erase(d)
+		elif MobileStation.is_mobile(d):
+			if MobileStation.step_data(self, id, st, d, dt):
+				st.ships.erase(d)
 		elif Survey.step_data(self, id, st, d, dt):
 			# Lost to a base on the way (already out of the list).
 			st.ships.erase(d)

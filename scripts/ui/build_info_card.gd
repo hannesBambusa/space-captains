@@ -1,13 +1,16 @@
 class_name BuildInfoCard
 extends PanelContainer
-## The build bar's rich tooltip, shown above the hovered [BuildTile]: name
-## and group, how many are built of the limit, what it does, the cost per
-## resource (red where you are short, with what you have), build time, the
-## hire terms, the defence numbers (DefenseStats) and why it cannot be built
-## right now.
+## The build bar's rich tooltip, shown above the hovered [BuildTile] (the
+## tiles are icon only, so this is where the words are): name and group,
+## how many are built of the limit, what it does, the cost per resource
+## (red where you are short, with what you have), build time, the hire
+## terms, the defence numbers (DefenseStats) and why it cannot be built
+## right now. Looks like the [RichTooltip] (its panel, the accent bar amber,
+## red while it cannot be built). A refresh with the same content keeps the
+## nodes, so the card stays still while the mouse rests on a tile.
 
 const H := preload("res://scripts/ui/theme/hud_style.gd")
-const WIDTH := 360.0
+const WIDTH := 340.0
 
 var _title: Label
 var _group: Label
@@ -20,10 +23,14 @@ var _stats_box: PanelContainer
 var _stats: Label
 var _block: Label
 var _hint: Label
+var _style: ChamferBox
+## The last content shown ([method show_info] skips a repeat).
+var _shown_key := ""
 
 
 func _ready() -> void:
-	theme_type_variation = &"TooltipPanel"
+	_style = RichTooltip.panel_style(H.ACCENT)
+	add_theme_stylebox_override("panel", _style)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	custom_minimum_size.x = WIDTH
 	visible = false
@@ -33,7 +40,8 @@ func _ready() -> void:
 	var top := HBoxContainer.new()
 	v.add_child(top)
 	_title = UIUtil.label("", &"TitleLabel")
-	_title.add_theme_font_size_override("font_size", 21)
+	_title.add_theme_font_override("font", H.font("SemiBold", true))
+	_title.add_theme_font_size_override("font_size", 19)
 	top.add_child(_title)
 	top.add_child(UIUtil.spacer())
 	_group = UIUtil.label("", &"HeaderLabel")
@@ -74,13 +82,18 @@ func _ready() -> void:
 
 func _wrap(l: Label) -> Label:
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	l.custom_minimum_size.x = WIDTH - 24.0
+	l.custom_minimum_size.x = WIDTH - 2.0 * RichTooltip.MARGIN_X - 3.0
 	return l
 
 
 ## Fills the card. [param info] keys: title, group, count, desc, costs
 ## (Array of {icon, text, short, have}), time, hire, stats, block, hint.
 func show_info(info: Dictionary, above: Rect2) -> void:
+	var key := var_to_str(info) + str(above)
+	if visible and key == _shown_key:
+		return
+	_shown_key = key
+	_style.accent_color = H.BAD if not String(info.get("block", "")).is_empty() else H.ACCENT
 	_title.text = String(info.get("title", ""))
 	_group.text = String(info.get("group", ""))
 	_count.text = String(info.get("count", ""))

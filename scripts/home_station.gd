@@ -1,9 +1,14 @@
 class_name HomeStation
 extends Node3D
-## Home station at the sector origin. Instances the Blender glb at runtime so the
-## scene still loads when the file is missing, then falls back to a placeholder.
+## A station: the class for every station, the home one and forward ones
+## (SolarSystem.add_station; the name stays from when home was the only one).
+## Instances the Blender glb at runtime ([member model_path]) so the scene
+## still loads when the file is missing: then [member fallback_path] scaled
+## by [member fallback_scale], then a placeholder. Set the fields before it
+## enters the tree.
 
 const STATION_PATH := "res://assets/models/station/station_home.glb"
+const FORWARD_PATH := "res://assets/models/station/station_forward.glb"
 const RING_NODE := "station_ring"
 ## Docking pad empties "dock_pad_1", "dock_pad_2" in the model, or these
 ## (station space; the arms point at 15 and 195 degrees in Blender).
@@ -16,6 +21,32 @@ const DOCK_PAD_FALLBACK: Array[Vector3] = [Vector3(55.5, 0.0, -14.9), Vector3(-5
 @export var station_spin_deg: float = 0.0
 ## Habitat ring yaw speed in degrees per second, on top of the station spin.
 @export var ring_spin_deg: float = 3.0
+
+## Station model (glb); [member fallback_path] while it does not load.
+var model_path: String = STATION_PATH
+## Model used when [member model_path] does not load, scaled by
+## [member fallback_scale] (and so are its pads and bays). "" = placeholder.
+var fallback_path: String = ""
+var fallback_scale: float = 1.0
+## Addon bays on the core ("addon_bay_1".., BuildingManager) and docking
+## pads ("dock_pad_1".., CargoShuttle).
+var bay_count: int = 6
+var dock_pad_count: int = 2
+## Keep-out radius cargo shuttles route round the hub, m.
+var hub_clearance: float = 120.0
+## Display name ("Home Station" or the forward station's name).
+var station_name: String = "Home Station"
+## Keep-outs and edges for the BuildingManager ([method apply_forward_profile]);
+## < 0 or empty = the manager's own (home's) values.
+var structure_clearance: float = -1.0
+var edge_radius: float = -1.0
+var hull_radius: float = -1.0
+var solar_wing_dirs: PackedVector3Array = PackedVector3Array()
+var solar_wing_span: Vector2 = Vector2.ZERO
+var solar_wing_half_width: float = -1.0
+## Pad distance from the centre when the model has no "dock_pad_N"
+## empties, m; 0 = [constant DOCK_PAD_FALLBACK] as is.
+var dock_pad_radius: float = 0.0
 
 var _model: Node3D
 var _ring: Node3D
@@ -32,12 +63,33 @@ func get_model() -> Node3D:
 	return _model
 
 
-## Station-space position of docking pad [param index] (0 or 1).
+## Station-space position of docking pad [param index] (0 ..
+## [member dock_pad_count] - 1).
 func dock_pad(index: int) -> Vector3:
 	var n := _model.find_child(DOCK_PAD_NODE % (index + 1), true, false) as Node3D if _model else null
 	if n:
 		return ModelLoader.relative_transform(self, n).origin
-	return DOCK_PAD_FALLBACK[clampi(index, 0, DOCK_PAD_FALLBACK.size() - 1)]
+	var s := _model.scale.x if _model else 1.0
+	var p := DOCK_PAD_FALLBACK[clampi(index, 0, DOCK_PAD_FALLBACK.size() - 1)]
+	if dock_pad_radius > 0.0:
+		p = p.normalized() * dock_pad_radius
+	return p * s
+
+
+## The forward station's layout (station_forward.glb: hub ring r ~25, bay
+## collars r 30, pads r 40, solar tips r ~60 at -60 / 120 degrees). Also
+## fits the home model scaled ~0.65 (the fallback). Before _ready.
+func apply_forward_profile() -> void:
+	bay_count = 2
+	dock_pad_count = 2
+	hub_clearance = 85.0
+	structure_clearance = 80.0
+	edge_radius = 75.0
+	hull_radius = 28.0
+	solar_wing_dirs = PackedVector3Array([Vector3(0.5, 0.0, -0.866), Vector3(-0.5, 0.0, 0.866)])
+	solar_wing_span = Vector2(26.0, 62.0)
+	solar_wing_half_width = 10.0
+	dock_pad_radius = 40.0
 
 
 ## The spinning habitat ring inside the model, or null.
@@ -53,9 +105,13 @@ func _process(delta: float) -> void:
 
 
 func _load_model() -> Node3D:
-	var m := ModelLoader.instantiate(STATION_PATH, func() -> Node3D:
-		print("HomeStation: %s not found, using placeholder" % STATION_PATH)
-		return _build_placeholder())
+	var m := ModelLoader.instantiate(model_path, func() -> Node3D:
+		var f := ModelLoader.instantiate(fallback_path, func() -> Node3D:
+			print("HomeStation: %s not found, using placeholder" % model_path)
+			return _build_placeholder())
+		if f.name != "station_placeholder":
+			f.scale = Vector3.ONE * fallback_scale
+		return f)
 	if m.name != "station_placeholder":
 		ModelLoader.dim_emission(m)
 	return m

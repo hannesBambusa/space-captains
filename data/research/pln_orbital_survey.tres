@@ -14,4 +14,5 @@ cost_titanium = 30
 research_time = 150.0
 unlock_modules = Array[StringName]([&"prospector_array_2", &"wreck_scanner_2"])
 tags = PackedStringArray("economy")
+benefit = "Better scanners: richer rock and wrecks, seen from further away."
 description = "Survey methods from planetary orbit, turned on rocks and wrecks: Mk II prospector arrays and wreck scanners."

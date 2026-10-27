@@ -292,6 +292,10 @@ func hire_block_reason() -> String:
 		return "Disabled: wait for repairs"
 	if captains.size() >= def.max_hires:
 		return "All %d berths are taken" % def.max_hires
+	# A forward station with upkeep owed or no water (StationSupply).
+	var supply := StationSupply.hire_block(self)
+	if not supply.is_empty():
+		return supply
 	return Economy.shortfall_text(def.hire_cost_credits)
 
 
@@ -373,6 +377,10 @@ func replacement_block_reason(captain: Captain, player_pays: bool) -> String:
 		return "Not waiting for a ship"
 	if not is_active():
 		return "Finish construction first"
+	# A forward station with upkeep owed or no water (StationSupply).
+	var supply := StationSupply.hire_block(self)
+	if not supply.is_empty():
+		return supply.replace("no hiring here", "no new ships here")
 	if player_pays:
 		return Economy.shortfall_text(def.ship_cost)
 	if captain.wallet < def.ship_cost:

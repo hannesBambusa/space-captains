@@ -22,7 +22,7 @@ static func build(station_node: HomeStation, centre_clearance: float, bay_length
 	var k := StationKeepouts.new()
 	k.clearance = centre_clearance
 	var model := station_node.get_model() if station_node else null
-	for i in range(1, BuildingManager.BAY_COUNT + 1):
+	for i in range(1, (station_node.bay_count if station_node else BuildingManager.BAY_COUNT) + 1):
 		var n := model.find_child(BuildingManager.BAY_NODE % i, true, false) as Node3D if model else null
 		if n == null:
 			continue

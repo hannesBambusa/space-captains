@@ -34,6 +34,14 @@ const GROUP := "solar_system"
 ## Yaw offset (degrees) from looking straight at the star in the default view.
 @export var default_view_yaw_offset_deg: float = 28.0
 
+@export_group("Forward station")
+## Model of a station built from a site dict ([method add_station]) without
+## a "model" key; while it does not load, the home model scaled by
+## [member forward_fallback_scale].
+## Its layout (bays, pads, keep-outs): HomeStation.apply_forward_profile.
+@export var forward_station_model: String = HomeStation.FORWARD_PATH
+@export var forward_fallback_scale: float = 0.65
+
 @export_group("Zoom fades")
 ## Planet/gate orbit lines fade in between these camera distances.
 @export var orbit_fade_in: Vector2 = Vector2(2600.0, 7000.0)
@@ -50,6 +58,9 @@ var gates: Array[JumpGate] = []
 var dens: Array[ScavengerDen] = []
 ## Derelict hulks of a generated system (P4, [Derelict]).
 var derelicts: Array[Derelict] = []
+## The station orbiter of this system (home's, or a forward station built
+## from its site, [method add_station]); null when the system has none.
+## Its child "Station" is the [HomeStation].
 var home_station: Orbiter
 ## Spawns new clusters when one is mined out (child node, saved by GameSnapshot).
 var cluster_spawner: ClusterSpawner
@@ -161,6 +172,10 @@ func _build() -> void:
 
 	if not def.station_planet.is_empty():
 		_add_station(def)
+	else:
+		var site := _station_site()
+		if not site.is_empty():
+			add_station(site)
 
 	for bdef in def.belts:
 		add_cluster(bdef.duplicate() as ClusterDef)
@@ -368,21 +383,51 @@ func _add_planet(pdef: PlanetDef, parent: Node3D) -> PlanetBody:
 	return body
 
 
+## Home's station, from [member SystemDef.station_planet].
 func _add_station(def: SystemDef) -> void:
-	var host := find_child(def.station_planet.validate_node_name(), false, false) as PlanetBody
+	add_station({"planet": def.station_planet, "orbit_radius": def.station_orbit_radius, "period": def.station_orbit_period,
+			"angle": def.station_start_angle_deg, "name": "Home Station", "node": "HomeStation", "model": HomeStation.STATION_PATH})
+
+
+## The forward station site of this system (RemoteSystemState.station), or {}.
+func _station_site() -> Dictionary:
+	var w := SystemWorld.of(self)
+	if w == null or not w.is_ancestor_of(self):
+		return {}
+	return w.station_site
+
+
+## Builds this system's station orbiter ([member home_station]) from
+## [param site]: {planet, orbit_radius, period, angle (deg), name}, the
+## RemoteSystemState.station shape (founded_at is not read here). Optional:
+## "model" (glb path, default [member forward_station_model]), "scale" (of
+## the fallback home model), "node" (orbiter name). A site without "model"
+## gets the forward layout (HomeStation.apply_forward_profile). Null when
+## the planet is not in this system.
+func add_station(site: Dictionary) -> Orbiter:
+	var planet := String(site.get("planet", ""))
+	var host := find_child(planet.validate_node_name(), false, false) as PlanetBody
 	if host == null:
-		push_warning("SolarSystem: station planet '%s' not found" % def.station_planet)
-		return
+		push_warning("SolarSystem: station planet '%s' not found" % planet)
+		return null
+	var orbit_r := float(site.get("orbit_radius", 1600.0))
 	home_station = Orbiter.new()
-	home_station.name = "HomeStation"
+	home_station.name = String(site.get("node", "ForwardStation"))
 	host.add_child(home_station)
-	home_station.setup_orbit(def.station_orbit_radius, def.station_orbit_period, def.station_start_angle_deg)
+	home_station.setup_orbit(orbit_r, float(site.get("period", 360.0)), float(site.get("angle", 0.0)))
 	home_station.make_focusable(60.0, 420.0)
 	_orbiters.append(home_station)
-	_add_orbit_line(host, def.station_orbit_radius, _moon_orbit_mat, Color(1.0, 0.78, 0.5, 0.12))
+	_add_orbit_line(host, orbit_r, _moon_orbit_mat, Color(1.0, 0.78, 0.5, 0.12))
 
 	var station := HomeStation.new()
 	station.name = "Station"
+	station.station_name = String(site.get("name", "Station"))
+	station.model_path = String(site.get("model", forward_station_model))
+	if not site.has("model"):
+		station.apply_forward_profile()
+	if station.model_path != HomeStation.STATION_PATH:
+		station.fallback_path = HomeStation.STATION_PATH
+		station.fallback_scale = float(site.get("scale", forward_fallback_scale))
 	home_station.add_child(station)
 	MeshUtil.set_layers_recursive(station, 2)
 	var core := OmniLight3D.new()
@@ -404,6 +449,7 @@ func _add_station(def: SystemDef) -> void:
 	dock.omni_attenuation = 1.6
 	dock.light_cull_mask = 2
 	home_station.add_child(dock)
+	return home_station
 
 
 func _make_orbit_material(px: float) -> ShaderMaterial:

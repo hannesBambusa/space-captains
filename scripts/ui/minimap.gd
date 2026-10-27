@@ -1,6 +1,7 @@
 class_name Minimap
 extends PanelContainer
-## Top-right minimap of the system plane, turned with the camera (view
+## Top-right minimap, two modes (the SYSTEM | CLUSTER toggle in its header,
+## remembered in user://settings.cfg). SYSTEM: the system plane, turned with the camera (view
 ## forward is up): the star, planet orbits and planets, asteroid clusters as blobs on faint orbit lines, dens,
 ## the home station and its shield bubble ring (while it is up), the defence
 ## zones (cyan, gold with a kill bounty, red with raiders inside), the camera's
@@ -9,6 +10,9 @@ extends PanelContainer
 ## there. The wheel (or the 1x button)
 ## zooms in steps (1x, 4x, 16x) around the camera. The header also cycles
 ## the marker density (N) and collapses the map.
+## CLUSTER: a compact cluster map ([ClusterGraph], the same graph as the M
+## map): click a system to view it, right click opens the M map on it; the
+## tooltip shows its name, danger and survey age.
 
 const ZOOM_LEVELS: Array[float] = [1.0, 0.25, 0.0625]
 const STAR_COLOR := Color(1.0, 0.86, 0.55)
@@ -19,13 +23,23 @@ const BELT_COLOR := Color(0.75, 0.62, 0.48, 0.28)
 const CLUSTER_COLORS: Array[Color] = [Color(0.7, 0.66, 0.6), Color(0.86, 0.6, 0.42), Color(0.74, 0.8, 0.9), Color(0.5, 0.88, 1.0)]
 const HOME_COLOR := Color(1.0, 0.7, 0.35)
 const VIEW_COLOR := Color(0.85, 0.92, 1.0, 0.55)
+const SETTINGS_PATH := "user://settings.cfg"
+const SETTINGS_SECTION := "ui"
+const SETTINGS_KEY := "minimap_mode"
+## Cluster mode: redraws per second, seconds between layout rebuilds.
+const CLUSTER_REDRAW := 0.25
+const CLUSTER_REBUILD := 2.0
 
-@export var map_px: float = 300.0
+enum Mode { SYSTEM, CLUSTER }
+
+## Map height in pixels; the width fills the right column.
+@export var map_h: float = 200.0
 @export var dot_pick_px: float = 7.0
 
 var hud: HUD
 var markers: ShipMarkers
 var is_open := true
+var mode := Mode.SYSTEM
 
 var _canvas: Control
 ## Orbiter -> its orbit as top-down points ([method _orbit_points]).
@@ -33,6 +47,12 @@ var _orbit_cache: Dictionary = {}
 var _mode_button: Button
 var _toggle_button: Button
 var _zoom_button: Button
+var _system_button: Button
+var _cluster_button: Button
+var _graph := ClusterGraph.new(null, true)
+var _hover: StringName = &""
+var _redraw_in := 0.0
+var _rebuild_in := 0.0
 var _zoom := 0
 ## Placed at a clicked map point so the camera can fly there and stay.
 var _anchor: Node3D
@@ -46,12 +66,18 @@ func _ready() -> void:
 	add_child(v)
 	var h := HBoxContainer.new()
 	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	h.add_child(HudStyle.icon_rect(&"tab_system", 14.0, HudStyle.HOLO))
-	h.add_child(UIUtil.label("SECTOR MAP", &"HeaderLabel"))
+	h.add_theme_constant_override("separation", 4)
+	var group := ButtonGroup.new()
+	_system_button = _mode_chip("SYSTEM", &"star", "This system's map", group, Mode.SYSTEM)
+	h.add_child(_system_button)
+	_cluster_button = _mode_chip("CLUSTER", &"gate", "The explored cluster: click a system to view it, right click opens the cluster map (M)", group, Mode.CLUSTER)
+	h.add_child(_cluster_button)
 	h.add_child(UIUtil.spacer())
-	_mode_button = UIUtil.button("Markers: All", &"IconButton")
+	_mode_button = UIUtil.button("ALL", &"IconButton")
+	_mode_button.icon = HudStyle.icon(&"tab_pilots")
 	_mode_button.custom_minimum_size = Vector2(0.0, 22.0)
-	_mode_button.tooltip_text = "Ship markers on the map: all, hostiles plus selected, off (N)"
+	_mode_button.add_theme_font_size_override("font_size", 12)
+	_mode_button.tooltip_text = "Ship markers: all, hostiles plus selected, off (N)"
 	_mode_button.pressed.connect(func() -> void:
 		if markers:
 			markers.cycle_mode())
@@ -70,26 +96,47 @@ func _ready() -> void:
 	v.add_child(h)
 	_canvas = Control.new()
 	_canvas.name = "Map"
-	_canvas.custom_minimum_size = Vector2(map_px, map_px)
-	_canvas.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_canvas.custom_minimum_size = Vector2(0.0, map_h)
+	_canvas.size_flags_horizontal = Control.SIZE_FILL
 	_canvas.clip_contents = true
 	_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
 	_canvas.mouse_default_cursor_shape = Control.CURSOR_CROSS
 	_canvas.draw.connect(_draw_map)
 	_canvas.gui_input.connect(_on_map_input)
+	_canvas.resized.connect(func() -> void: _rebuild_in = 0.0)
+	_canvas.mouse_exited.connect(func() -> void:
+		_hover = &""
+		_canvas.tooltip_text = "")
 	v.add_child(_canvas)
+	set_mode(_load_mode(), false)
+
+
+func _mode_chip(text: String, icon_name: StringName, tip: String, group: ButtonGroup, m: Mode) -> Button:
+	var b := UIUtil.button(text, &"ChipButton")
+	b.toggle_mode = true
+	b.button_group = group
+	b.icon = HudStyle.icon(icon_name)
+	b.custom_minimum_size.y = 22.0
+	b.add_theme_font_size_override("font_size", 12)
+	b.tooltip_text = tip
+	b.pressed.connect(func() -> void: set_mode(m))
+	return b
 
 
 func setup(owner_hud: HUD, ship_markers: ShipMarkers) -> void:
 	hud = owner_hud
 	markers = ship_markers
+	_graph.hud = hud
 	markers.mode_changed.connect(func(_m: ShipMarkers.Mode) -> void: _sync_mode())
+	Sector.surveyed.connect(func(_id: StringName) -> void: _rebuild_in = 0.0)
+	Sector.revealed.connect(func(_id: StringName, _n: PackedStringArray) -> void: _rebuild_in = 0.0)
 	# Another system on screen: its orbits, and the fly-to anchor lives in one system.
 	hud.view_rebound.connect(func(_w: SystemWorld) -> void:
 		_orbit_cache.clear()
 		if is_instance_valid(_anchor):
 			_anchor.queue_free()
 		_anchor = null
+		_redraw_in = 0.0
 		_canvas.queue_redraw())
 	_sync_mode()
 
@@ -102,8 +149,38 @@ func toggle() -> void:
 	reset_size()
 
 
+## SYSTEM or CLUSTER; [param remember] keeps it in the settings.
+func set_mode(m: Mode, remember: bool = true) -> void:
+	mode = m
+	(_system_button if m == Mode.SYSTEM else _cluster_button).set_pressed_no_signal(true)
+	(_cluster_button if m == Mode.SYSTEM else _system_button).set_pressed_no_signal(false)
+	var sys := m == Mode.SYSTEM
+	_mode_button.visible = sys
+	_zoom_button.visible = sys
+	_canvas.mouse_default_cursor_shape = Control.CURSOR_CROSS if sys else Control.CURSOR_POINTING_HAND
+	_hover = &""
+	_canvas.tooltip_text = ""
+	_rebuild_in = 0.0
+	_redraw_in = 0.0
+	_canvas.queue_redraw()
+	if remember:
+		var cfg := ConfigFile.new()
+		cfg.load(SETTINGS_PATH)
+		cfg.set_value(SETTINGS_SECTION, SETTINGS_KEY, int(m))
+		if cfg.save(SETTINGS_PATH) != OK:
+			push_warning("Minimap: could not save %s" % SETTINGS_PATH)
+
+
+static func _load_mode() -> Mode:
+	var cfg := ConfigFile.new()
+	if cfg.load(SETTINGS_PATH) != OK:
+		return Mode.SYSTEM
+	var v: Variant = cfg.get_value(SETTINGS_SECTION, SETTINGS_KEY, int(Mode.SYSTEM))
+	return Mode.CLUSTER if typeof(v) == TYPE_INT and int(v) == int(Mode.CLUSTER) else Mode.SYSTEM
+
+
 func _sync_mode() -> void:
-	_mode_button.text = "MARKERS: %s" % markers.get_mode_name().to_upper()
+	_mode_button.text = markers.get_mode_name().to_upper()
 
 
 func _set_zoom(z: int) -> void:
@@ -112,8 +189,19 @@ func _set_zoom(z: int) -> void:
 	_canvas.queue_redraw()
 
 
-func _process(_delta: float) -> void:
-	if is_open and is_visible_in_tree():
+func _process(delta: float) -> void:
+	if not is_open or not is_visible_in_tree():
+		return
+	if mode == Mode.SYSTEM:
+		_canvas.queue_redraw()
+		return
+	_rebuild_in -= delta
+	if _rebuild_in <= 0.0:
+		_rebuild_in = CLUSTER_REBUILD
+		_rebuild_graph()
+	_redraw_in -= delta
+	if _redraw_in <= 0.0:
+		_redraw_in = CLUSTER_REDRAW
 		_canvas.queue_redraw()
 
 
@@ -126,7 +214,8 @@ func _extent() -> float:
 
 ## World metres per map pixel.
 func _scale() -> float:
-	return _extent() * ZOOM_LEVELS[_zoom] / (map_px * 0.5)
+	var sz := _canvas.size
+	return _extent() * ZOOM_LEVELS[_zoom] / (maxf(minf(sz.x, sz.y), 1.0) * 0.5)
 
 
 func _center_world() -> Vector3:
@@ -146,7 +235,7 @@ func _to_map(p: Vector3) -> Vector2:
 	var back := Vector3(sin(yaw), 0.0, cos(yaw))
 	var d := p - _center_world()
 	d.y = 0.0
-	return Vector2(d.dot(right), d.dot(back)) / _scale() + Vector2(map_px, map_px) * 0.5
+	return Vector2(d.dot(right), d.dot(back)) / _scale() + _canvas.size * 0.5
 
 
 ## World (x, z) to map pixels as one transform (cheap for whole point arrays).
@@ -156,7 +245,7 @@ func _map_xform() -> Transform2D:
 	var x_axis := Vector2(cos(yaw), sin(yaw)) / sc
 	var y_axis := Vector2(-sin(yaw), cos(yaw)) / sc
 	var c := _center_world()
-	return Transform2D(x_axis, y_axis, Vector2(map_px, map_px) * 0.5 - x_axis * c.x - y_axis * c.z)
+	return Transform2D(x_axis, y_axis, _canvas.size * 0.5 - x_axis * c.x - y_axis * c.z)
 
 
 ## Top-down (x, z) points of an orbit, cached per body: the orbit never changes.
@@ -176,13 +265,16 @@ func _to_world(m: Vector2) -> Vector3:
 	var yaw := _yaw()
 	var right := Vector3(cos(yaw), 0.0, -sin(yaw))
 	var back := Vector3(sin(yaw), 0.0, cos(yaw))
-	var q := (m - Vector2(map_px, map_px) * 0.5) * _scale()
+	var q := (m - _canvas.size * 0.5) * _scale()
 	return _center_world() + right * q.x + back * q.y
 
 
 # --- Input ------------------------------------------------------------------------
 
 func _on_map_input(event: InputEvent) -> void:
+	if mode == Mode.CLUSTER:
+		_on_cluster_input(event)
+		return
 	var mb := event as InputEventMouseButton
 	if mb == null or not mb.pressed:
 		return
@@ -199,6 +291,56 @@ func _on_map_input(event: InputEvent) -> void:
 	else:
 		return
 	_canvas.accept_event()
+
+
+## Click: view the system; right click: the M map on it; hover: the tooltip.
+func _on_cluster_input(event: InputEvent) -> void:
+	var mm := event as InputEventMouseMotion
+	if mm:
+		var id := _graph.node_at(mm.position, 4.0)
+		if id != _hover:
+			_hover = id
+			_canvas.tooltip_text = _cluster_tooltip(id)
+			_canvas.queue_redraw()
+		return
+	var mb := event as InputEventMouseButton
+	if mb == null or not mb.pressed:
+		return
+	var at := _graph.node_at(mb.position, 4.0)
+	if mb.button_index == MOUSE_BUTTON_LEFT and not at.is_empty():
+		var vm := hud.view_manager if hud else null
+		if vm and vm.can_view(at) and vm.viewed_id() != at:
+			vm.view(at)
+	elif mb.button_index == MOUSE_BUTTON_RIGHT and not at.is_empty():
+		if hud and hud.cluster_map:
+			hud.cluster_map.open_on(at)
+	elif mb.button_index != MOUSE_BUTTON_WHEEL_UP and mb.button_index != MOUSE_BUTTON_WHEEL_DOWN:
+		return
+	_canvas.accept_event()
+
+
+## "OSTRA / Danger 3 · seen 12 min ago / what a click does".
+func _cluster_tooltip(id: StringName) -> String:
+	if id.is_empty():
+		return ""
+	var home := id == ClusterNetwork.HOME_ID
+	var lines: PackedStringArray = [_graph.name_of(id) + (" (home)" if home else "")]
+	var site := ClusterGraph.station_site(id)
+	if not site.is_empty():
+		lines.append("Station: %s" % String(site.get("name", "Station")))
+	if not home:
+		var d := Sector.danger_text(id)
+		if not d.is_empty():
+			lines.append(d[0].to_upper() + d.substr(1))
+	var vm := hud.view_manager if hud else null
+	var click := "Click: view it" if vm and vm.can_view(id) and vm.viewed_id() != id else ("Viewing it" if vm and vm.viewed_id() == id else "Not viewable yet")
+	lines.append(click + ". Right click: cluster map")
+	return "\n".join(lines)
+
+
+func _rebuild_graph() -> void:
+	var sz := _canvas.size
+	_graph.rebuild(Rect2(Vector2(36.0, 26.0), Vector2(maxf(sz.x - 72.0, 1.0), maxf(sz.y - 52.0, 1.0))), 130.0)
 
 
 func _ship_at(m: Vector2) -> Node3D:
@@ -265,7 +407,7 @@ func _draw_clusters(c: Control, sys: SolarSystem, sc: float, xf: Transform2D) ->
 
 func _draw_map() -> void:
 	var c := _canvas
-	var size := Vector2(map_px, map_px)
+	var size := c.size
 	c.draw_rect(Rect2(Vector2.ZERO, size), Color(HudStyle.VOID, 0.82), true)
 	# Survey grid and corner brackets.
 	for i in range(1, 4):
@@ -279,6 +421,11 @@ func _draw_map() -> void:
 		var sy := 1.0 if corner.y == 0.0 else -1.0
 		c.draw_line(p, p + Vector2(10.0 * sx, 0), bk, 1.0)
 		c.draw_line(p, p + Vector2(0, 10.0 * sy), bk, 1.0)
+	if mode == Mode.CLUSTER:
+		var vm := hud.view_manager if hud else null
+		_graph.draw(c, vm.viewed_id() if vm else ClusterNetwork.HOME_ID, _hover)
+		c.draw_rect(Rect2(Vector2.ZERO, size), HudStyle.HAIRLINE, false, 1.0)
+		return
 	if hud == null or hud.solar_system == null:
 		return
 	var sys := hud.solar_system
