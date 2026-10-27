@@ -370,6 +370,44 @@ func _add_member(ship: Ship) -> void:
 			"rank": ship.captain.rank if ship.captain else 0, "left_early": false, "lost": false}
 
 
+## A member who went home for repairs ([method leave], left early, not
+## lost) may fly back while the fleet is still on its way or fighting, in
+## the same system, with room under [constant MAX_SIZE].
+func can_rejoin(ship: Ship) -> bool:
+	if state != State.EN_ROUTE and state != State.ENGAGING:
+		return false
+	if contract.is_finished() or not Combat.is_live(contract.target) or members.has(ship) or members.size() >= MAX_SIZE:
+		return false
+	if members.is_empty() or SystemWorld.of(members[0]) != SystemWorld.of(ship):
+		return false
+	var r: Variant = roster.get(ship.get_instance_id())
+	return r is Dictionary and bool(r["left_early"]) and not bool(r["lost"])
+
+
+## The running fleet [param ship] left for repairs and may rejoin, or null.
+static func rejoinable(ship: Ship) -> MercFleet:
+	for c in ContractBoard.contracts:
+		var b := c as BountyContract
+		if b and b.fleet and b.fleet.can_rejoin(ship):
+			return b.fleet
+	return null
+
+
+## Back from repairs: [param ship] (a taker of the contract again) flies in
+## its old slot; it no longer counts as left early in the split.
+func rejoin(ship: Ship) -> void:
+	if not can_rejoin(ship):
+		return
+	members.append(ship)
+	var mb := ship.brain as MercenaryBrain
+	if mb:
+		mb.fleet = self
+	roster[ship.get_instance_id()]["left_early"] = false
+	EventLog.post("%s rejoins %s's fleet on %s after repairs (%d)" % [ship.get_display_name(), leader_name, contract.get_target_name(), members.size()],
+			EventLog.Kind.COMBAT, ship)
+	changed.emit(self)
+
+
 ## Asks the idle and patrolling mercs (in [param ctx]'s system), once each.
 func invite(ctx: Node) -> void:
 	if ctx == null or not ctx.is_inside_tree() or not is_recruiting():

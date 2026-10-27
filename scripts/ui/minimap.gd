@@ -60,6 +60,10 @@ var _anchor: Node3D
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# The header icons are drawn far below their texture size (14 px from 64,
+	# less again at 1280x720): without mipmaps the thin collapse dash fell
+	# between texels and vanished.
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 4)
 	v.mouse_filter = Control.MOUSE_FILTER_IGNORE

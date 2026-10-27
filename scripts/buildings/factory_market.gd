@@ -163,12 +163,30 @@ func expected_rate(ore: int) -> float:
 
 ## Player ore above the reserve and the held yard ore.
 func surplus(ore: int) -> int:
-	return maxi(Economy.ore[ore] - kept(ore) - mini(held[ore], Economy.ore[ore]), 0)
+	return maxi(Economy.ore[ore] - kept(ore) - held_units(ore), 0)
+
+
+## The market whose reserve and held yard ore count: home's Factory's. A
+## forward station's own Factory buys for its own stock too, but from the
+## same player ore (Economy.ore), so "keep at least" and the held Salvage
+## Yard ore are counted once, here, for every Factory. Self without one.
+func primary() -> FactoryMarket:
+	if not is_inside_tree():
+		return self
+	var home := SystemWorld.home(get_tree())
+	for n in SystemWorld.nodes_in(home, Factory.GROUP) if home else []:
+		var f := n as Factory
+		if f and f.market and is_instance_valid(f.building):
+			return f.market
+	return self
 
 
 ## What selling leaves in stock: the reserve, and for water at least what
 ## the forward stations use in StationSupply.WATER_RESERVE_MINUTES.
 func kept(ore: int) -> int:
+	var p := primary()
+	if p != self:
+		return p.kept(ore)
 	return maxi(reserve[ore], station_water(ore))
 
 
@@ -181,6 +199,10 @@ func station_water(ore: int) -> int:
 
 ## Ore bought at the Salvage Yard landed: auto-sell leaves it alone.
 func hold(cargo: PackedInt32Array) -> void:
+	var p := primary()
+	if p != self:
+		p.hold(cargo)
+		return
 	for i in mini(cargo.size(), TYPES):
 		held[i] += cargo[i]
 	changed.emit()
@@ -188,6 +210,9 @@ func hold(cargo: PackedInt32Array) -> void:
 
 ## Units of [param ore] currently held back (bought ore the player still has).
 func held_units(ore: int) -> int:
+	var p := primary()
+	if p != self:
+		return p.held_units(ore)
 	return mini(held[ore], Economy.ore[ore])
 
 
@@ -223,8 +248,13 @@ func _follow_price(ore: int) -> void:
 	ask[ore] = clampf(willing_price(ore) * follow_margin, ask_step[ore], ask_max[ore])
 
 
+## Sets "keep at least" (on the [method primary] market: one for all Factories).
 func set_reserve(ore: int, amount: int) -> void:
-	reserve[ore] = maxi(amount, 0)
+	var p := primary()
+	if p != self:
+		p.set_reserve(ore, amount)
+	else:
+		reserve[ore] = maxi(amount, 0)
 	changed.emit()
 
 

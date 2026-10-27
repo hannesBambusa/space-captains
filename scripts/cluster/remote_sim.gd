@@ -205,6 +205,21 @@ func _advance(d: Dictionary, dt: float) -> bool:
 	return i >= pts.size()
 
 
+## Ships of base dict [param dd] out in data system [param st]: its
+## spawns still flying plus the pending launches (counted against the cap).
+static func den_out(st: RemoteSystemState, dd: Dictionary, alive_ids: Dictionary = {}) -> int:
+	var alive := alive_ids
+	if alive.is_empty():
+		alive = {}
+		for d: Dictionary in st.ships:
+			alive[int(d.get("id", 0))] = true
+	var out := int(dd.get("pending", 0))
+	for sid in dd.get("spawns", []):
+		if alive.has(int(sid)):
+			out += 1
+	return out
+
+
 func _step_dens(def: SystemDef, st: RemoteSystemState, dt: float) -> void:
 	if st.dens.is_empty():
 		return
@@ -218,10 +233,7 @@ func _step_dens(def: SystemDef, st: RemoteSystemState, dt: float) -> void:
 		var dur: Dictionary = dd.get("durability", {})
 		if not dur.is_empty():
 			dur["shields"] = float(dur.get("max_shields", dur.get("shields", 0.0)))
-		var out := int(dd.get("pending", 0))
-		for sid in dd.get("spawns", []):
-			if alive_ids.has(int(sid)):
-				out += 1
+		var out := den_out(st, dd, alive_ids)
 		if out >= ddef.spawn_cap:
 			continue
 		var clock := float(dd.get("respawn_clock", ddef.respawn_time)) - dt

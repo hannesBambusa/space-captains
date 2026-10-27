@@ -2,7 +2,9 @@ extends Node
 ## Autoload "AudioDirector". Music and ambience that outlive scene changes:
 ## the ambient background loops all the time (menu and game); the intro
 ## music loops on top while the main menu is up and fades out over
-## [constant FADE_TIME] when a game starts.
+## [constant FADE_TIME] when a game starts. Buses: music on "Music", the
+## ambience on "Ambient" (sends to Music, so the Music slider covers both);
+## sound effects are the Sfx autoload's.
 
 const MENU_SCENE := "res://scenes/main_menu.tscn"
 const MENU_MUSIC :="res://assets/audio/intro_music.mp3"
@@ -22,8 +24,8 @@ var _check := 0.0
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_menu = _make_player(MENU_MUSIC)
-	_ambient = _make_player(AMBIENT)
+	_menu = _make_player(MENU_MUSIC, &"Music")
+	_ambient = _make_player(AMBIENT, &"Ambient")
 
 
 func _process(delta: float) -> void:
@@ -45,8 +47,9 @@ func _exit_tree() -> void:
 			p.stream = null
 
 
-func _make_player(path: String) -> AudioStreamPlayer:
+func _make_player(path: String, bus: StringName) -> AudioStreamPlayer:
 	var p := AudioStreamPlayer.new()
+	p.bus = bus
 	var stream := load(path) as AudioStreamMP3
 	if stream:
 		stream.loop = true

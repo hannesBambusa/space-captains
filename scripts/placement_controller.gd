@@ -204,6 +204,7 @@ func confirm() -> Building:
 	else:
 		b = manager.place(def, offset)
 	if b:
+		Sfx.ui(&"build_placed")
 		placed.emit(b)
 	return b
 

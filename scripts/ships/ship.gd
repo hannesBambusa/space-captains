@@ -240,6 +240,7 @@ func _ready() -> void:
 	_prepare_model(_model)
 	MeshUtil.set_layers_recursive(_model, RENDER_LAYER)
 	_collect_glow()
+	EnginePlume.attach(self, _model, _glow_node)
 	if stats.has_weapon():
 		weapon = ShipWeapon.new(self, stats, _model, Combat.HOSTILE_TRACER if faction == Combat.Faction.SCAVENGER else Combat.PLAYER_TRACER)
 	set_meta(&"focus_radius", 14.0)
@@ -396,6 +397,7 @@ func _update_warp_policy() -> void:
 
 
 func _on_warp_changed(_m: ShipMover, state: ShipMover.Warp) -> void:
+	if state != ShipMover.Warp.IDLE: Sfx.play_on(&"warp_spool" if state == ShipMover.Warp.SPOOL else &"warp_jump", self)
 	if _warp_vis == null and state != ShipMover.Warp.IDLE and DisplayServer.get_name() != "headless":
 		_warp_vis = WarpVisuals.new()
 		var fac := Factions.of(self)
@@ -528,6 +530,7 @@ func eject_chance() -> float:
 
 ## Called by the brain when the ship is back in its berth after a trip.
 func on_docked_home() -> void:
+	Sfx.play_on(&"dock", self)
 	if captain:
 		captain.note_survived(trip_lowest_hull, trip_was_hit)
 	trip_lowest_hull = 1.0
@@ -764,11 +767,14 @@ func _update_altitude(dt: float) -> void:
 	_track_leg(pos, goal, dt)
 	if mover.warp_state != ShipMover.Warp.IDLE:
 		# Hold the hop's lane height; never cross back through the rocks.
+		# Already farther out than the lane: hop at that height (spooling
+		# down to the lane first could take longer than the hop, a slow
+		# hull high over a band never got level and never jumped).
 		var y := position.y
 		_at_goal_height = false
 		mover.warp_exit_y = NAN
 		if mover.warp_altitude > 0.0:
-			mover.cruise_y = (signf(y) if absf(y) > 1.0 else lane_sign()) * mover.warp_altitude
+			mover.cruise_y = (signf(y) if absf(y) > 1.0 else lane_sign()) * maxf(mover.warp_altitude, absf(y))
 		elif mover.warp_state == ShipMover.Warp.SPOOL:
 			# No band on the hop: spool level.
 			mover.cruise_y = y
@@ -985,6 +991,7 @@ func enter_home_frame() -> void:
 
 ## Path from the berth out past the spawn point (home frame).
 func start_undock() -> void:
+	Sfx.play_on(&"undock", self)
 	repairing = false
 	RepairBay.end_session(self)
 	if home:

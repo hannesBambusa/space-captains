@@ -97,7 +97,7 @@ func sim_step(dt: float) -> void:
 		_claimed = amount > 0 and (not ContractBoard.get_for_target(self).is_empty() or SalvageContract.free_in_use(self))
 	if not _claimed:
 		_age += dt
-	var spread := 0.35 + 0.65 * (1.0 - exp(-_age * 1.6))
+	var spread := 0.12 + 0.88 * (1.0 - exp(-_age * 0.9))
 	if _mmi:
 		_mmi.scale = Vector3(spread, 1.0, spread)
 	if _mat:

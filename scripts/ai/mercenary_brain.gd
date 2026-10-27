@@ -339,6 +339,11 @@ func update(dt: float) -> void:
 					return
 			if not RepairBay.needs_repair(ship):
 				last_decision = "Repaired"
+				if MercFleet.rejoinable(ship):
+					# Its fleet is still out: no rest, back to it (_rejoin_fleet).
+					_set_state(State.EVALUATING)
+					_timer = THINK_TIME
+					return
 				_set_state(State.RESTING)
 				_timer = rest_duration() * 0.5
 			elif not RepairBay.can_afford(ship):
@@ -394,6 +399,8 @@ func _decide_merc() -> void:
 				Fmt.amount(RepairBay.cost_to_repair(ship)), Fmt.amount(captain.wallet if captain else 0)], "", "repairs_first")
 		_set_state(State.REPAIRING)
 		_timer = 1.0
+		return
+	if _rejoin_fleet():
 		return
 	var e := evaluator.pick(self, ContractBoard.get_available(-1, system_id()))
 	if e and e.accept and _take(e.contract, e):
@@ -491,6 +498,29 @@ func join_fleet(f: MercFleet, e: RoleEvaluator.Evaluation = null) -> void:
 	decided.emit(self, true, last_decision)
 	_launch(Mode.BOUNTY, t)
 	f.join(ship)
+
+
+## Repaired after leaving a fleet for repairs: back into it while it is
+## still on its way or fighting (MercFleet.can_rejoin). True when it went.
+func _rejoin_fleet() -> bool:
+	if ship.hull_fraction() < MercenaryEvaluator.MIN_HULL:
+		return false
+	var f := MercFleet.rejoinable(ship)
+	if f == null:
+		return false
+	var c := f.contract
+	# Past the rally point the contract takes no new takers: its old one comes back.
+	if not c.takers.has(ship):
+		c.takers.append(ship)
+		c._update_status()
+	var t := _begin_trip(c)
+	last_decision = "Rejoined %s's fleet for %s" % [f.leader_name, c.get_target_name()]
+	note(CaptainLog.Kind.FLEET, CaptainLog.Outcome.DID, "Rejoined %s's fleet on %s after repairs" % [f.leader_name, c.get_target_name()],
+			"Hull %d%% again, the fleet (%d) is still %s" % [roundi(ship.hull_fraction() * 100.0), f.members.size(), MercFleet.STATE_NAMES[f.state]])
+	decided.emit(self, true, last_decision)
+	_launch(Mode.BOUNTY, t)
+	f.rejoin(ship)
+	return true
 
 
 ## Said no to [param f]'s call ([param e]: the join evaluation).

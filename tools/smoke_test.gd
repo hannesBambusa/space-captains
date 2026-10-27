@@ -49,7 +49,13 @@ extends Node
 ## rolls). Saves to memory and reloads while parked, while waiting for an
 ## escort and in transit. Prints the build, wait, flight and found times,
 ## the hops, the escort and convoy feed lines, the stations live; fails
-## when one is not founded or a reload changed the convoy.
+## when one is not founded or a reload changed the convoy. Station 1 is
+## attacked at home on its way out ([constant COLONY_RAIDERS] raiders):
+## fails when its escorts never fight them; any mobile station spooling a
+## warp longer than [constant COLONY_SPOOL_MAX] fails the run too.
+## Every run fails when a base has more ships out than its spawn cap;
+## --forward also checks that a forward Factory shares home's keep-at-least
+## and held ore (installed for a moment at the end).
 ## The default run never touches them.
 
 const SEED := 12345
@@ -245,6 +251,8 @@ func _run() -> void:
 	if long_run and not forward:
 		_long_report()
 	var why := "%d trip checks on another system's contract" % _fw_wrong if _fw_wrong > 0 else ""
+	if _fw_factory_bad:
+		why = "a forward Factory keeps its own reserve or held ore (see SMOKE forward factory)"
 	if save_roundtrip and not _rt_ok:
 		why = "save round trip changed the game (see SMOKE forward reload)"
 	_finish(Time.get_ticks_msec() - t0, why)
@@ -254,11 +262,40 @@ func _finish(ms: int, why: String = "") -> void:
 	if _done:
 		return
 	_done = true
+	var over := _bases_over_cap()
 	if is_instance_valid(_mgr):
 		_report(SimClock.time - _start_time, ms)
+		print("SMOKE bases over cap %s" % (", ".join(over) if not over.is_empty() else "none"))
+	if why.is_empty() and not over.is_empty():
+		why = "bases with more ships out than their cap: %s" % ", ".join(over)
 	if not why.is_empty():
 		print("SMOKE FAIL: %s" % why)
 	get_tree().quit(1 if _log.script_errors > 0 or not why.is_empty() else 0)
+
+
+## Bases (live, and as data in systems not live) with more ships out than
+## their spawn cap ("7/4 out").
+func _bases_over_cap() -> PackedStringArray:
+	var out: PackedStringArray = []
+	var tree := get_tree()
+	for n in tree.get_nodes_in_group(ScavengerDen.GROUP):
+		var d := n as ScavengerDen
+		if d and not d.dead and d.def and d.spawns.size() > d.def.spawn_cap:
+			out.append("%s %d/%d" % [d.get_display_name(), d.spawns.size(), d.def.spawn_cap])
+	var vm := ViewManager.of(tree)
+	for id: StringName in Sector.states:
+		var def := Sector.system_def(id)
+		if def == null or (vm and vm.is_live(id)):
+			continue
+		var st := Sector.states[id] as RemoteSystemState
+		for ddef in def.dens:
+			var dd: Dictionary = st.dens.get(ddef.name, {})
+			if dd.is_empty() or bool(dd.get("dead", false)):
+				continue
+			var n_out := RemoteSim.den_out(st, dd)
+			if n_out > ddef.spawn_cap:
+				out.append("%s (data) %d/%d" % [ddef.name, n_out, ddef.spawn_cap])
+	return out
 
 
 ## Watchdog: a script error ends the run coroutine without a report.
@@ -385,6 +422,7 @@ func _long_report() -> void:
 
 const FORWARD_ID := &"s1"
 var _fw: SystemWorld
+var _fw_factory_bad := false
 var _fw_outpost: Building
 var _fw_notes: PackedStringArray = []
 var _fw_miners: Array[Ship] = []
@@ -606,9 +644,43 @@ func _forward_report() -> void:
 			print("SMOKE forward reload %s" % l)
 		print("SMOKE forward reload forward ore %d at the save -> %d at the end (%s)" % [_rt_ore, end, "rising" if rising else "NOT RISING"])
 	print("SMOKE forward live   %s, viewed %s, pinned %s" % [vm.worlds.keys(), vm.viewed_id(), vm.is_pinned(FORWARD_ID)])
+	print("SMOKE forward factory %s" % _forward_factory_check())
 	print("SMOKE forward ms/step home %.3f, forward %.3f, other %.3f (%d steps); ms/frame %.2f over %d real frames" % [
 			_fw_usec.get("home", 0) / 1000.0 / steps, _fw_usec.get("forward", 0) / 1000.0 / steps, _fw_usec.get("other", 0) / 1000.0 / steps,
 			_fw_steps, frame_ms, frames])
+
+
+## A Factory addon at the forward station for a moment: it must use home's
+## keep-at-least and held yard ore (one player ore pool), then it is removed.
+func _forward_factory_check() -> String:
+	var fm := _fw.buildings if is_instance_valid(_fw) else null
+	var def := fm.def_by_id(&"factory") if fm else null
+	var bays: Array = fm.free_bays() if fm else []
+	var hf := Building.first_active_service(SystemWorld.home(get_tree()), Factory.GROUP) as Factory
+	if def == null or bays.is_empty() or hf == null:
+		return "skipped (no bay or no home Factory)"
+	var b := fm.install_addon(def, bays[0], true)
+	var ff := Building.first_active_service(_fw, Factory.GROUP) as Factory if b else null
+	if ff == null or ff == hf:
+		if b:
+			fm.remove_addon(b)
+		return "skipped (not installed)"
+	var hm := hf.market
+	var m := ff.market
+	var keep0 := hm.reserve[Economy.Ore.IRON]
+	m.set_reserve(Economy.Ore.IRON, keep0 + 50)
+	var shared := m.primary() == hm and hm.reserve[Economy.Ore.IRON] == keep0 + 50 and m.kept(Economy.Ore.IRON) == hm.kept(Economy.Ore.IRON)
+	var held0 := hm.held[Economy.Ore.TITANIUM]
+	var cargo := Economy.zero_ore()
+	cargo[Economy.Ore.TITANIUM] = 5
+	m.hold(cargo)
+	shared = shared and hm.held[Economy.Ore.TITANIUM] == held0 + 5 and m.surplus(Economy.Ore.IRON) == hm.surplus(Economy.Ore.IRON)
+	hm.held[Economy.Ore.TITANIUM] = held0
+	hm.set_reserve(Economy.Ore.IRON, keep0)
+	fm.remove_addon(b)
+	if not shared:
+		_fw_factory_bad = true
+	return "keep and held shared with home's: %s" % ("ok" if shared else "FAIL")
 
 
 ## F4: threat, upkeep, water, hauling fee, berths.
@@ -776,9 +848,16 @@ func _census() -> Dictionary:
 
 ## Longest wait for one step of a convoy, sim seconds.
 const COLONY_STEP_MAX := 1500.0
+## Longest warp spool a mobile station may sit in, sim seconds (a climb
+## to a belt lane takes about 20; more fails the run).
+const COLONY_SPOOL_MAX := 60.0
+## Station 1 is attacked at home on its way out by this many raiders.
+const COLONY_RAIDERS := 3
 var _col: PackedStringArray = []
 var _col_feed: PackedStringArray = []
 var _col_ok := true
+var _col_spool := false
+var _col_unguarded := false
 
 
 func _colony_run() -> String:
@@ -834,6 +913,10 @@ func _colony_run() -> String:
 	var fs := ForwardStations.of(tree)
 	if fs.count() != 2:
 		return "%d stations founded" % fs.count()
+	if _col_spool:
+		return "a mobile station spooled its warp longer than %.0f s" % COLONY_SPOOL_MAX
+	if _col_unguarded:
+		return "the escorts never fought the raiders attacking station 1"
 	return "" if _col_ok else "a reload changed the convoy (see SMOKE colony reload)"
 
 
@@ -940,9 +1023,25 @@ func _colony_fly(n: int, target: StringName, reload: bool) -> bool:
 	var marks := {}
 	var reloaded := false
 	var hops := ""
+	var spool := 0.0
+	var raiders: Array[ScavengerShip] = []
+	var hull := -1.0
+	var fought := 0
 	while SimClock.time - t0 < COLONY_STEP_MAX * 2.0 and Sector.state(target).station.is_empty():
 		SimStepper.run(tree, 2.0)
 		var ms := _mobile(n)
+		if ms and ms.mover.warp_state == ShipMover.Warp.SPOOL:
+			spool = maxf(spool, SpaceNav.WARP_SPOOL - ms.mover.warp_timer)
+		if n == 1 and ms and ms.state == MobileStation.State.TRAVEL and not marks.has("attack") and SystemWorld.of(ms) and SystemWorld.of(ms).is_home:
+			raiders = _colony_attack(ms)
+			marks["attack"] = SimClock.time - t0
+			hull = ms.durability.hull
+		if ms and hull >= 0.0:
+			marks["hull_lost"] = hull - ms.durability.hull
+			for e in ms.escorts():
+				var mb := e.brain as MercenaryBrain
+				if mb and mb.combat_target is ScavengerShip and raiders.has(mb.combat_target):
+					fought += 1
 		if ms and ms.state == MobileStation.State.TRAVEL and not marks.has("left"):
 			marks["left"] = SimClock.time - t0
 			hops = ", ".join(ms.transit.hops) if ms.transit else "?"
@@ -968,6 +1067,17 @@ func _colony_fly(n: int, target: StringName, reload: bool) -> bool:
 		await tree.process_frame
 	var done := not Sector.state(target).station.is_empty()
 	var w := ViewManager.of(tree).world(target)
+	_col.append("fly %d: longest warp spool %.1f s (at most %.0f)" % [n, spool, COLONY_SPOOL_MAX])
+	if spool > COLONY_SPOOL_MAX:
+		_col_ok = false
+		_col_spool = true
+	if marks.has("attack"):
+		var down := raiders.filter(func(r: Variant) -> bool: return not is_instance_valid(r) or (r as ScavengerShip).dead).size()
+		_col.append("attack %d: %d raiders at %s in %s, %d down by the founding, station hull -%d, escort fight samples %d" % [n, raiders.size(),
+				Fmt.clock(float(marks["attack"])), _sys_name(ClusterNetwork.HOME_ID), down, roundi(float(marks.get("hull_lost", 0.0))), fought])
+		if fought == 0:
+			_col_ok = false
+			_col_unguarded = true
 	_col.append("fly %d to %s: waited %s for %s, hops %s, data %s, arrived %s, deploy %s, founded %s%s; roll %s" % [n, _sys_name(target),
 			Fmt.clock(float(marks.get("left", -1.0))), marks.get("escorts", "-"), hops, marks.get("data", "never"),
 			Fmt.clock(float(marks.get("cruise", -1.0))), Fmt.clock(float(marks.get("deploy", -1.0))),
@@ -983,6 +1093,23 @@ func _colony_fly(n: int, target: StringName, reload: bool) -> bool:
 			where.append("%s %s" % [c.captain_name, ("%s: %s" % [SystemWorld.of(s).system_id if s and SystemWorld.of(s) else "?", s.get_status_text()]) if is_instance_valid(s) else (c.away_in if not c.away_in.is_empty() else "no ship")])
 		_col.append("escorts 4 min later: %s, wallets %s" % ["; ".join(where), ", ".join((mo.captains if mo else []).map(func(c: Captain) -> String: return str(c.wallet)))])
 	return done
+
+
+## Raiders from a home base sent at [param ms] (launched, 1.4 km out).
+func _colony_attack(ms: MobileStation) -> Array[ScavengerShip]:
+	var out: Array[ScavengerShip] = []
+	for d in SystemWorld.nodes_in(ms, ScavengerDen.GROUP):
+		var den := d as ScavengerDen
+		if den == null or den.dead:
+			continue
+		var k := 0
+		for r in den.spawn_pack(COLONY_RAIDERS, true):
+			r.global_position = ms.global_position + Vector3(cos(k * 2.1) * 1400.0, 0.0, sin(k * 2.1) * 1400.0)
+			r.ai.set_raid_objective(ms)
+			out.append(r)
+			k += 1
+		break
+	return out
 
 
 ## Station [param n] as data: {d, where} or {}.

@@ -152,6 +152,7 @@ func _build() -> void:
 	var tut_hint := UIUtil.label("New games start with a short training card", &"DimLabel")
 	tut_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_settings.add_child(tut_hint)
+	_settings.add_child(VolumeSliders.new())
 	_settings.add_child(_button("Back", _show_main))
 
 	UIUtil.no_focus(self)
@@ -180,6 +181,7 @@ func _play_hover() -> void:
 		_hover_player = AudioStreamPlayer.new()
 		_hover_player.stream = load(HOVER_SOUND)
 		_hover_player.volume_db = HOVER_VOLUME_DB
+		_hover_player.bus = &"UI"
 		add_child(_hover_player)
 	_hover_player.play()
 

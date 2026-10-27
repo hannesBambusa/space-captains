@@ -20,8 +20,13 @@ Layout (Blender Z up, exported +Y up). Hub centre at origin, play plane z=0.
   Each bay fits a module 30 wide x 25 tall x 45 long pointing radially out.
   2 docking arms with pads (15 and 195 deg, pad centre r 57.5) and 2 solar wings (135 and 315
   deg, panels r 53.7..82.8, half width 11.3) sit in the 30 deg gaps between the bays.
+  2 heat radiator wings (75 and 255 deg, the last two gaps): truss mast r 48..86, ribbed panels
+  r 52..86 in a slight dihedral; panel edges stay >= 1.5 m clear of a 30 m wide addon module.
+  Lower spine under the core (z -18..-45, r <= 6): truss, spherical tanks, reactor can.
+  Paint: patchwork of worn white, warm grey, faded slate blue and ochre plates (worn kinds
+  registered locally below), rust on old brackets; MLI, cargo pods, conduits, doubler plates.
 Hierarchy: station_home (empty root) -> station_core, station_ring, station_docks, station_solar,
-  station_bays, addon_bay_1..addon_bay_6, dock_pad_1, dock_pad_2 (empties).
+  station_radiators, station_bays, addon_bay_1..addon_bay_6, dock_pad_1, dock_pad_2 (empties).
 station_ring has its origin at the hub centre so Godot can spin it.
 addon_bay_N: Blender rot_z = angle + 90 deg, so its local -Y points radially out; after the
 glTF Y-up conversion that is the node's local +Z (Godot basis.z = outward, basis.y = up).
@@ -41,6 +46,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
 import parts  # noqa: E402
 import station_textures as st  # noqa: E402
+import worn_kit  # noqa: E402  (registers the "rust" worn kind, cargo_pod)
 
 V = Vector
 OUT = os.path.join(common.ROOT, "assets", "models", "station", "station_home.glb")
@@ -49,6 +55,7 @@ BAY_DEG = [165.0 + 60.0 * k for k in range(6)]  # addon_bay_1 .. addon_bay_6
 DOCK_DEG = (15, 195)                           # docking arms, in the gaps between bays
 PAD_R = 57.5
 SOLAR_DEG = (135, 315)
+RAD_DEG = (75, 255)                            # heat radiator wings, the last two gaps
 RING_MODULES = 16
 UP = V((0, 0, 1))
 
@@ -59,7 +66,8 @@ FLAT = ("window", "window_dim", "window_cool", "glass", "nav_red", "nav_green", 
 # decal sheet cells (station_textures.make_decal_sheet)
 LABELS = (["DOCK 1", "DOCK 2"] + [f"BAY {k + 1}" for k in range(6)]
           + [f"C-0{k + 1}" for k in range(4)] + [f"R-{k + 1:02d}" for k in range(RING_MODULES)]
-          + ["#BAR", "#CHEV", "NO STEP", "LOX", "N2", "PWR"])
+          + ["#BAR", "#CHEV", "NO STEP", "LOX", "N2", "PWR", "RAD 1", "RAD 2", "H2O", "CARGO",
+             "SPINE"])
 CELL = {t: i for i, t in enumerate(LABELS)}
 INK_DARK = (0.035, 0.035, 0.038)        # stencil paint on light hull
 INK_LIGHT = (0.42, 0.42, 0.39)          # faded off-white on dark surfaces
@@ -67,6 +75,32 @@ ID_COLS = [(0.045, 0.085, 0.17), (0.20, 0.045, 0.035), (0.06, 0.13, 0.06),
            (0.36, 0.26, 0.04), (0.13, 0.13, 0.14), (0.05, 0.11, 0.13)]
 DECALS = []
 SCORCH = []
+
+
+def _kind(base, **kw):
+    d = dict(st.WORN_KINDS[base])
+    d.update(kw)
+    return d
+
+
+# Local (this run only) worn kinds: a dirtier, darker white and two faded paints. Other
+# generators keep the shared station_textures.WORN_KINDS as they are.
+st.WORN_KINDS["hull"] = _kind(
+    "hull", tones=[(0.40, 0.40, 0.39), (0.36, 0.365, 0.365), (0.44, 0.435, 0.42),
+                   (0.31, 0.32, 0.325), (0.38, 0.37, 0.35), (0.34, 0.35, 0.36)],
+    plate_var=0.09, grime_k=1.35, streak_k=0.6, chip_k=1.25, hatches=0.18)
+st.WORN_KINDS["radiator"] = _kind(
+    "radiator", tones=[(0.40, 0.405, 0.41), (0.37, 0.375, 0.38), (0.43, 0.435, 0.44),
+                       (0.36, 0.365, 0.37), (0.39, 0.395, 0.40), (0.38, 0.385, 0.39)],
+    grime_k=1.0, streak_k=0.45)
+st.WORN_KINDS["slate"] = _kind(
+    "hull3", tones=[(0.16, 0.19, 0.225), (0.145, 0.175, 0.205), (0.175, 0.205, 0.24),
+                    (0.135, 0.16, 0.185), (0.165, 0.185, 0.21), (0.15, 0.17, 0.2)],
+    plate_var=0.06, chip_k=1.3, bleach=0.35)
+st.WORN_KINDS["ochre"] = _kind(
+    "hull3", tones=[(0.30, 0.235, 0.12), (0.28, 0.22, 0.11), (0.32, 0.25, 0.13),
+                    (0.27, 0.215, 0.115), (0.295, 0.235, 0.125), (0.285, 0.225, 0.12)],
+    plate_var=0.07, chip_k=1.6, bleach=0.45, streak_k=0.55)
 
 
 def build_materials():
@@ -82,7 +116,10 @@ def build_materials():
     MATS["mli"] = m("station_mli_white", (0.5, 0.49, 0.455), roughness=0.86)
     MATS["mli_gold"] = m("station_mli_gold", (0.6, 0.39, 0.12), roughness=0.3, metallic=1.0)
     MATS["mli_silver"] = m("station_mli_silver", (0.6, 0.6, 0.61), roughness=0.26, metallic=1.0)
-    MATS["radiator"] = m("station_radiator", (0.47, 0.475, 0.48), roughness=0.45, metallic=0.15)
+    MATS["radiator"] = m("station_radiator", (0.40, 0.405, 0.41), roughness=0.45, metallic=0.15)
+    MATS["slate"] = m("station_hull_slate", (0.16, 0.19, 0.22), roughness=0.58)
+    MATS["ochre"] = m("station_hull_ochre", (0.30, 0.235, 0.12), roughness=0.6)
+    MATS["rust"] = m("station_rust", (0.15, 0.07, 0.03), roughness=0.8)
     MATS["solar"] = m("station_solar_panel", (0.01, 0.018, 0.045), roughness=0.2, metallic=0.5)
     # flat (untextured) emissive / glass, double sided
     # Emissive parts get a near-black base colour so the sun does not light them up white;
@@ -240,12 +277,13 @@ def build_core(rng):
                 13: "hull3", 14: "hull3", 15: "hull2", 16: "hull", 17: "dark", 18: "hull2",
                 19: "hull", 20: "dark"}
     segs = 48
-    panel = [rng.random() < 0.3 for _ in range(segs // 6)]
+    panel = [rng.choice(["hull", "hull3", "hull3", "slate", "hull", "hull2"])
+             for _ in range(segs // 6)]
 
     def core_mat(i, j):
         k = edge_mat[j]
-        if k == "hull" and panel[i // 6]:
-            return "hull3"
+        if k == "hull" and (j != 8 or panel[i // 6] != "ochre"):
+            return panel[i // 6]
         return k
     p.lathe(prof, segs, core_mat)
 
@@ -352,12 +390,73 @@ def build_core(rng):
     p.cyl(V((-1.4, -3.4, 19.0)), 0.1, 0.04, 3.6, "metal", segs=5)
     parts.dish(p, V((2.9, -2.9, 18.9)), 1.0, V((0.5, -0.6, 0.6)), "hull", "metal", depth=0.3)
     nav(p, V((-1.6, -1.6, 18.95)), "nav_white", 0.35)
-    # underside: dark thrust cone and beacon instead of a glowing disc
+    # underside: spine socket, then the lower spine
     p.cyl(V((0, 0, -17.6)), 2.2, 1.7, 1.2, "metal", segs=16)
     p.cyl(V((0, 0, -18.3)), 1.7, 1.2, 0.3, "dark", segs=16)
-    nav(p, V((0, 0, -18.7)), "nav_white", 0.45)
     SCORCH.append((0.0, 0.0, -17.4, 3.5))
+    drum_greebles(p, rng)
+    build_spine(p, rng)
     return p
+
+
+def drum_greebles(p, rng):
+    """Stringers, doubler plates and service boxes on the core drum (r 13.5, z -5.8..4.6)."""
+    for i in range(24):
+        a = 2 * math.pi * (i + 0.5) / 24
+        if min(abs(math.degrees(a) % 45.0 - x) for x in (0.0, 22.5, 45.0)) < 2.0:
+            continue                       # conduit runs at 22.5 + 45k
+        for z0, z1 in ((-5.5, -1.6), (1.6, 4.4)):
+            p.box(polar(13.56, a, (z0 + z1) / 2), (0.14, 0.22, z1 - z0), "dark", rot_z=a,
+                  bevel=0.0)
+    for i in range(14):
+        a = rng.uniform(0, 2 * math.pi)
+        z = rng.choice((-4.6, -2.6, 2.3))
+        w, h = rng.uniform(1.4, 3.2), rng.uniform(0.7, 1.4)
+        p.box(polar(13.58, a, z), (0.1, w, h), rng.choice(["hull2", "hull3", "slate", "rust"]),
+              rot_z=a, bevel=0.0)
+    for i in range(6):
+        a = 2 * math.pi * (i + 0.15) / 6
+        p.box(polar(13.9, a, -4.4), (0.8, 1.6, 1.1), rng.choice(["hull2", "dark"]), rot_z=a,
+              bevel=0.08)
+        p.box(polar(14.32, a, -4.4), (0.06, 1.0, 0.5), "dark", rot_z=a, bevel=0.0)
+
+
+def build_spine(p, rng):
+    """Lower spine (z -18.6..-45): square truss, spherical tanks on cradles, a reactor can
+    with short fins, conduits and a beacon. Stays inside r 6.5 (under the hub)."""
+    z0, z1 = -18.6, -44.0
+    hw = 1.6
+    truss(p, V((0, 0, z0)), V((0, 0, z1)), hw * 2, hw * 2, 9, "metal", chord=0.3, brace=0.15,
+          up=V((1, 0, 0)))
+    for z in (-21.0, -28.5, -36.0):
+        p.box(V((0, 0, z)), (hw * 2 + 0.6, hw * 2 + 0.6, 0.5), "dark", bevel=0.0)
+    for zt, foil in ((-24.6, "mli_gold"), (-32.2, "mli_silver")):
+        for k in range(3):
+            a = 2 * math.pi * k / 3 + (0.5 if foil == "mli_gold" else 1.55)
+            c = polar(4.3, a, zt)
+            p.sphere(c, 2.25, foil, segs=14, rings=7)
+            p.cyl(c, 2.32, 2.32, 0.24, "dark", segs=14)
+            p.beam(polar(1.6, a, zt), polar(2.4, a, zt), 0.5, 0.5, "dark")
+            p.tube(polar(1.7, a, zt + 2.4), c + V((0, 0, 2.1)), 0.11, 0.11, "metal", segs=5)
+    # reactor can at the foot, ochre band, short radial fins
+    p.cyl(V((0, 0, -41.0)), 3.2, 3.2, 5.0, "hull2", segs=16)
+    p.cyl(V((0, 0, -38.2)), 3.0, 3.2, 0.6, "dark", segs=16)
+    p.cyl(V((0, 0, -40.3)), 3.28, 3.28, 0.9, "ochre", segs=16)
+    p.cyl(V((0, 0, -43.8)), 3.2, 2.4, 0.6, "dark", segs=16)
+    p.cyl(V((0, 0, -44.6)), 1.2, 0.8, 1.0, "metal", segs=10)
+    label("SPINE", polar(3.3, -math.pi / 2, -40.3), -V((0, 1, 0)), UP, 0.55, INK_DARK, 0.75)
+    for k in range(4):
+        a = math.pi / 4 + k * math.pi / 2
+        c = polar(4.8, a, -41.0)
+        rm = Matrix((radial(a), UP.cross(radial(a)), UP)).transposed().to_4x4()
+        p.box(c, (3.0, 0.12, 4.0), "radiator", r=rm, bevel=0.0)
+        p.box(polar(3.3, a, -41.0), (0.6, 0.4, 4.2), "dark", rot_z=a, bevel=0.0)
+    for k in range(2):
+        a = k * math.pi + 0.3
+        p.tube(polar(2.0, a, -19.0), polar(2.0, a, -38.0), 0.16, 0.16,
+               "accent" if k == 0 else "metal", segs=6)
+    nav(p, V((0, 0, -45.3)), "nav_white", 0.5)
+    nav(p, polar(3.25, 0.0, -38.4), "nav_red", 0.3)
 
 
 # ---------------------------------------------------------------- ring (spins)
@@ -386,7 +485,8 @@ def build_ring(rng):
     modes = []
     for m in range(RING_MODULES):
         a0 = m * step
-        paint = "hull3" if rng.random() < 0.3 else "hull"
+        paint = rng.choice(["hull", "hull", "hull", "hull3", "hull3", "slate", "hull3", "slate",
+                            "ochre", "hull2"])
         mode = rng.choice(["hab", "hab", "hab", "work", "store"])
         if m % 4 == 2:
             mode = "store"           # the MLI tank modules
@@ -435,8 +535,13 @@ def build_ring(rng):
             p.cyl(polar(34.4, a0 + step * 0.4, 3.9), 0.12, 0.05, 1.8, "metal", segs=5)
             parts.dish(p, polar(34.4, a0 + step * 0.4, 4.8), 0.6, V((0.3, 0.2, 1.0)), "hull",
                        "metal", depth=0.2)
+        ring_module_greebles(p, rng, m, a0, step, mode)
     # conduits along the top (inner half) and underside fins
     pipe_arc(p, 34.35, 3.17, 0.0, 2 * math.pi, 48, 0.17, "metal", segs=6)
+    # outer wall: two-pipe coolant bundle on the upper chamfer, one under the floor
+    pipe_arc(p, 39.86, 1.95, 0.0, 2 * math.pi, 48, 0.13, "metal", segs=6)
+    pipe_arc(p, 39.32, 2.62, 0.0, 2 * math.pi, 48, 0.1, "accent", segs=5)
+    pipe_arc(p, 37.3, -3.15, 0.0, 2 * math.pi, 48, 0.15, "metal", segs=6)
     for i in range(16):
         a = 2 * math.pi * (i + 0.25) / 16
         p.box(polar(36.0, a, -3.4), (4.4, 0.3, 0.8), "dark", rot_z=a, bevel=0.0)
@@ -501,6 +606,49 @@ def build_ring(rng):
     return p, ring_modes
 
 
+def ring_module_greebles(p, rng, m, a0, step, mode):
+    """Per habitat module: doubler plates on the outer wall, pipe brackets, deck clutter
+    (service boxes, vents, cargo pods on store / work modules). Stays inside r 40.4."""
+    # doubler / patch plates under the window row (flat outer wall r 40, z -1.4..1.4)
+    for k in range(rng.randint(1, 3)):
+        a = a0 + step * rng.uniform(0.12, 0.88)
+        w = rng.uniform(1.6, 4.2)
+        p.box(polar(40.04, a, -0.75), (0.1, w, rng.uniform(0.6, 1.0)),
+              rng.choice(["hull2", "hull3", "slate", "rust", "hull"]), rot_z=a, bevel=0.0)
+    # top-edge girder: a light truss chord per module along the outer deck edge
+    e = 0.03
+    g0, g1 = polar(39.0, a0 + e, 3.35), polar(39.0, a0 + step - e, 3.35)
+    truss(p, g0, g1, 0.6, 0.5, 4, "dark", chord=0.14, brace=0.08, diag=False)
+    for g in (g0, g1):
+        p.box(g - UP * 0.45, (0.3, 0.3, 0.6), "dark", rot_z=a0, bevel=0.0)
+    for k in range(3):                     # brackets for the chamfer pipes
+        a = a0 + step * (0.2 + 0.3 * k)
+        p.box(polar(39.72, a, 2.2), (0.5, 0.25, 0.7), "dark", rot_z=a, bevel=0.0)
+    # deck (z 3.0, r 33.6..38.4): service boxes and vents
+    for k in range(rng.randint(2, 4)):
+        a = a0 + step * rng.uniform(0.08, 0.92)
+        r = rng.uniform(35.0, 37.6)
+        w, d, h = rng.uniform(0.6, 1.6), rng.uniform(0.6, 1.4), rng.uniform(0.3, 0.9)
+        p.box(polar(r, a, 3.0 + h / 2), (d, w, h),
+              rng.choice(["hull2", "hull3", "dark", "slate"]), rot_z=a, bevel=0.06)
+        if rng.random() < 0.5:
+            p.box(polar(r, a, 3.0 + h + 0.06), (d * 0.6, w * 0.6, 0.12), "dark", rot_z=a,
+                  bevel=0.0)
+    if mode in ("work", "store") and m % 4 != 2:
+        cols = ["hull3", "ochre", "slate", "accent", "hull2"]
+        a = a0 + step * 0.22
+        for n in range(rng.randint(2, 3)):
+            c = polar(36.2, a, 3.0 + 1.1) + tangent(a) * (n * 2.5)
+            worn_kit.cargo_pod(p, c, (2.0, 2.3, 2.2), rot_z=a, body=rng.choice(cols))
+        label("CARGO", polar(35.0, a, 3.02) + tangent(a) * 2.5, UP, up_for(radial(a)), 0.4,
+              INK_DARK, 0.7)
+    # underside: a tank saddle or a box every other module
+    if m % 2 == 1:
+        a = a0 + step * 0.5
+        p.cyl(polar(36.0, a, -4.1), 0.9, 0.9, 3.4, rng.choice(["mli_silver", "hull2"]), segs=10,
+              axis_rot=axis_tangent(a))
+
+
 # ---------------------------------------------------------------- docks
 def build_docks(rng):
     p = parts.PanelPart("station_docks", MATS)
@@ -522,6 +670,15 @@ def build_docks(rng):
                "accent", segs=5)
         handrail(p, [polar(42.6, a, 1.9) + t * 0.5, polar(49.8, a, 1.9) + t * 0.5], hgt=0.6,
                  t=0.06)
+        # cargo pods racked on both sides of the arm truss, a rack beam under them
+        cols = ["hull3", "ochre", "slate", "accent", "hull2", "hull"]
+        for sd in (-1, 1):
+            p.beam(polar(42.6, a, -1.9) + t * sd * 2.9, polar(49.6, a, -1.9) + t * sd * 2.9,
+                   0.35, 0.35, "rust")
+            for k, rr in enumerate((44.2, 47.3)):
+                if rng.random() < 0.85:
+                    worn_kit.cargo_pod(p, polar(rr, a, -0.6) + t * sd * 2.9, (2.3, 2.8, 2.4),
+                                 rot_z=a + math.pi / 2, body=rng.choice(cols))
         # docking collar node
         prof = [(0.0, -1.8), (2.2, -1.8), (2.5, -1.4), (2.5, 1.4), (2.2, 1.8), (0.0, 1.8)]
         cm = {0: "dark", 1: "hull2", 2: "hull2", 3: "hull2", 4: "dark"}
@@ -608,6 +765,62 @@ def build_solar(rng):
     return p
 
 
+# ---------------------------------------------------------------- radiators
+RAD_SEGS = [(52.0, 59.6, 7.0), (60.6, 68.2, 9.6), (69.2, 76.8, 12.2), (77.8, 85.4, 14.6)]
+RAD_TILT = math.radians(8.0)
+RAD_ROOT = 0.9          # panel inner edge, m from the mast axis
+
+
+def build_radiators(rng):
+    """Heat radiator wings in the 75 / 255 deg gaps. Each panel (r0, r1, width) leaves its
+    outer edge >= 1.5 m clear of a 30 m addon module on the neighbouring bays (30 deg off):
+    RAD_ROOT + width < r0 / 2 - 16.5."""
+    p = parts.PanelPart("station_radiators", MATS)
+    for wing, a_deg in enumerate(RAD_DEG):
+        a = math.radians(a_deg)
+        t = tangent(a)
+        # root: adapter on the frame ring, rotary joint, pump housings
+        p.box(polar(46.3, a, 0.0), (1.6, 4.6, 3.6), "hull2", rot_z=a, bevel=0.06)
+        p.cyl(polar(47.9, a), 1.7, 1.7, 2.2, "hull3", segs=12, axis_rot=axis_radial(a))
+        p.cyl(polar(49.1, a), 1.95, 1.95, 0.4, "dark", segs=12, axis_rot=axis_radial(a))
+        p.cyl(polar(49.8, a), 1.2, 1.2, 1.2, "metal", segs=12, axis_rot=axis_radial(a))
+        for sd in (-1, 1):
+            p.box(polar(47.4, a, 1.75) + t * sd * 1.25, (1.6, 0.9, 1.1), "slate", rot_z=a,
+                  bevel=0.08)
+        label(f"RAD {wing + 1}", polar(47.9, a, 1.72), UP, up_for(t), 0.6, INK_DARK, 0.8)
+        # mast truss with the supply / return manifolds along it
+        truss(p, polar(50.2, a), polar(86.2, a), 1.3, 1.3, 10, "metal", chord=0.22, brace=0.12)
+        for sd in (-1, 1):
+            p.tube(polar(50.0, a, 0.2) + t * sd * 0.8, polar(85.8, a, 0.2) + t * sd * 0.8, 0.14,
+                   0.14, "accent" if sd < 0 else "metal", segs=6)
+        p.cyl(polar(86.8, a), 0.9, 0.9, 1.4, "hull2", segs=10)
+        nav(p, polar(86.8, a, 0.95), "nav_white", 0.45)
+        for r0, r1, w in RAD_SEGS:
+            L = r1 - r0
+            mid = polar((r0 + r1) / 2, a)
+            for sd in (-1, 1):
+                rot = Matrix.Rotation(a, 4, "Z") @ Matrix.Rotation(sd * RAD_TILT, 4, "X")
+                r3 = rot.to_3x3()
+                c = mid + r3 @ V((0, sd * (RAD_ROOT + w / 2), 0))
+                p.box(c, (L, w, 0.12), "dark", r=rot, bevel=0.0)
+                p.box(c + r3 @ V((0, 0, 0.07)), (L - 0.3, w - 0.3, 0.05), "radiator", r=rot,
+                      bevel=0.0)
+                # heat pipe ribs run out from the manifold across the panel
+                n_rib = 6
+                for k in range(n_rib):
+                    x = -L / 2 + 0.6 + (L - 1.2) * k / (n_rib - 1)
+                    p.box(c + r3 @ V((x, 0, 0.11)), (0.12, w - 0.4, 0.06), "metal", r=rot,
+                          bevel=0.0)
+                # header pipe along the root edge, a hinge block
+                p.box(c + r3 @ V((0, -sd * (w / 2 - 0.1), 0.12)), (L - 0.2, 0.22, 0.2), "metal",
+                      r=rot, bevel=0.0)
+                p.box(mid + r3 @ V((0, sd * 0.75, 0)), (0.8, 0.5, 0.5), "dark", r=rot, bevel=0.0)
+                if r0 == RAD_SEGS[-1][0]:
+                    tip = c + r3 @ V((L / 2 - 0.3, sd * (w / 2 - 0.3), 0.12))
+                    nav(p, tip, "nav_red" if sd < 0 else "nav_green", 0.3)
+    return p
+
+
 # ---------------------------------------------------------------- addon bays
 def bay_frame(a, r=BAY_R, z=0.0):
     """Frame at radius r on bearing a: local +Z radially out, local +X tangential, +Y up."""
@@ -675,6 +888,8 @@ def build_bays(rng):
         a = 2 * math.pi * (i + 0.5) / 24
         p.box(polar(44.3, a, 0.0), (2.9, 0.35, 2.3), "dark", rot_z=a, bevel=0.0)
     pipe_arc(p, 44.9, 1.2, 0.0, 2 * math.pi, 48, 0.16, "metal", segs=6)
+    pipe_arc(p, 44.2, 1.16, 0.0, 2 * math.pi, 48, 0.12, "accent", segs=5)
+    pipe_arc(p, 44.3, -1.16, 0.0, 2 * math.pi, 48, 0.14, "metal", segs=5)
     # lower spine collar on the underside cone, below the tanks
     prof = [(5.0, -14.4), (9.6, -14.4), (10.2, -13.8), (10.2, -12.9), (9.6, -12.3), (5.6, -12.3)]
     cmat = {0: "dark", 1: "dark", 2: "hull2", 3: "metal", 4: "hull2"}
@@ -702,7 +917,8 @@ def build_station():
     root = parts.make_root("station_home", size=8)
     core = build_core(rng)
     ring, _ = build_ring(rng)
-    builders = [core, ring, build_docks(rng), build_solar(rng), build_bays(rng)]
+    builders = [core, ring, build_docks(rng), build_solar(rng), build_radiators(rng),
+                build_bays(rng)]
     objs = [b.finish(root) for b in builders]
     add_empties(root)
     return root, objs
@@ -720,11 +936,15 @@ def main():
         pads = [tuple(polar(PAD_R, math.radians(d))[:2]) for d in DOCK_DEG]
         st.texture_station(objs, MATS, pads, scorch=SCORCH, decals=DECALS, labels=LABELS)
     parts.print_stats(objs)
-    blend = os.path.join(common.ROOT, "blender", "station_home.blend")
-    parts.save_blend(blend)
-    bpy.ops.file.make_paths_relative()      # textures as //textures/...
-    bpy.ops.wm.save_mainfile(filepath=blend)
-    common.export_glb(root, OUT, export_image_format="AUTO")
+    # --preview-dir=DIR: previews there instead of blender/previews; --dry: no blend / glb
+    pdir = next((a.split("=", 1)[1] for a in argv if a.startswith("--preview-dir=")),
+                common.PREVIEW_DIR)
+    if "--dry" not in argv:
+        blend = os.path.join(common.ROOT, "blender", "station_home.blend")
+        parts.save_blend(blend)
+        bpy.ops.file.make_paths_relative()      # textures as //textures/...
+        bpy.ops.wm.save_mainfile(filepath=blend)
+        common.export_glb(root, OUT, export_image_format="AUTO")
     if "--no-preview" not in argv:
         common.setup_preview(cam_loc=(0, -120, 120), cam_target=(0, 0, 0), ortho_scale=175,
                              res=(1600, 1200), key_dir=(-0.6, -0.35, 0.7), key_energy=3.5)
@@ -732,7 +952,7 @@ def main():
             b = m.node_tree.nodes.get("Principled BSDF") if m.node_tree else None
             if b:
                 b.inputs["Emission Strength"].default_value *= 0.35
-        common.render(os.path.join(common.PREVIEW_DIR, "station_home_preview.png"))
+        common.render(os.path.join(pdir, "station_home_preview.png"))
         scene = bpy.context.scene
         cam = scene.camera
         cam.data.type = "PERSP"
@@ -740,7 +960,7 @@ def main():
         cam.location = (66.0, 18.0, 30.0)
         target = V((30.0, 32.0, 0.0))
         cam.rotation_euler = (target - cam.location).to_track_quat("-Z", "Y").to_euler()
-        common.render(os.path.join(common.PREVIEW_DIR, "station_home_closeup.png"))
+        common.render(os.path.join(pdir, "station_home_closeup.png"))
 
 
 main()

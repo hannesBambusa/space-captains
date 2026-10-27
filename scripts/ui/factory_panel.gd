@@ -296,7 +296,7 @@ func _make_ore_row(parent: VBoxContainer, ore: int) -> Dictionary:
 	var kminus := UIUtil.step_button("-", "Keep less %s back from auto-sell" % Economy.ore_name(ore), Vector2(22.0, 22.0))
 	kminus.pressed.connect(func() -> void:
 		if factory:
-			var m := factory.market
+			var m := factory.market.primary()
 			m.set_reserve(ore, m.reserve[ore] - m.reserve_step[ore]))
 	b.add_child(kminus)
 	var keep := UIUtil.label("", &"NumberLabel")
@@ -307,7 +307,7 @@ func _make_ore_row(parent: VBoxContainer, ore: int) -> Dictionary:
 	var kplus := UIUtil.step_button("+", "Keep more %s back from auto-sell, for building" % Economy.ore_name(ore), Vector2(22.0, 22.0))
 	kplus.pressed.connect(func() -> void:
 		if factory:
-			var m := factory.market
+			var m := factory.market.primary()
 			m.set_reserve(ore, m.reserve[ore] + m.reserve_step[ore]))
 	b.add_child(kplus)
 	var refine: Button = null
@@ -427,9 +427,12 @@ func _refresh_live() -> void:
 			rl.text = "~%d/min" % roundi(rate)
 		rl.add_theme_color_override("font_color", PipMeter.GOOD if rate >= m.max_buy_per_min[i] * 0.5 else (PipMeter.MID if rate > 0.0 else PipMeter.BAD))
 		var stations := m.station_water(i)
-		(r["keep"] as Label).text = str(m.kept(i)) + ("*" if stations > m.reserve[i] else "")
+		var reserve := m.primary().reserve[i]
+		(r["keep"] as Label).text = str(m.kept(i)) + ("*" if stations > reserve else "")
 		var keep_tip := "Keep %d %s (selling stops below this; building, research and tooling still use it). You have %d." % [
-				m.reserve[i], Economy.ore_name(i), Economy.ore[i]]
+				reserve, Economy.ore_name(i), Economy.ore[i]]
+		if m.primary() != m:
+			keep_tip += "\nShared with the home Factory: every Factory sells from the same ore."
 		if stations > 0:
 			keep_tip += "\nForward stations: at least %d kept (%d min of their water use)." % [stations, roundi(StationSupply.WATER_RESERVE_MINUTES)]
 		(r["keep"] as Label).tooltip_text = keep_tip

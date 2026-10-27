@@ -268,6 +268,7 @@ func warn_raid(den: ScavengerDen, size: int) -> void:
 	var text := "Raid incoming from %s toward %s: %s, launching in %d s" % [den.get_display_name(), objective_text(pending_aim, pending_target), what, roundi(warning_time)]
 	EventLog.post(text, EventLog.Kind.THREAT, den, Vector3.INF, "", f.id)
 	_toast("Raid incoming toward %s" % objective_text(pending_aim, pending_target))
+	Sfx.ui(&"alert")
 	raid_warned.emit(den, size, objective_text(pending_aim, pending_target))
 
 

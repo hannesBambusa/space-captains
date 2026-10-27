@@ -3,6 +3,8 @@ extends Node3D
 ## Mining laser: a thin emissive beam from the ship's nose to the asteroid,
 ## a hot spot at the contact point and a spray of sparks. World space
 ## (top_level), aimed every frame by the ship. Sparks freeze while paused.
+## The contact also carries a camera-facing glow (shaders/fx_glow.gdshader)
+## that keeps a few pixels on screen, so a working drill reads at belt zoom.
 
 @export var beam_color: Color = Color(0.55, 0.9, 1.0)
 @export var spark_color: Color = Color(1.0, 0.62, 0.25)
@@ -33,6 +35,7 @@ func _ready() -> void:
 	add_child(_hot)
 	_sparks = _make_sparks()
 	_hot.add_child(_sparks)
+	_hot.add_child(_make_glint())
 
 
 ## Shows the beam from [param from] to [param to] (world).
@@ -60,6 +63,7 @@ func set_active(on: bool) -> void:
 	if _on == on:
 		return
 	_on = on
+	Sfx.loop(self, &"mining_laser", on)
 	visible = on
 	_sparks.emitting = on
 
@@ -94,6 +98,24 @@ func _additive(color: Color, energy: float, alpha: float) -> StandardMaterial3D:
 	m.no_depth_test = false
 	m.disable_receive_shadows = true
 	return m
+
+
+func _make_glint() -> MeshInstance3D:
+	var quad := QuadMesh.new()
+	quad.size = Vector2.ONE
+	var m := ShaderMaterial.new()
+	m.shader = preload("res://shaders/fx_glow.gdshader")
+	m.set_shader_parameter(&"glow_color", spark_color.lerp(Color.WHITE, 0.35))
+	m.set_shader_parameter(&"size", 2.6)
+	m.set_shader_parameter(&"min_px", 5.0)
+	m.set_shader_parameter(&"energy", 2.4)
+	var mi := MeshInstance3D.new()
+	mi.name = "Glint"
+	mi.mesh = quad
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.custom_aabb = AABB(Vector3(-40, -40, -40), Vector3(80, 80, 80))
+	return mi
 
 
 func _make_sparks() -> GPUParticles3D:

@@ -7,7 +7,7 @@ shader_type spatial;
 uniform vec3 base_color : source_color = vec3(0.62, 0.6, 0.57);
 uniform float fade = 1.0;
 uniform float hot = 0.0;
-uniform float glint_strength = 7.0;
+uniform float glint_strength = 4.0;
 
 varying float v_glint;
 varying float v_hot;

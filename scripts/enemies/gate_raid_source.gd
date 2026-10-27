@@ -279,12 +279,14 @@ func _launch() -> void:
 
 
 ## A raider jumped back out: it counts into its base over there again
-## (while the system is data; a live base keeps its own count).
+## (while the system is data; a live base keeps its own count), up to the
+## base's spawn cap (a raid never left its count: a full base just takes
+## it back into the hangar).
 func note_return(den: GateRaidDen, _s: ScavengerShip) -> void:
 	stats["returned"] = int(stats["returned"]) + 1
 	var st := Sector.state(den.source_id)
 	var ds: Dictionary = st.dens.get(den.def.name, {}) if st else {}
-	if not ds.is_empty() and not bool(ds.get("dead", false)):
+	if not ds.is_empty() and not bool(ds.get("dead", false)) and RemoteSim.den_out(st, ds) < den.def.spawn_cap:
 		ds["pending"] = int(ds.get("pending", 0)) + 1
 	EventLog.post("%s jumped back out through %s" % [_s.get_display_name() if is_instance_valid(_s) else "A raider", den.gate.def.name if is_instance_valid(den.gate) else "the gate"],
 			EventLog.Kind.COMBAT, null, den.get_mouth_position())

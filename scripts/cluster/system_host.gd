@@ -113,7 +113,8 @@ func apply_state(st: RemoteSystemState) -> void:
 	for pair in made:
 		ShipCodec.finish(pair[0] as Ship, pair[1] as Dictionary, refs)
 	for den: ScavengerDen in den_data:
-		var pending := int((den_data[den] as Dictionary).get("pending", 0))
+		# Never past the cap (older saves could hold more pending than room).
+		var pending := mini(int((den_data[den] as Dictionary).get("pending", 0)), den.def.spawn_cap - den.spawns.size())
 		if pending > 0:
 			den.spawn_pack(pending, false, true)
 	# Live now: the data copy is stale until the next capture.

@@ -161,6 +161,8 @@ func _build() -> void:
 	_main.add_child(_fullscreen_button)
 	_main.add_child(_button("Main menu", func() -> void: SaveManager.to_main_menu()))
 	_main.add_child(_button("Quit to desktop", func() -> void: SaveManager.quit_game()))
+	_main.add_child(HSeparator.new())
+	_main.add_child(VolumeSliders.new())
 
 	_main.add_child(HSeparator.new())
 	var hint := UIUtil.label("Esc to resume. The game saves on quit.", &"SmallLabel")
@@ -214,6 +216,7 @@ func _button(text: String, action: Callable) -> Button:
 	b.focus_mode = Control.FOCUS_NONE
 	b.custom_minimum_size = Vector2(0, 46)
 	b.pressed.connect(action)
+	b.mouse_entered.connect(Sfx.ui.bind(&"ui_hover"))
 	return b
 
 

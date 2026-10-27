@@ -105,6 +105,9 @@ var _entries: Array[Entry] = []
 var _count := 0
 var _badges: Array[Dictionary] = []
 var _arrows: Array[Dictionary] = []
+## Screen rects of the HUD panels without a background (the pilot list):
+## nothing is drawn under them ([method _under_panel]).
+var _panels: Array[Rect2] = []
 ## Fleet links this frame: {from, to, alpha}; badges: {pos, count, alpha}.
 var _fleet_links: Array[Dictionary] = []
 var _fleet_badges: Array[Dictionary] = []
@@ -298,6 +301,7 @@ func _process(delta: float) -> void:
 	_count = 0
 	_badges.clear()
 	_arrows.clear()
+	_panels = _panel_rects()
 	_fleet_links.clear()
 	_fleet_badges.clear()
 	_structures.clear()
@@ -338,7 +342,7 @@ func _process(delta: float) -> void:
 		if cam.is_position_behind(p):
 			continue
 		var sp := cam.unproject_position(p)
-		if not screen.has_point(sp):
+		if not screen.has_point(sp) or _under_panel(sp):
 			continue
 		var e := _next_entry()
 		_fill_ship(e, s, cam, sp, emphasis)
@@ -351,7 +355,7 @@ func _process(delta: float) -> void:
 			if cam.is_position_behind(p):
 				continue
 			var sp := cam.unproject_position(p)
-			if not screen.has_point(sp):
+			if not screen.has_point(sp) or _under_panel(sp):
 				continue
 			var e := _next_entry()
 			_fill_den(e, d, cam, sp, d == selected or d == followed)
@@ -360,7 +364,7 @@ func _process(delta: float) -> void:
 			if site == null or not site.is_inside_tree() or cam.is_position_behind(site.global_position):
 				continue
 			var sp := cam.unproject_position(site.global_position)
-			if not screen.has_point(sp):
+			if not screen.has_point(sp) or _under_panel(sp):
 				continue
 			_fill_site(_next_entry(), site, sp, site == followed)
 	if mode == Mode.ALL:
@@ -596,6 +600,10 @@ func _arrow_area(vp: Rect2) -> Rect2:
 			r.position.x = left
 	r.position.y += 40.0
 	r.size.y -= 40.0
+	for p in _panels:
+		# Left of the pilot list (it reaches the right edge).
+		if p.position.x > r.position.x + 200.0 and p.end.x >= r.end.x - edge_margin_px:
+			r.size.x = minf(r.size.x, p.position.x - edge_margin_px * 0.5 - r.position.x)
 	return r
 
 
@@ -615,7 +623,7 @@ func _collect_badges(cam: Camera3D, screen: Rect2, zoom_alpha: float) -> void:
 		if cam.is_position_behind(p):
 			continue
 		var sp := cam.unproject_position(p)
-		if not screen.has_point(sp):
+		if not screen.has_point(sp) or _under_panel(sp):
 			continue
 		var d := maxf(cam.global_position.distance_to(p), 1.0)
 		var r := minf(b.def.footprint_radius / d * _px_per_rad, 70.0)
@@ -643,7 +651,7 @@ func _collect_structures(cam: Camera3D, screen: Rect2, selected: Node3D) -> void
 		if cam.is_position_behind(p):
 			continue
 		var sp := cam.unproject_position(p)
-		if not screen.has_point(sp):
+		if not screen.has_point(sp) or _under_panel(sp):
 			continue
 		var d := maxf(cam.global_position.distance_to(p), 1.0)
 		var r := clampf(b.def.footprint_radius / d * _px_per_rad, icon_px, 70.0)
@@ -754,11 +762,35 @@ func _layout_labels(zoom_alpha: float) -> void:
 					if _entries[i] != e and icons[i].has_area() and icons[i].intersects(rect):
 						clash = true
 						break
-		if clash:
+		if clash or _under_panel_rect(rect):
 			continue
 		placed.append(rect)
 		e.label_rect = rect
 		e.show_label = true
+
+
+## The pilot list floats over space with no background (outlined text):
+## markers, labels and badges under it are left out, so the list stays
+## readable and takes the clicks there.
+func _panel_rects() -> Array[Rect2]:
+	var out: Array[Rect2] = []
+	if hud and hud.pilots and hud.pilots.is_visible_in_tree():
+		out.append(hud.pilots.get_global_rect())
+	return out
+
+
+func _under_panel(p: Vector2) -> bool:
+	for r in _panels:
+		if r.has_point(p):
+			return true
+	return false
+
+
+func _under_panel_rect(rect: Rect2) -> bool:
+	for r in _panels:
+		if r.intersects(rect):
+			return true
+	return false
 
 
 func _update_tooltip(delta: float) -> void:

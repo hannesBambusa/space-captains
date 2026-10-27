@@ -201,6 +201,7 @@ func _enter(dt: float) -> bool:
 	_set_model_scale(lerpf(1.0, SHRINK, smoothstep(0.55, 1.0, k)))
 	if k >= 0.8 and not _flashed:
 		_flashed = true
+		Sfx.play_at(&"gate_transit", c, ship)
 		WarpFx.flash(ship, c, g.portal_radius * 0.9, g.def.portal_color.lerp(Color.WHITE, 0.35), 1.3, ax)
 	if k >= 1.0:
 		_jump(g)
@@ -216,6 +217,7 @@ func _arrive(dt: float) -> bool:
 	var ax := g.portal_axis()
 	if _t <= 0.0:
 		_from = c
+		Sfx.play_at(&"gate_transit", c, ship)
 		WarpFx.flash(ship, c, g.portal_radius * 0.9, g.def.portal_color.lerp(Color.WHITE, 0.35), 1.3, ax)
 	_t += dt
 	var k := clampf(_t / ARRIVE_TIME, 0.0, 1.0)

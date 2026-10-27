@@ -89,6 +89,7 @@ func post(contract: Contract) -> Contract:
 	contract.system_id = _system_of(contract)
 	contract.changed.connect(_on_contract_changed)
 	contracts.append(contract)
+	Sfx.ui(&"contract_posted")
 	contract_posted.emit(contract)
 	return contract
 
