@@ -8,8 +8,10 @@ extends Node
 ##   Sfx.loop(self, &"mining_laser", on)  # 3D loop on a node while on
 ##   Sfx.ui(&"ui_click")                  # flat cue (UI bus or SFX bus, see SOUNDS)
 ## Signals wired here, no hooks: Research.tech_completed (research_done),
-## Economy.income (credits, a few sources only), every BaseButton's pressed
-## (ui_click).
+## every BaseButton's pressed (ui_click).
+## Files: recorded Kenney CC0 packs, levelled to one loudness (loudest
+## 100 ms at -14 dBFS); the mix lives in the "db" column below
+## (assets/audio/sfx/CREDITS.md).
 ##
 ## Only the viewed system is heard ([ViewManager]): a sound in any other
 ## World3D is dropped before it takes a player. Each live system gets its
@@ -28,29 +30,28 @@ extends Node
 ## jitter (pitch +-), zoom (max camera distance, m; 3D only), unit (unit
 ## size per metre of camera distance; 3D only).
 const SOUNDS := {
-	&"autocannon": {"path": "autocannon", "variants": 3, "db": -6.0, "limit": 5, "gap": 0.06, "jitter": 0.08, "zoom": 9000.0, "unit": 0.5},
-	&"missile_launch": {"path": "missile_launch", "db": -5.0, "limit": 3, "gap": 0.2, "jitter": 0.06, "zoom": 15000.0, "unit": 0.6},
-	&"hull_hit": {"path": "hull_hit", "variants": 3, "db": -6.0, "limit": 5, "gap": 0.05, "jitter": 0.12, "zoom": 6000.0, "unit": 0.45},
-	&"shield_hit": {"path": "shield_hit", "db": -8.0, "limit": 4, "gap": 0.06, "jitter": 0.1, "zoom": 6000.0, "unit": 0.45},
-	&"explosion_small": {"path": "explosion_small", "variants": 3, "db": 0.0, "limit": 4, "gap": 0.12, "jitter": 0.12, "zoom": 30000.0, "unit": 0.7},
-	&"explosion_big": {"path": "explosion_big", "db": 2.0, "limit": 2, "gap": 0.6, "jitter": 0.06, "zoom": 130000.0, "unit": 1.0},
-	&"warp_spool": {"path": "warp_spool", "db": -8.0, "limit": 3, "gap": 0.3, "jitter": 0.05, "zoom": 8000.0, "unit": 0.5},
-	&"warp_jump": {"path": "warp_jump", "db": -6.0, "limit": 3, "gap": 0.2, "jitter": 0.08, "zoom": 12000.0, "unit": 0.55},
-	&"gate_transit": {"path": "gate_transit", "db": -4.0, "limit": 2, "gap": 0.8, "jitter": 0.04, "zoom": 20000.0, "unit": 0.7},
+	&"autocannon": {"path": "autocannon", "variants": 3, "db": -10.0, "limit": 4, "gap": 0.08, "jitter": 0.08, "zoom": 9000.0, "unit": 0.5},
+	&"missile_launch": {"path": "missile_launch", "db": -7.0, "limit": 3, "gap": 0.2, "jitter": 0.06, "zoom": 15000.0, "unit": 0.6},
+	&"hull_hit": {"path": "hull_hit", "variants": 3, "db": -9.0, "limit": 4, "gap": 0.07, "jitter": 0.12, "zoom": 6000.0, "unit": 0.45},
+	&"shield_hit": {"path": "shield_hit", "db": -12.0, "limit": 3, "gap": 0.08, "jitter": 0.1, "zoom": 6000.0, "unit": 0.45},
+	&"explosion_small": {"path": "explosion_small", "variants": 3, "db": -4.0, "limit": 3, "gap": 0.15, "jitter": 0.12, "zoom": 30000.0, "unit": 0.7},
+	&"explosion_big": {"path": "explosion_big", "db": 0.0, "limit": 2, "gap": 0.6, "jitter": 0.06, "zoom": 130000.0, "unit": 1.0},
+	&"warp_spool": {"path": "warp_spool", "db": -9.0, "limit": 3, "gap": 0.3, "jitter": 0.05, "zoom": 8000.0, "unit": 0.5},
+	&"warp_jump": {"path": "warp_jump", "db": -7.0, "limit": 3, "gap": 0.2, "jitter": 0.08, "zoom": 12000.0, "unit": 0.55},
+	&"gate_transit": {"path": "gate_transit", "db": -5.0, "limit": 2, "gap": 0.8, "jitter": 0.04, "zoom": 20000.0, "unit": 0.7},
 	&"dock": {"path": "dock", "db": -6.0, "limit": 2, "gap": 0.4, "jitter": 0.07, "zoom": 3000.0, "unit": 0.5},
 	&"undock": {"path": "undock", "db": -6.0, "limit": 2, "gap": 0.4, "jitter": 0.07, "zoom": 3000.0, "unit": 0.5},
-	&"mining_laser": {"path": "mining_laser", "db": -10.0, "limit": 3, "gap": 0.0, "jitter": 0.04, "zoom": 4000.0, "unit": 0.4, "loop": true},
-	&"ui_click": {"path": "ui_click", "bus": &"UI", "db": -6.0, "limit": 2, "gap": 0.03, "jitter": 0.03},
-	&"ui_hover": {"file": "res://assets/audio/ui/menu_hover.wav", "bus": &"UI", "db": -14.0, "limit": 1, "gap": 0.06, "jitter": 0.0},
-	&"build_placed": {"path": "build_placed", "bus": &"SFX", "db": -4.0, "limit": 2, "gap": 0.15, "jitter": 0.05},
-	&"research_done": {"path": "research_done", "bus": &"UI", "db": -4.0, "limit": 1, "gap": 1.0, "jitter": 0.0},
-	&"alert": {"path": "alert", "bus": &"UI", "db": -4.0, "limit": 1, "gap": 3.0, "jitter": 0.0},
-	&"contract_posted": {"path": "contract_posted", "bus": &"UI", "db": -4.0, "limit": 1, "gap": 0.5, "jitter": 0.02},
-	&"credits": {"path": "credits", "bus": &"UI", "db": -4.0, "limit": 1, "gap": 4.0, "jitter": 0.02},
+	&"mining_laser": {"path": "mining_laser", "db": -15.0, "limit": 3, "gap": 0.0, "jitter": 0.04, "zoom": 4000.0, "unit": 0.4, "loop": true},
+	&"ui_click": {"path": "ui_click", "bus": &"UI", "db": -10.0, "limit": 2, "gap": 0.03, "jitter": 0.03},
+	&"ui_hover": {"path": "ui_hover", "bus": &"UI", "db": -18.0, "limit": 1, "gap": 0.06, "jitter": 0.0},
+	&"build_placed": {"path": "build_placed", "bus": &"SFX", "db": -6.0, "limit": 2, "gap": 0.15, "jitter": 0.05},
+	&"research_done": {"path": "research_done", "bus": &"UI", "db": -7.0, "limit": 1, "gap": 1.0, "jitter": 0.0},
+	&"alert": {"path": "alert", "bus": &"UI", "db": -5.0, "limit": 1, "gap": 3.0, "jitter": 0.0},
+	&"contract_posted": {"path": "contract_posted", "bus": &"UI", "db": -8.0, "limit": 1, "gap": 0.5, "jitter": 0.02},
 }
 const SFX_DIR := "res://assets/audio/sfx/"
 ## Players per system pool.
-const VOICES := 20
+const VOICES := 16
 ## Flat (UI) players.
 const UI_VOICES := 6
 ## World sounds are silent above this sim speed.
@@ -60,8 +61,6 @@ const MAX_SIM_SPEED := 8.0
 const CULL := 3.0
 ## Seconds between loop refreshes (which loops sound, their pause state).
 const LOOP_TICK := 0.25
-## Income sources that chime.
-const CHIME_SOURCES := ["Factory sales", "Discovery", "Salvage"]
 const POOL_NAME := &"SfxPool"
 
 var enabled := true
@@ -109,7 +108,6 @@ func _ready() -> void:
 		_ui.append(p)
 	get_tree().node_added.connect(_on_node_added)
 	Research.tech_completed.connect(func(_t: TechDef) -> void: ui(&"research_done"))
-	Economy.income.connect(_on_income)
 
 
 ## A 3D one-shot at [param at] (world) in the system [param ctx] is in.
@@ -211,25 +209,29 @@ func _process(delta: float) -> void:
 
 ## Drops the streams on exit, so the engine does not report them as leaked.
 func _exit_tree() -> void:
-	for p in _ui:
-		p.stop()
-		p.stream = null
+	var players: Array = []
+	players.append_array(_ui)
+	for pool: Variant in _pools.values():
+		if is_instance_valid(pool):
+			players.append_array((pool as Node).get_children())
+	for p: Variant in _loop_players.values():
+		if is_instance_valid(p):
+			players.append(p)
+	for p: Variant in players:
+		(p as Node).call(&"stop")
+		(p as Node).set(&"stream", null)
 	_streams.clear()
 
 
-## The files of a sound: name_1..name_N for variants, else name.wav (the
-## synth fallback, tools/gen_sfx.py, writes the plain names); "file" wins.
+## The files of a sound: name_1..name_N for variants, else name.wav.
 func _paths(d: Dictionary) -> PackedStringArray:
-	if d.has("file"):
-		return PackedStringArray([d["file"]])
 	var base := SFX_DIR + String(d.get("path", ""))
+	var n := int(d.get("variants", 0))
+	if n == 0:
+		return PackedStringArray([base + ".wav"])
 	var out := PackedStringArray()
-	for i in int(d.get("variants", 0)):
-		var p := "%s_%d.wav" % [base, i + 1]
-		if ResourceLoader.exists(p):
-			out.append(p)
-	if out.is_empty():
-		out.append(base + ".wav")
+	for i in n:
+		out.append("%s_%d.wav" % [base, i + 1])
 	return out
 
 
@@ -382,8 +384,3 @@ func _on_node_added(n: Node) -> void:
 
 func _on_button_pressed() -> void:
 	ui(&"ui_click")
-
-
-func _on_income(amount: int, source: String) -> void:
-	if amount > 0 and source in CHIME_SOURCES:
-		ui(&"credits")

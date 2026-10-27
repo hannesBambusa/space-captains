@@ -7,12 +7,19 @@ extends MeshInstance3D
 ## lengths, warp: brighter and longer); parked it is off. Pixel floors in the
 ## shader keep a burning drive readable as a small tick at system zoom.
 ## Child of the model (banks, pitches and hides with it). Never headless.
+## Steady by design: no time-based pulse (Ship's own flame mesh pulses),
+## level eased frame-rate independently, so nothing changes frame to frame
+## while the thrust holds.
 
 const SHADER := preload("res://shaders/vfx_plume.gdshader")
 const PLAYER_TINT := Color(0.55, 0.75, 1.0)
 const HOSTILE_TINT := Color(1.0, 0.62, 0.36)
 ## Hidden beyond this camera distance, metres.
 const MAX_CAM := 12000.0
+## Master switch: false attaches no plumes at all.
+const ENABLED := true
+## How fast the plume follows thrust, 1/s (exponential ease).
+const EASE_RATE := 4.0
 
 static var _quad: QuadMesh
 static var _mat: ShaderMaterial
@@ -25,7 +32,7 @@ var _full := 16.0
 
 ## Adds a plume to [param s] at its engine glow node (no glow: nothing).
 static func attach(s: Ship, model: Node3D, glow: Node3D) -> void:
-	if s == null or model == null or glow == null or Vfx.headless():
+	if not ENABLED or s == null or model == null or glow == null or Vfx.headless():
 		return
 	var p := EnginePlume.new()
 	p.ship = s
@@ -71,12 +78,11 @@ func _process(delta: float) -> void:
 		if m.warp_state != ShipMover.Warp.IDLE:
 			want = 1.0
 			boost = 1.6
-	_level = lerpf(_level, want, clampf(delta * 6.0, 0.0, 1.0))
+	_level = lerpf(_level, want, 1.0 - exp(-EASE_RATE * delta))
 	var cam := get_viewport().get_camera_3d()
 	var far := cam != null and cam.global_position.distance_to(global_position) > MAX_CAM
 	visible = _level > 0.03 and not far
 	if not visible:
 		return
-	var flick := 0.93 + 0.07 * sin(Time.get_ticks_msec() * 0.047 + float(get_instance_id() % 97))
-	set_instance_shader_parameter(&"pl_len", _full * lerpf(0.15, 1.0, _level) * boost * flick)
+	set_instance_shader_parameter(&"pl_len", _full * lerpf(0.15, 1.0, _level) * boost)
 	set_instance_shader_parameter(&"pl_alpha", lerpf(0.25, 1.0, _level) * minf(boost, 1.3))
