@@ -8,6 +8,9 @@ const SETTINGS_PATH := "user://settings.cfg"
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# Graphics options (user://settings.cfg [graphics]) on the root before
+	# any scene renders; system SubViewports copy them as they are built.
+	GraphicsSettings.apply_saved(get_tree())
 	if DisplayServer.get_name() == "headless":
 		return
 	var args := OS.get_cmdline_user_args() + OS.get_cmdline_args()

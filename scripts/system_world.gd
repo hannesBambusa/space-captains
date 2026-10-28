@@ -84,6 +84,8 @@ var _members: Dictionary = {}
 
 func _enter_tree() -> void:
 	add_to_group(GROUP)
+	# Glow / SSAO from the graphics settings, before the first frame.
+	GraphicsSettings.apply_world(self)
 	get_viewport().set_meta(META, self)
 	var vm := ViewManager.of(get_tree())
 	if vm:

@@ -240,7 +240,6 @@ func _ready() -> void:
 	_prepare_model(_model)
 	MeshUtil.set_layers_recursive(_model, RENDER_LAYER)
 	_collect_glow()
-	EnginePlume.attach(self, _model, _glow_node)
 	if stats.has_weapon():
 		weapon = ShipWeapon.new(self, stats, _model, Combat.HOSTILE_TRACER if faction == Combat.Faction.SCAVENGER else Combat.PLAYER_TRACER)
 	set_meta(&"focus_radius", 14.0)

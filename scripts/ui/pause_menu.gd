@@ -2,7 +2,8 @@ extends CanvasLayer
 ## Autoload "PauseMenu". Esc opens it during a game when nothing else used the
 ## key (placing a building and selections handle Esc first). Pauses the sim
 ## while open. Save game writes the current slot, Load game lists the saves
-## ([SaveList]), Main menu and Quit save first (SaveManager).
+## ([SaveList]), Graphics shows [GraphicsOptions], Main menu and Quit save
+## first (SaveManager).
 ## Also shows short toasts ("Game saved") at the top of the screen, open or not:
 ## a banner with an icon, red and held longer for raid warnings, amber for
 ## long-range scans and new factions, green otherwise.
@@ -15,6 +16,7 @@ const ALERT_TIME := 5.0
 var _root: Control
 var _main: VBoxContainer
 var _loads: SaveList
+var _graphics: VBoxContainer
 var _fullscreen_button: Button
 var _was_paused := false
 var _toast: PanelContainer
@@ -70,7 +72,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not SaveManager.in_game():
 		return
 	if event.is_action_pressed("ui_cancel") and not event.is_echo():
-		if is_open() and _loads.visible:
+		if is_open() and (_loads.visible or _graphics.visible):
 			_show_main()
 		elif is_open():
 			close()
@@ -159,6 +161,7 @@ func _build() -> void:
 	_main.add_child(_button("Load game", _show_loads))
 	_fullscreen_button = _button("Fullscreen", _toggle_fullscreen)
 	_main.add_child(_fullscreen_button)
+	_main.add_child(_button("Graphics", _show_graphics))
 	_main.add_child(_button("Main menu", func() -> void: SaveManager.to_main_menu()))
 	_main.add_child(_button("Quit to desktop", func() -> void: SaveManager.quit_game()))
 	_main.add_child(HSeparator.new())
@@ -173,6 +176,14 @@ func _build() -> void:
 	_loads.back.connect(_show_main)
 	stack.add_child(_loads)
 	_loads.hide()
+
+	_graphics = VBoxContainer.new()
+	_graphics.add_theme_constant_override("separation", 12)
+	stack.add_child(_graphics)
+	_graphics.add_child(UIUtil.label("GRAPHICS", &"TitleLabel"))
+	_graphics.add_child(GraphicsOptions.new())
+	_graphics.add_child(_button("Back", _show_main))
+	_graphics.hide()
 	UIUtil.no_focus(_root)
 
 
@@ -227,7 +238,14 @@ func _save() -> void:
 
 func _show_main() -> void:
 	_loads.hide()
+	_graphics.hide()
 	_main.show()
+
+
+func _show_graphics() -> void:
+	_main.hide()
+	_loads.hide()
+	_graphics.show()
 
 
 func _show_loads() -> void:

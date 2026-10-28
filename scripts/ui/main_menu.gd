@@ -2,21 +2,20 @@ class_name MainMenu
 extends Control
 ## The start screen (scenes/main_menu.tscn, the project's main scene):
 ## Continue (the newest save), New game, Load game ([SaveList]), Settings
-## (fullscreen, the tutorial for new games) and Quit, over the slowly turning station ([MenuBackdrop]).
+## (fullscreen, the tutorial for new games, volumes, a Graphics page:
+## [GraphicsOptions]) and Quit, over the slowly turning station ([MenuBackdrop]).
 ## Styled like the pause menu (ui/theme.tres).
 ## Run with "-- --screenshot=..." it starts a new game at once, so the
 ## screenshot check keeps rendering the system.
 
 const THEME_PATH := "res://ui/theme.tres"
 const TITLE_COLOR := HudStyle.ACCENT
-## Click played when the mouse moves onto a button (made with ElevenLabs).
-const HOVER_SOUND := "res://assets/audio/ui/menu_hover.wav"
-const HOVER_VOLUME_DB := -14.0
 const HOVER_COOLDOWN := 0.06
 
 var _main: VBoxContainer
 var _loads: SaveList
 var _settings: VBoxContainer
+var _graphics: VBoxContainer
 var _continue: Button
 var _continue_hint: Label
 var _error: Label
@@ -24,7 +23,6 @@ var _backup: Button
 var _fullscreen: Button
 var _tutorial: CheckButton
 var _newest: Dictionary = {}
-var _hover_player: AudioStreamPlayer
 var _last_hover := -1.0
 
 
@@ -153,7 +151,15 @@ func _build() -> void:
 	tut_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_settings.add_child(tut_hint)
 	_settings.add_child(VolumeSliders.new())
+	_settings.add_child(_button("Graphics", _show_graphics))
 	_settings.add_child(_button("Back", _show_main))
+
+	_graphics = VBoxContainer.new()
+	_graphics.add_theme_constant_override("separation", 12)
+	stack.add_child(_graphics)
+	_graphics.add_child(UIUtil.label("GRAPHICS", &"TitleLabel"))
+	_graphics.add_child(GraphicsOptions.new())
+	_graphics.add_child(_button("Back", _show_settings))
 
 	UIUtil.no_focus(self)
 
@@ -170,31 +176,29 @@ func _button(text: String, action: Callable, variation: StringName = &"MainMenuB
 	return b
 
 
-## The hover click, at most once per [constant HOVER_COOLDOWN] so a fast
+## The hover click (Sfx "ui_hover"), at most once per [constant HOVER_COOLDOWN] so a fast
 ## sweep over the buttons does not rattle.
 func _play_hover() -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	if now - _last_hover < HOVER_COOLDOWN:
 		return
 	_last_hover = now
-	if _hover_player == null:
-		_hover_player = AudioStreamPlayer.new()
-		_hover_player.stream = load(HOVER_SOUND)
-		_hover_player.volume_db = HOVER_VOLUME_DB
-		_hover_player.bus = &"UI"
-		add_child(_hover_player)
-	_hover_player.play()
+	Sfx.ui(&"ui_hover")
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel") and not event.is_echo() and not _main.visible:
-		_show_main()
+		if _graphics.visible:
+			_show_settings()
+		else:
+			_show_main()
 		get_viewport().set_input_as_handled()
 
 
 func _show_main() -> void:
 	_loads.hide()
 	_settings.hide()
+	_graphics.hide()
 	_main.show()
 	_newest = SaveManager.newest_save()
 	_error.hide()
@@ -212,6 +216,7 @@ func _show_main() -> void:
 func _show_loads() -> void:
 	_main.hide()
 	_settings.hide()
+	_graphics.hide()
 	_loads.playing_slot = ""
 	_loads.refresh()
 	_loads.show()
@@ -220,9 +225,15 @@ func _show_loads() -> void:
 func _show_settings() -> void:
 	_main.hide()
 	_loads.hide()
+	_graphics.hide()
 	_update_fullscreen()
 	_tutorial.set_pressed_no_signal(Tutorial.runs_on_new_game())
 	_settings.show()
+
+
+func _show_graphics() -> void:
+	_settings.hide()
+	_graphics.show()
 
 
 func _on_continue() -> void:
