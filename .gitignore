@@ -5,3 +5,6 @@
 blender/__pycache__/
 _site/
 screenshots/
+
+# Raw source mesh for blender/gen_miner_hauler.py (67 MB, local only)
+assets/models/new/spaceship/*.obj
