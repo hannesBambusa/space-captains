@@ -268,8 +268,28 @@ static func get_variant_mesh(v_name: String) -> Mesh:
 	if mesh == null:
 		print("AsteroidBelt: %s.glb not found, using procedural fallback" % v_name)
 		mesh = AsteroidFallback.build(v_name)
+	else:
+		_set_ore(mesh, v_name)
 	_mesh_cache[v_name] = mesh
 	return mesh
+
+
+## Iron and titanium rocks draw their ore in the shader (veins, blobs) on
+## the rock surface (surface 0; blender/gen_asteroids.py gives no ore faces).
+static func _set_ore(mesh: Mesh, v_name: String) -> void:
+	var mat := mesh.surface_get_material(0) as ShaderMaterial if mesh.get_surface_count() > 0 else null
+	if mat == null:
+		return
+	if v_name.contains("iron"):
+		mat.set_shader_parameter("ore_mode", 1)
+		mat.set_shader_parameter("ore_color", Color(0.62, 0.26, 0.08))
+		mat.set_shader_parameter("ore_metallic", 0.35)
+		mat.set_shader_parameter("ore_roughness", 0.5)
+	elif v_name.contains("titanium"):
+		mat.set_shader_parameter("ore_mode", 2)
+		mat.set_shader_parameter("ore_color", Color(0.70, 0.80, 0.92))
+		mat.set_shader_parameter("ore_metallic", 0.4)
+		mat.set_shader_parameter("ore_roughness", 0.4)
 
 
 ## Loads the first MeshInstance3D's mesh from a glb, then makes an in-memory copy

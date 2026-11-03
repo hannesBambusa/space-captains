@@ -20,3 +20,4 @@ ending a session. A stale doc is worse than no doc, because it is trusted.
 | Feature | Doc | Status | Branch |
 |---|---|---|---|
 | Rival corporation | [`rival-corporation.md`](rival-corporation.md) | Ready for review (M1: 1 to 3 rivals) | — |
+| Planet outposts | [`planet-outposts.md`](planet-outposts.md) | Planned | — |

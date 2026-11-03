@@ -144,25 +144,14 @@ def build_asteroid(kind, idx, seed):
         mesh.materials.append(m)
 
     bm = bmesh.new()
-    bmesh.ops.create_icosphere(bm, subdivisions=4, radius=1.0)
+    # Fine enough for close-ups: clusters hold 25 to 100 big rocks, not thousands.
+    bmesh.ops.create_icosphere(bm, subdivisions=5, radius=1.0)
     rock_shape(bm, rng, kind)
     bm.normal_update()
 
-    # Ore patches: material 1 on faces where a ridged noise field is high.
-    ore_off = Vector((rng.uniform(-50, 50), rng.uniform(-50, 50), rng.uniform(-50, 50)))
-    if kind in ("iron", "titanium"):
-        for f in bm.faces:
-            c = f.calc_center_median().normalized() * 1.6 + ore_off
-            if kind == "iron":
-                # Veins: thin bands where |noise| ~ 0
-                val = 1.0 - abs(noise.noise(c, noise_basis="PERLIN_ORIGINAL"))
-                hit = val > 0.86
-            else:
-                # Blobby patches
-                val = noise.noise(c * 0.9, noise_basis="PERLIN_ORIGINAL")
-                hit = val > 0.28
-            if hit:
-                f.material_index = 1
+    # Iron and titanium ore is drawn by the asteroid shader as soft veins and
+    # blobs in the rock's own space (shaders/asteroid.gdshader, ore_mode),
+    # not as per-face patches: every face keeps the rock material here.
 
     for f in bm.faces:
         f.smooth = True
