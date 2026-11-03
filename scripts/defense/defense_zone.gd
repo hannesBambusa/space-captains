@@ -86,7 +86,7 @@ func hostiles_inside(margin: float = 0.0) -> Array[Node3D]:
 	var out: Array[Node3D] = []
 	if not is_inside_tree():
 		return out
-	for h in Combat.hostiles_near(self, global_position, radius + margin, Combat.Faction.PLAYER):
+	for h in Combat.hostiles_near(self, global_position, radius + margin, Combat.faction_of_corp(Corps.corp_of_node(self))):
 		if h is Ship:
 			out.append(h)
 	return out

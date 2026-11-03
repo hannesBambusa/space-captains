@@ -223,7 +223,7 @@ func remove(z: DefenseZone) -> void:
 		return
 	var back := maxi(z.budget, 0)
 	z.budget = 0
-	ContractBoard.release(back, "Zone budget refund")
+	ContractBoard.release(back, "Zone budget refund", Corps.economy(self))
 	zones.erase(z)
 	EventLog.post("%s removed%s" % [z.zone_name, ", %s cr of its budget came back" % Fmt.amount(back) if back > 0 else ""], EventLog.Kind.INFO)
 	z.queue_free()
@@ -243,7 +243,7 @@ func set_kill_bounty(z: DefenseZone, credits: int) -> void:
 ## Reserves [param credits] more for [param z]'s kill bounty. False when the
 ## player cannot pay it.
 func add_budget(z: DefenseZone, credits: int) -> bool:
-	if credits <= 0 or not ContractBoard.reserve(credits):
+	if credits <= 0 or not ContractBoard.reserve(credits, "zone budget", Corps.economy(self)):
 		return false
 	z.budget += credits
 	z.spent_noted = false
@@ -257,7 +257,7 @@ func withdraw_budget(z: DefenseZone, credits: int) -> int:
 	if back <= 0:
 		return 0
 	z.budget -= back
-	ContractBoard.release(back, "Zone budget refund")
+	ContractBoard.release(back, "Zone budget refund", Corps.economy(self))
 	_changed(z)
 	return back
 
@@ -348,7 +348,7 @@ func pay_defence(raider: Ship, killer: Node3D) -> int:
 	if raider.global_position.distance_to(sys.home_station.global_position) > DEFENCE_PAY_REACH:
 		return 0
 	var earners := earners_of(raider, killer)
-	if earners.is_empty() or not Economy.spend(defence_pay, PackedInt32Array(), Ledger.ZONES, "Defence pay"):
+	if earners.is_empty() or not Corps.economy(self).spend(defence_pay, PackedInt32Array(), Ledger.ZONES, "Defence pay"):
 		return 0
 	var parts := Economy.split_evenly(defence_pay, earners.size())
 	var names: PackedStringArray = []
@@ -357,7 +357,7 @@ func pay_defence(raider: Ship, killer: Node3D) -> int:
 		if parts[i] <= 0:
 			continue
 		s.captain.credits_earned += parts[i]
-		Economy.collect_fees(s.captain, parts[i])
+		Corps.economy(self).collect_fees(s.captain, parts[i])
 		names.append(s.captain.captain_name)
 		s.show_toast("+%d cr defence pay" % parts[i], Ship.TOAST_REWARD)
 		if s.brain:
@@ -386,7 +386,7 @@ func pay_kill(z: DefenseZone, raider: Ship, killer: Node3D) -> int:
 		var part := parts[i]
 		if part <= 0:
 			continue
-		var got := ContractBoard.pay_from_escrow(s, part)
+		var got := ContractBoard.pay_from_escrow(s, part, Corps.economy(self))
 		total += got
 		names.append(s.captain.captain_name if s.captain else s.get_display_name())
 		s.show_toast("+%d cr zone bounty" % got, Ship.TOAST_REWARD)

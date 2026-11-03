@@ -52,7 +52,7 @@ func _process(delta: float) -> void:
 		if not is_instance_valid(target) or not (target as Node3D).is_inside_tree():
 			continue
 		var m := _markers[target] as Node3D
-		var cs := ContractBoard.get_for_target(target as Node)
+		var cs := ContractBoard.get_for_target(target as Node, Corps.PLAYER)
 		if cs.is_empty():
 			continue
 		if not (target is AsteroidCluster):

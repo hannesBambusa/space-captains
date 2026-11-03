@@ -86,14 +86,15 @@ static func all(tree: SceneTree) -> Array[StationSupply]:
 static func water_use_per_minute(tree: SceneTree) -> float:
 	var total := 0.0
 	for s in all(tree):
-		total += s.water_per_minute
+		if Corps.corp_of_node(s) == Corps.PLAYER:
+			total += s.water_per_minute
 	return total
 
 
 ## Sim minutes the water stock lasts at the stations' use (INF: none used).
 static func water_minutes_left(tree: SceneTree) -> float:
 	var use := water_use_per_minute(tree)
-	return float(Economy.ore[Economy.Ore.WATER]) / use if use > 0.0 else INF
+	return float(Corps.player.economy.ore[Economy.Ore.WATER]) / use if use > 0.0 else INF
 
 
 ## Water the Factory must leave in stock for the stations:
@@ -203,7 +204,7 @@ func _tick() -> void:
 	_upkeep_carry -= due
 	var was_owed := owed > 0
 	owed += due
-	if owed > 0 and Economy.spend(owed, PackedInt32Array(), Ledger.UPKEEP, "Upkeep: %s" % station_name(), system_id()):
+	if owed > 0 and Corps.economy(self).spend(owed, PackedInt32Array(), Ledger.UPKEEP, "Upkeep: %s" % station_name(), system_id()):
 		upkeep_paid += owed
 		owed = 0
 		if was_owed:
@@ -211,11 +212,12 @@ func _tick() -> void:
 	elif owed > 0 and not was_owed:
 		EventLog.post("Upkeep for %s unpaid (%s cr): no hiring there until it is paid" % [station_name(), Fmt.amount(owed)],
 				EventLog.Kind.LOSS, _station_node())
-	_water_carry += water_per_minute * tick_interval / 60.0
+	# The rival corp's stations draw no water (its AI has no planet raids).
+	_water_carry += water_per_minute * tick_interval / 60.0 if Corps.corp_of_node(self) == Corps.PLAYER else 0.0
 	var need := floori(_water_carry)
 	if need > 0:
-		if Economy.ore[Economy.Ore.WATER] >= need:
-			Economy.add_ore_of(Economy.Ore.WATER, -need)
+		if Corps.economy(self).ore[Economy.Ore.WATER] >= need:
+			Corps.economy(self).add_ore_of(Economy.Ore.WATER, -need)
 			water_used += need
 			_water_carry -= need
 			if dry:
@@ -253,7 +255,7 @@ func take_hauling_fee(cargo: PackedInt32Array) -> PackedInt32Array:
 	var worth := roundi(value)
 	hauled_fee_value += worth
 	var w := get_parent() as SystemWorld
-	Economy.ledger.note_held(maxi(worth, 1), Ledger.HAULING, "Hauling fee: %s at %s" % [Economy.cost_text(fee), station_name()], Economy.credits,
+	Corps.economy(self).ledger.note_held(maxi(worth, 1), Ledger.HAULING, "Hauling fee: %s at %s" % [Economy.cost_text(fee), station_name()], Corps.economy(self).credits,
 			w.system_id if w else &"")
 	changed.emit()
 	return net
@@ -287,7 +289,7 @@ func tooltip_text() -> String:
 	var lines: PackedStringArray = [
 		"Upkeep: %d cr per minute from your credits (free the first %d min), paid so far %s cr%s." % [roundi(upkeep_per_minute),
 				roundi(free_upkeep_time / 60.0), Fmt.amount(upkeep_paid), ", %s cr owed: no hiring here until it is paid" % Fmt.amount(owed) if owed > 0 else ""],
-		"Water: %s per minute from your stock (%s left), used so far %s.%s" % [Fmt.amount(roundi(water_per_minute)), Fmt.amount(Economy.ore[Economy.Ore.WATER]),
+		"Water: %s per minute from your stock (%s left), used so far %s.%s" % [Fmt.amount(roundi(water_per_minute)), Fmt.amount(Corps.economy(self).ore[Economy.Ore.WATER]),
 				Fmt.amount(water_used), " Out of water: no hiring here, captains work at %d%% speed." % roundi(dry_work_speed * 100.0) if dry else ""],
 		"Hauling fee: %d%% of the ore landed here, so far %s (worth about %s cr)." % [roundi(hauling_fee * 100.0),
 				Economy.cost_text(hauled_fee) if not Economy.cost_text(hauled_fee).is_empty() else "none", Fmt.amount(hauled_fee_value)],

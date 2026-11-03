@@ -3,8 +3,10 @@ extends Node3D
 ## The look of one ship's warp hops (visuals only; ShipMover owns the hop).
 ## Made by Ship on the first warp (never headless), fed
 ## [method on_warp_changed] and [method update] from Ship's visuals.
-## - Spool: a thin charging ring across the drive fades in and pulses, a few
-##   drive sparks, and [method glow_boost] brightens and pulses the engines.
+## - Spool: the engines build up smoothly ([method glow_boost], an eased
+##   ramp, no pulsing) and small motes of light are drawn into the drive
+##   from around it (they ride with the ship), thickening as the charge
+##   fills. Held at full while the ship still lines up.
 ## - Jump-out: a flash and shock ring at the drive (WarpFx), the hull
 ##   stretches along its heading for [constant STRETCH_OUT] s, then hides.
 ## - In the hop: a thin tapered light trail (shaders/warp_trail.gdshader)
@@ -24,6 +26,8 @@ const STRETCH_IN := 0.42
 const STRETCH_LEN := 3.2
 const STRETCH_WIDTH := 0.5
 const FLARE_TIME := 0.9
+## Extra engine brightness at a full charge (1.0 = twice as bright).
+const SPOOL_GLOW := 0.6
 const TRAIL_MIN := 500.0
 const TRAIL_MAX := 4000.0
 ## Trail length per metre of camera distance.
@@ -42,7 +46,6 @@ var tint: Color = HudStyle.HOLO
 var _model: Node3D
 var _drive: Node3D
 var _trail: MeshInstance3D
-var _charge: MeshInstance3D
 var _sparks: CPUParticles3D
 var _state: ShipMover.Warp = ShipMover.Warp.IDLE
 var _pulse := 0.0
@@ -84,9 +87,11 @@ func _ready() -> void:
 		_spark_mesh = QuadMesh.new()
 		_spark_mesh.size = Vector2.ONE
 		_spark_mesh.material = _spark_mat
+		# Fade in from nothing, brightest on the way in, gone at the drive.
 		_spark_ramp = Gradient.new()
-		_spark_ramp.set_color(0, Color(1.0, 1.0, 1.0, 1.0))
+		_spark_ramp.set_color(0, Color(1.0, 1.0, 1.0, 0.0))
 		_spark_ramp.set_color(1, Color(1.0, 1.0, 1.0, 0.0))
+		_spark_ramp.add_point(0.45, Color(1.0, 1.0, 1.0, 0.9))
 	_trail = MeshInstance3D.new()
 	_trail.name = "WarpTrail"
 	_trail.mesh = WarpFx.quad()
@@ -99,36 +104,28 @@ func _ready() -> void:
 	_trail.set_instance_shader_parameter(&"trail_tint", tint)
 	_trail.set_instance_shader_parameter(&"trail_width", 0.8 + ship.hit_radius * 0.07)
 	add_child(_trail)
-	_charge = MeshInstance3D.new()
-	_charge.name = "DriveRing"
-	_charge.mesh = WarpFx.quad()
-	_charge.material_override = WarpFx.ring_material()
-	_charge.custom_aabb = WarpFx.CULL
-	_charge.visible = false
-	_charge.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_charge.layers = Ship.RENDER_LAYER
-	_charge.set_instance_shader_parameter(&"ring_tint", tint.lerp(Color.WHITE, 0.3))
-	_charge.set_instance_shader_parameter(&"ring_grow", 0.3)
-	add_child(_charge)
+	# Charge motes: born on a shell round the drive and pulled into it
+	# (negative radial acceleration), in the ship's own frame so they ride
+	# along instead of trailing behind a moving ship.
 	_sparks = CPUParticles3D.new()
-	_sparks.name = "DriveSparks"
+	_sparks.name = "DriveMotes"
 	_sparks.emitting = false
-	_sparks.amount = 14
-	_sparks.lifetime = 0.7
-	_sparks.local_coords = false
+	_sparks.amount = 22
+	_sparks.lifetime = 0.55
+	_sparks.local_coords = true
 	_sparks.mesh = _spark_mesh
-	_sparks.direction = Vector3(0.0, 0.0, 1.0)
-	_sparks.spread = 28.0
 	_sparks.gravity = Vector3.ZERO
-	_sparks.initial_velocity_min = 4.0 + ship.hit_radius * 0.6
-	_sparks.initial_velocity_max = 10.0 + ship.hit_radius * 1.6
-	_sparks.damping_min = 6.0
-	_sparks.damping_max = 12.0
-	_sparks.scale_amount_min = 0.35 + ship.hit_radius * 0.03
-	_sparks.scale_amount_max = 0.7 + ship.hit_radius * 0.06
-	_sparks.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
-	_sparks.emission_sphere_radius = ship.hit_radius * 0.15
-	_sparks.color = tint.lerp(Color.WHITE, 0.55)
+	_sparks.initial_velocity_min = 0.0
+	_sparks.initial_velocity_max = 0.0
+	_sparks.radial_accel_min = -ship.hit_radius * 9.0
+	_sparks.radial_accel_max = -ship.hit_radius * 14.0
+	_sparks.damping_min = 0.0
+	_sparks.damping_max = 0.0
+	_sparks.scale_amount_min = 0.12 + ship.hit_radius * 0.012
+	_sparks.scale_amount_max = 0.2 + ship.hit_radius * 0.02
+	_sparks.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE_SURFACE
+	_sparks.emission_sphere_radius = ship.hit_radius * 0.9
+	_sparks.color = tint.lerp(Color.WHITE, 0.4)
 	_sparks.color_ramp = _spark_ramp
 	_sparks.layers = Ship.RENDER_LAYER
 	_sparks.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -137,11 +134,13 @@ func _ready() -> void:
 	WarpFx.prewarm(ship)
 
 
-## Engine emission multiplier: charging pulse while spooling, a flare after drop-in.
+## Engine emission multiplier: a smooth build while spooling (eased, with a
+## faint fast shimmer near the top instead of a pulse), a flare after drop-in.
 func glow_boost() -> float:
 	var b := 1.0
 	if _state == ShipMover.Warp.SPOOL:
-		b = (1.0 + 1.4 * _charge_k) * (1.0 + 0.3 * _charge_k * sin(_pulse))
+		var e := _charge_k * _charge_k * (3.0 - 2.0 * _charge_k)
+		b = 1.0 + SPOOL_GLOW * e + 0.04 * e * sin(_pulse)
 	if _flare > 0.0:
 		var f := _flare / FLARE_TIME
 		b = maxf(b, 1.0 + 2.2 * f * f)
@@ -159,13 +158,14 @@ func on_warp_changed(state: ShipMover.Warp) -> void:
 	elif prev == ShipMover.Warp.WARP:
 		_drop_in()
 	if state != ShipMover.Warp.SPOOL:
-		_charge.visible = false
+		# Gone with the jump (or the cancel): no motes left hanging in space.
 		_sparks.emitting = false
+		_sparks.visible = false
 
 
 func _jump_out() -> void:
 	var fwd := -ship.global_basis.z
-	WarpFx.flash(ship, _drive_pos(), _burst_size(), tint.lerp(Color.WHITE, 0.25), 0.26, fwd)
+	WarpFx.flash(ship, _drive_pos(), _burst_size(), tint.lerp(Color.WHITE, 0.25), 0.18, fwd)
 	_jump_from = ship.global_position
 	_last_pos = _jump_from
 	_trail_len = 0.0
@@ -176,15 +176,16 @@ func _jump_out() -> void:
 
 func _drop_in() -> void:
 	var fwd := -ship.global_basis.z
-	WarpFx.flash(ship, ship.global_position + fwd * ship.hit_radius * 0.5, _burst_size(), tint.lerp(Color.WHITE, 0.25), 0.3, fwd)
+	WarpFx.flash(ship, ship.global_position + fwd * ship.hit_radius * 0.5, _burst_size(), tint.lerp(Color.WHITE, 0.25), 0.22, fwd)
 	_show_model()
 	_begin_stretch(true)
 	_flare = FLARE_TIME
 	_trail_fading = true
 
 
+## A tight flash: the hop reads from the stretch and the trail, not a bloom.
 func _burst_size() -> float:
-	return 6.0 + ship.hit_radius * 1.4
+	return 2.5 + ship.hit_radius * 0.55
 
 
 func _drive_pos() -> Vector3:
@@ -209,16 +210,15 @@ func _update_spool(dt: float) -> void:
 	if _state != ShipMover.Warp.SPOOL:
 		return
 	_charge_k = 1.0 - clampf(ship.mover.warp_timer / SpaceNav.WARP_SPOOL, 0.0, 1.0)
-	_pulse += dt * TAU * lerpf(1.5, 6.0, _charge_k)
+	_pulse += dt * TAU * 9.0
 	var k := _charge_k
-	_charge.visible = true
-	_charge.global_position = _drive_pos()
-	_charge.set_instance_shader_parameter(&"ring_normal", ship.global_basis.z)
-	_charge.set_instance_shader_parameter(&"ring_radius", ship.hit_radius * (0.32 + 0.14 * k) * (1.0 + 0.04 * sin(_pulse)))
-	_charge.set_instance_shader_parameter(&"ring_width", lerpf(0.08, 0.04, k))
-	_charge.set_instance_shader_parameter(&"ring_alpha", (0.06 + 0.45 * k * k) * (0.8 + 0.2 * sin(_pulse)))
 	_sparks.global_position = _drive_pos()
-	_sparks.emitting = k > 0.3
+	_sparks.visible = true
+	_sparks.emitting = k > 0.12
+	# Brighter motes as the charge fills.
+	var c := tint.lerp(Color.WHITE, 0.4)
+	c.a = clampf(0.2 + 0.8 * k, 0.0, 1.0)
+	_sparks.color = c
 
 
 func _begin_stretch(arriving: bool) -> void:

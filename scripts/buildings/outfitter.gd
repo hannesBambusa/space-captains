@@ -105,7 +105,7 @@ func block_reason(captain: Captain, m: ShipModule) -> String:
 		return "Needs %s rank" % Reputation.rank_name(Reputation.MAX_TIER.find(m.tier))
 	if factory() == null:
 		return "No Factory"
-	var locked := Research.module_lock_reason(m.id)
+	var locked := Corps.research(self).module_lock_reason(m.id)
 	if not locked.is_empty() and not (factory().rare_parts.has(m.id) and factory().stock_of(m) > 0):
 		return locked
 	if not is_stocked(m) and factory().stock_of(m) <= 0:
@@ -272,7 +272,7 @@ func sell(ship: Ship, m: ShipModule, context: String = "") -> ShipModule:
 	ship.loadout.set_module(m.slot, fitted)
 	ship.refit()
 	var income := roundi(float(price) * sale_share)
-	Economy.add_income(income, Ledger.OUTFITTER, "Module sales")
+	Corps.economy(self).add_income(income, Ledger.OUTFITTER, "Module sales")
 	total_sales += price
 	total_income += income
 	var sale := {"time": SimClock.time, "captain": cap.captain_name, "module": m.display_name, "tier": m.tier, "price": price, "income": income}

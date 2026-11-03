@@ -20,7 +20,8 @@ extends Ship
 
 ## Hover gap between the asteroid surface and the ship's centre, metres.
 @export var standoff_gap: float = 17.0
-## Distance from the ship's origin to the drill tip (nose, -Z), metres.
+## Distance from the ship's origin to the drill tip (nose, -Z), metres. Used
+## when the model has no [constant DRILL_NODE] empty.
 @export var nose_offset: float = 7.6
 ## Tangential spread of the asteroid search around the arrival point, metres.
 @export var search_spread: float = 300.0
@@ -35,7 +36,11 @@ static var _claims: Dictionary = {}
 var hold_fill: float = 0.0
 var hold_ore: int = -1
 
+const DRILL_NODE := "drill_point"
+
 var _beam: DrillBeam
+## Model empty the drill beam fires from (null: [member nose_offset]).
+var _drill_point: Node3D
 var _claim_key := ""
 var _rng := RandomNumberGenerator.new()
 
@@ -50,6 +55,7 @@ func _on_ready_ship() -> void:
 	_beam = DrillBeam.new()
 	_beam.name = "DrillBeam"
 	add_child(_beam)
+	_drill_point = _model.find_child(DRILL_NODE, true, false) as Node3D if _model else null
 
 
 func _exit_tree() -> void:
@@ -78,9 +84,10 @@ func job_begin(trip: CaptainBrain.Trip) -> bool:
 		# Search on the side of the thick clump this ship comes in from
 		# (cluster_side): a rock in that half means a short drop from the lane.
 		q.y = belt.global_position.y + cluster_side(belt) * belt.def.vertical_spread * 0.45
-		var found := belt.find_nearest_ore(q, mc.ore_type)
+		var held := claimed_rocks(belt)
+		var found := belt.find_nearest_ore(q, mc.ore_type, held)
 		if found < 0:
-			found = belt.find_nearest_ore(q, -1)
+			found = belt.find_nearest_ore(q, -1, held)
 		if found >= 0 and not _claims.has(_key(belt, found)):
 			idx = found
 			break
@@ -164,7 +171,8 @@ func job_work(trip: CaptainBrain.Trip, dt: float) -> bool:
 	if trip.progress >= 1.0:
 		var mc := trip.contract as MiningContract
 		if mc and is_instance_valid(mc.belt):
-			mc.belt.take_load()
+			# This rock's load: the rock itself goes (one rock per load).
+			mc.belt.take_load(trip.asteroid)
 		return true
 	return false
 
@@ -247,7 +255,7 @@ func _update_beam() -> void:
 	if ast.is_empty():
 		_beam.set_active(false)
 		return
-	var nose := global_transform * Vector3(0.0, 0.0, -nose_offset)
+	var nose := _drill_point.global_position if _drill_point else global_transform * Vector3(0.0, 0.0, -nose_offset)
 	var center: Vector3 = ast["position"]
 	var to_nose := (nose - center)
 	var contact := center + to_nose.normalized() * float(ast["radius"]) * 0.75
@@ -269,6 +277,16 @@ static func claims_on(belt: AsteroidCluster) -> int:
 		if k.begins_with(prefix):
 			n += 1
 	return n
+
+
+## Rock indices on [param belt] other miners hold: {index: true}.
+static func claimed_rocks(belt: AsteroidCluster) -> Dictionary:
+	var prefix := "%d:" % belt.get_instance_id()
+	var out := {}
+	for k: String in _claims:
+		if k.begins_with(prefix):
+			out[int(k.trim_prefix(prefix))] = true
+	return out
 
 
 static func _key(belt: AsteroidCluster, idx: int) -> String:

@@ -426,7 +426,7 @@ func _deliver() -> void:
 		# A forward station: the haulers keep their share (StationSupply).
 		var supply := StationSupply.of(self)
 		var landed := supply.take_hauling_fee(cargo) if supply else cargo
-		Economy.receive_cargo(landed, get_display_name())
+		Corps.economy(self).receive_cargo(landed, get_display_name())
 		total_delivered += n
 		show_toast("+%s" % load_text(), TOAST_DELIVERY)
 		if is_instance_valid(home) and home.get_service() is SalvageYard:

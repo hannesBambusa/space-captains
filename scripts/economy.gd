@@ -1,3 +1,4 @@
+class_name CorpEconomy
 extends Node
 ## Autoload "Economy". The player's resources: credits (pay contractors) and
 ## typed ore (iron, titanium, crystal: for building, tooling, and to sell to

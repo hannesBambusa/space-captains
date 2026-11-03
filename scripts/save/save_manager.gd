@@ -31,6 +31,9 @@ const MAGIC := "SCSAVE\n"
 
 ## Slot of the game being played ("" in the menu).
 var current_slot: String = ""
+## The running game was lost (its home destroyed): nothing saves any more.
+var game_lost := false
+const SETTINGS_PATH := "user://settings.cfg"
 ## Real seconds of unpaused play since the last save.
 var since_save: float = 0.0
 var _busy := false
@@ -96,10 +99,12 @@ func list_saves() -> Array[Dictionary]:
 	return out
 
 
-## The newest save, or {} when there is none.
+## The newest save that is not lost, or {} when there is none.
 func newest_save() -> Dictionary:
-	var list := list_saves()
-	return list[0] if not list.is_empty() else {}
+	for e in list_saves():
+		if not is_lost(String(e.get("slot", ""))):
+			return e
+	return {}
 
 
 ## "game_3" for the third game: one more than the highest slot number used.
@@ -193,6 +198,8 @@ static func write_file(slot: String, header: Dictionary, data: Dictionary) -> Er
 func save_game(slot: String = "") -> String:
 	if not in_game():
 		return "No game running"
+	if game_lost:
+		return "This game is lost"
 	if slot.is_empty():
 		if current_slot.is_empty():
 			current_slot = next_slot()
@@ -214,6 +221,28 @@ func save_game(slot: String = "") -> String:
 
 # --- Scenes -----------------------------------------------------------------------
 
+## The running game is lost (rival corporation plan, R7): its slot is
+## marked in user://settings.cfg [lost] and never saves or loads again.
+func mark_lost() -> void:
+	game_lost = true
+	if current_slot.is_empty():
+		return
+	var cfg := ConfigFile.new()
+	cfg.load(SETTINGS_PATH)
+	var lost: PackedStringArray = cfg.get_value("lost", "slots", PackedStringArray())
+	if not lost.has(current_slot):
+		lost.append(current_slot)
+	cfg.set_value("lost", "slots", lost)
+	cfg.save(SETTINGS_PATH)
+
+
+func is_lost(slot: String) -> bool:
+	var cfg := ConfigFile.new()
+	if cfg.load(SETTINGS_PATH) != OK:
+		return false
+	return (cfg.get_value("lost", "slots", PackedStringArray()) as PackedStringArray).has(slot)
+
+
 ## Starts a fresh game in a new slot.
 func new_game() -> void:
 	if _busy:
@@ -234,6 +263,8 @@ func new_game() -> void:
 func load_game(slot: String, backup: bool = false) -> String:
 	if _busy:
 		return "Busy"
+	if is_lost(slot):
+		return "This game was lost: its home station is destroyed. Start a new game."
 	var file := read_file(backup_of(slot) if backup else path_of(slot))
 	if not bool(file["ok"]):
 		return String(file["error"])
@@ -310,6 +341,7 @@ func _enter_game(data: Dictionary) -> void:
 
 ## Autoload state and static registries for a fresh scene.
 func _reset_globals() -> void:
+	game_lost = false
 	SaveIds.reset()
 	ContractBoard.reset()
 	SimClock.reset()
@@ -318,6 +350,8 @@ func _reset_globals() -> void:
 	EventLog.reset()
 	# A new network seed: a load puts the saved one back (apply_globals).
 	Sector.reset()
+	# After the network: the rival (per the New game setting) needs its seed.
+	Corps.reset()
 	MinerShip._claims.clear()
 	SalvagerShip._slots.clear()
 	CargoShuttle._pads.clear()

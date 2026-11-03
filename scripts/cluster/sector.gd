@@ -57,14 +57,18 @@ func _ready() -> void:
 	reset()
 
 
-## A new network with a new random seed, every system unknown.
+## A new network with a new random seed, every system unknown, with a
+## rival region per rival of the next new game (Corps.next_rival_count).
 func reset() -> void:
-	start(_rng.randi())
+	start(_rng.randi(), Corps.regions_for_new_game() if is_inside_tree() and get_node_or_null(^"/root/Corps") else 1)
 
 
-## Builds the network of [param net_seed] with fresh (empty) states.
-func start(net_seed: int) -> void:
-	network = ClusterNetwork.generate(net_seed)
+## Builds the network of [param net_seed] with fresh (empty) states and
+## [param regions] rival regions (1 to 3).
+func start(net_seed: int, regions: int = -1) -> void:
+	if regions < 1:
+		regions = network.rival_ids.size() if network and not network.rival_ids.is_empty() else 1
+	network = ClusterNetwork.generate(net_seed, regions)
 	states.clear()
 	transits.clear()
 	discoveries.clear()
@@ -98,7 +102,8 @@ func save_state() -> Dictionary:
 		var c := x.duplicate()
 		c["system"] = String(c["system"])
 		disc.append(c)
-	return {"seed": get_seed(), "generator_version": SystemGenerator.VERSION, "systems": sys, "transits": tr, "discoveries": disc}
+	return {"seed": get_seed(), "generator_version": SystemGenerator.VERSION, "regions": network.rival_ids.size() if network else 1,
+			"systems": sys, "transits": tr, "discoveries": disc}
 
 
 ## [param d]: the "cluster" key of a save. Empty (an older save): keeps the
@@ -106,7 +111,7 @@ func save_state() -> Dictionary:
 func load_state(d: Dictionary) -> void:
 	if d.is_empty() or not d.has("seed"):
 		return
-	start(int(d["seed"]))
+	start(int(d["seed"]), int(d.get("regions", 1)))
 	var version := int(d.get("generator_version", SystemGenerator.VERSION))
 	if version != SystemGenerator.VERSION:
 		push_warning("Sector: save made with generator v%d, regenerated with v%d (same seed, systems may differ)" % [version, SystemGenerator.VERSION])

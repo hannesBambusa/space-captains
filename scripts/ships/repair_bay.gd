@@ -106,7 +106,7 @@ static func end_session(ship: Ship) -> void:
 		return
 	ship.repair_session_paid = 0
 	var share := roundi(float(paid) * PLAYER_SHARE)
-	Economy.add_income(share, Ledger.REPAIRS, "Ship repairs")
+	Corps.economy(ship).add_income(share, Ledger.REPAIRS, "Ship repairs")
 	var who := ship.captain.captain_name if ship.captain else ship.get_display_name()
 	var note := "" if not needs_repair(ship) else ", %d%% hull (wallet empty)" % roundi(ship.hull_fraction() * 100.0)
 	EventLog.post("%s paid %d cr for repairs%s. Repairs: +%d cr" % [who, paid, note, share], EventLog.Kind.REWARD, ship, Vector3.INF, "repairs:" + who)

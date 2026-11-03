@@ -16,6 +16,15 @@
 #   --colony (with --forward, or alone): two Forward Stations built at home
 #   and flown with escorts to their planets (one live, one as data), reloads
 #   while parked, waiting and in transit (own summary).
+#   --rivals=N: N rival corps (1 to 3), implies --rival.
+#   --rival: a rival corp (Normal) builds its colony at its home 4 to 5 jumps
+#   out; prints its money, buildings, captains, contracts, research and intel.
+#   --war (with --rival): contact at minute 2, war at 3, a player strike at 8,
+#   a peace proposal at 14; prints strikes, offers and the war feed.
+#   --eliminate (with --rival): war at 2, the rival HQ knocked out at 3; fails
+#   unless the scuttle destroys it and the rival is eliminated by minute 5.
+#   --expand (with --rival): the rival gets Forward operations and its charts
+#   at minute 1; fails unless it founds a forward station.
 set -u
 cd "$(dirname "$0")/.."
 GODOT="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
@@ -26,6 +35,8 @@ LONG=""
 FORWARD=""
 ROUNDTRIP=""
 COLONY=""
+RIVAL=""
+WAR=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--minutes) MINUTES="$2"; shift 2 ;;
@@ -36,10 +47,16 @@ while [ $# -gt 0 ]; do
 		--forward) FORWARD="--forward"; shift ;;
 		--save-roundtrip) ROUNDTRIP="--save-roundtrip"; shift ;;
 		--colony) COLONY="--colony"; shift ;;
+		--rival) RIVAL="--rival"; shift ;;
+		--rivals=*) RIVAL="$1"; shift ;;
+		--war) WAR="--war"; shift ;;
+		--eliminate) WAR="--eliminate"; shift ;;
+		--expand) WAR="--expand"; shift ;;
+		--lab) WAR="--lab"; shift ;;
 		*) echo "unknown arg: $1" >&2; exit 2 ;;
 	esac
 done
-OUT="$("$GODOT" --headless --path . res://tools/smoke_test.tscn -- --minutes="$MINUTES" $MULTI $EXPLORE $LONG $FORWARD $ROUNDTRIP $COLONY 2>&1)"
+OUT="$("$GODOT" --headless --path . res://tools/smoke_test.tscn -- --minutes="$MINUTES" $MULTI $EXPLORE $LONG $FORWARD $ROUNDTRIP $COLONY $RIVAL $WAR 2>&1)"
 CODE=$?
 echo "$OUT" | grep '^SMOKE'
 if echo "$OUT" | grep -q 'SCRIPT ERROR\|Parse Error'; then

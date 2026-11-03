@@ -255,9 +255,9 @@ static func deliver(ship: Ship, s: Dictionary) -> String:
 			sold += roundi(float(m.cost) * PART_SALE)
 	var text := loot_text(Array(ore), credits, parts)
 	if hold_used(s) > 0:
-		Economy.receive_cargo(ore, INCOME_SOURCE)
+		Corps.economy(ship).receive_cargo(ore, INCOME_SOURCE)
 	if credits + sold > 0:
-		Economy.add_income(credits + sold, INCOME_SOURCE, "Derelict salvage")
+		Corps.economy(ship).add_income(credits + sold, INCOME_SOURCE, "Derelict salvage")
 	var who := ship.captain.captain_name if ship and ship.captain else "An explorer"
 	var note := " (no Factory: parts sold for %s cr)" % Fmt.amount(sold) if sold > 0 else ""
 	EventLog.post("%s brought salvage home: %s%s" % [who, text, note], EventLog.Kind.REWARD, ship)

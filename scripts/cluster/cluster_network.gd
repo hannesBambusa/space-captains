@@ -10,7 +10,21 @@ extends RefCounted
 ## ship comes out of there.
 ##
 ## Danger 1..5 per system: depth + rand(-1..1), plus 1 for a third of the
-## depth-3 systems, clamped. The SystemDefs are generated with the network
+## depth-3 systems, clamped.
+##
+## The rival regions (rival corporation plan, R0 and M1): past the tree,
+## one per rival (1 to 3, [method generate]'s regions). Each is a chain
+## from a depth-3 system to that rival's home ([member rival_ids]) at depth 4
+## or 5 ([constant RIVAL_DEPTHS]), plus a few side systems at depth 4 to 5.
+## Each region starts from a different depth-3 system, the one farthest
+## from the homes placed before it (another branch first); when no free
+## depth-3 system is left, a connector system at depth 3 is added off a
+## depth-2 one in the branch with fewer homes. Every region has its own rng
+## and its systems come after the tree's in id order, so the tree, its
+## names and its dangers are the same as without them, and region 1 is the
+## same whatever the count (only the systems a region hangs off gain a
+## gate). A rival home has danger [constant RIVAL_HOME_DANGER] (bases there
+## raid the rival like home's raid the player). The SystemDefs are generated with the network
 ## (SystemGenerator; names unique across the network) and never saved: the
 ## same seed makes the same network and the same defs.
 
@@ -24,6 +38,15 @@ const MAX_REMOTE := 9
 const MAX_DEPTH := 3
 ## Gates per remote system at most (links to the parent, children, cross-link).
 const MAX_LINKS := 4
+## The rival home sits this many jumps out (one picked per seed).
+const RIVAL_DEPTHS := [4, 5]
+## Deepest system of the rival region.
+const REGION_MAX_DEPTH := 5
+## Side systems of the rival region (besides its chain).
+const REGION_EXTRA_MIN := 2
+const REGION_EXTRA_MAX := 3
+const RIVAL_HOME_DANGER := 2
+const MAX_REGIONS := 3
 
 
 ## One system of the network.
@@ -35,6 +58,8 @@ class Entry extends RefCounted:
 	## 0 = behind Ostra Gate, 1 = behind Kharon Gate, -1 = home.
 	var branch: int = -1
 	var parent: StringName = &""
+	## Part of a rival region (past the tree, see [member rival_ids]).
+	var region := false
 
 
 ## One jump lane: gate [member gate_a] in [member a] leads to gate
@@ -55,18 +80,28 @@ var systems: Dictionary = {}
 var links: Array[Link] = []
 ## SystemDef per id (home's is the loaded home_system.tres).
 var defs: Dictionary = {}
+## The rival corporations' home systems (depth 4 or 5), rival 1 first.
+var rival_ids: Array[StringName] = []
 
 var _rng := RandomNumberGenerator.new()
+var _regions := 1
 
 
 ## The network of [param net_seed] with every system's def.
-static func generate(net_seed: int) -> ClusterNetwork:
+## [param regions]: rival regions, 1 to 3 (the New game's rival count; 1 while Off).
+static func generate(net_seed: int, regions: int = 1) -> ClusterNetwork:
 	var n := ClusterNetwork.new()
+	n._regions = clampi(regions, 1, MAX_REGIONS)
 	n._build(net_seed)
 	return n
 
 
 # --- Queries ------------------------------------------------------------------
+
+## True for a rival corporation's home system.
+func is_rival_home(id: StringName) -> bool:
+	return rival_ids.has(id)
+
 
 func entry(id: StringName) -> Entry:
 	return systems.get(id) as Entry
@@ -173,7 +208,8 @@ func dump() -> String:
 	var lines: PackedStringArray = ["seed %d" % seed]
 	for id in ids:
 		var e := entry(id)
-		lines.append("sys %s %s depth %d danger %d branch %d parent %s" % [id, e.name, e.depth, e.danger, e.branch, e.parent])
+		lines.append("sys %s %s depth %d danger %d branch %d parent %s%s%s" % [id, e.name, e.depth, e.danger, e.branch, e.parent,
+				" region" if e.region else "", " rival" if rival_ids.has(id) else ""])
 	for l in links:
 		lines.append("link %s:%s <-> %s:%s%s" % [l.a, l.gate_a, l.b, l.gate_b, " cross" if l.cross else ""])
 	for id in remote_ids():
@@ -249,11 +285,112 @@ func _build(net_seed: int) -> void:
 		var e := entry(id)
 		var bonus := 1 if e.depth >= MAX_DEPTH and _rng.randf() < 0.35 else 0
 		e.danger = clampi(e.depth + _rng.randi_range(-1, 1) + bonus, 1, 5)
+	for r in _regions:
+		_rival_region(names, r)
 	# Defs in id order (the name allocator hands names out in that order).
 	for id in remote_ids():
 		var e := entry(id)
-		defs[id] = SystemGenerator.generate(seed, id, e.name, e.depth, e.danger, _gate_specs(id), names)
+		defs[id] = SystemGenerator.generate(seed, id, e.name, e.depth, e.danger, _gate_specs(id), names, rival_ids.has(id))
 	apply_home_gates()
+
+
+## Rival region [param r] (0 = rival 1): a chain from a depth-3 system to
+## its home, then side systems. Own rng per region (the tree above keeps its
+## draws; region 0 draws as it did alone); dangers set here.
+func _rival_region(names: NamePool.Allocator, r: int) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("rival:%d" % seed) if r == 0 else hash("rival:%d:%d" % [seed, r])
+	var roots: Array[StringName] = []
+	for id in ids:
+		var e := entry(id)
+		if e.depth == MAX_DEPTH and not e.region and neighbours(id).size() < MAX_LINKS and not _region_root(id):
+			roots.append(id)
+	var at: StringName = &""
+	if r == 0:
+		if roots.is_empty():
+			push_error("ClusterNetwork: no depth-%d system for the rival region (seed %d)" % [MAX_DEPTH, seed])
+			return
+		at = roots[rng.randi_range(0, roots.size() - 1)]
+	else:
+		# The root farthest from the homes so far; none left: a connector.
+		var best_d := -1
+		for id in roots:
+			var d := 99
+			for h in rival_ids:
+				d = mini(d, path(id, h).size() - 1)
+			if d > best_d:
+				best_d = d
+				at = id
+		if at.is_empty():
+			at = _connector(names, rng)
+		if at.is_empty():
+			push_error("ClusterNetwork: no room for rival region %d (seed %d)" % [r + 1, seed])
+			return
+	_roots.append(at)
+	var want: int = RIVAL_DEPTHS[rng.randi_range(0, RIVAL_DEPTHS.size() - 1)]
+	var chain: Array[StringName] = []
+	while entry(at).depth < want:
+		var p := entry(at)
+		var e := _add(_next_id(), names.take(&"system"), p.depth + 1, p.branch, at)
+		e.region = true
+		e.danger = clampi(e.depth - 1 + rng.randi_range(-1, 1), 2, 5)
+		_link(at, e.id)
+		chain.append(e.id)
+		at = e.id
+	rival_ids.append(at)
+	entry(at).danger = RIVAL_HOME_DANGER
+	# Side systems: off the chain (not the rival home) and off depth-3 systems.
+	var extra := rng.randi_range(REGION_EXTRA_MIN, REGION_EXTRA_MAX)
+	for i in extra:
+		var cands: Array[StringName] = []
+		for id in ids:
+			var e := entry(id)
+			if rival_ids.has(id) or e.depth < MAX_DEPTH or e.depth >= REGION_MAX_DEPTH:
+				continue
+			if neighbours(id).size() >= MAX_LINKS - 1:
+				continue
+			cands.append(id)
+		if cands.is_empty():
+			break
+		var parent: StringName = cands[rng.randi_range(0, cands.size() - 1)]
+		var pe := entry(parent)
+		var e := _add(_next_id(), names.take(&"system"), pe.depth + 1, pe.branch, parent)
+		e.region = true
+		e.danger = clampi(e.depth - 1 + rng.randi_range(-1, 1), 2, 5)
+		_link(parent, e.id)
+
+
+var _roots: Array[StringName] = []
+
+
+func _region_root(id: StringName) -> bool:
+	return _roots.has(id)
+
+
+## A new depth-3 system (part of a region) off a depth-2 tree system of the
+## branch with fewer rival homes, as a region's root. &"" when none has room.
+func _connector(names: NamePool.Allocator, rng: RandomNumberGenerator) -> StringName:
+	var per := [0, 0]
+	for h in rival_ids:
+		var b := entry(h).branch
+		if b >= 0:
+			per[b] += 1
+	var order := [0, 1] if per[0] <= per[1] else [1, 0]
+	for branch: int in order:
+		var cands: Array[StringName] = []
+		for id in ids:
+			var e := entry(id)
+			if e.branch == branch and e.depth == MAX_DEPTH - 1 and not e.region and neighbours(id).size() < MAX_LINKS:
+				cands.append(id)
+		if cands.is_empty():
+			continue
+		var parent: StringName = cands[rng.randi_range(0, cands.size() - 1)]
+		var e := _add(_next_id(), names.take(&"system"), MAX_DEPTH, branch, parent)
+		e.region = true
+		e.danger = clampi(MAX_DEPTH - 1 + rng.randi_range(-1, 1), 2, 5)
+		_link(parent, e.id)
+		return e.id
+	return &""
 
 
 func _add(id: StringName, system_name: String, d: int, branch: int, parent: StringName) -> Entry:

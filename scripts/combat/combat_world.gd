@@ -87,7 +87,10 @@ func _ready() -> void:
 	raids.name = "RaidDirector"
 	threats = ThreatDirector.new()
 	threats.name = "ThreatDirector"
-	if not is_home and w:
+	if not is_home and w and w.is_hq:
+		# A corp headquarters (the rival's) is raided like home.
+		threats.arrivals = false
+	elif not is_home and w:
 		raids.start_offset = float(w.station_site.get("founded_at", SimClock.time))
 		raids.first_raid_time = forward_raid_grace
 		var def := Sector.system_def(w.system_id)

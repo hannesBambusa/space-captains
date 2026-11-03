@@ -98,8 +98,11 @@ static func find(ctx: Node) -> Factory:
 	var f := Building.first_active_service(ctx, GROUP) as Factory
 	if f == null and ctx and ctx.is_inside_tree():
 		var w := SystemWorld.of(ctx)
-		if w and w.has_station and not w.is_home:
-			f = Building.first_active_service(SystemWorld.home(ctx.get_tree()), GROUP) as Factory
+		if w and w.has_station:
+			# The corp's headquarters (home for the player's forward stations).
+			var hq := Corps.hq_world(ctx.get_tree(), Corps.corp_of_system(w.system_id))
+			if hq and hq != w:
+				f = Building.first_active_service(hq, GROUP) as Factory
 	return f
 
 
@@ -313,7 +316,7 @@ func order_state_text(o: Dictionary) -> String:
 		"next":
 			return "next"
 		"tooling":
-			var locked := Research.module_lock_reason(m.id)
+			var locked := Corps.research(self).module_lock_reason(m.id)
 			return locked.to_lower() if not locked.is_empty() else "needs %s tooling" % ShipModule.TIER_NAMES[m.tier]
 		"ore":
 			return "waiting for %s" % _short_ore(ore_cost(m))
@@ -411,12 +414,12 @@ func _update_need() -> void:
 ## True when the Factory can make [param m]: researched, and tooled for it
 ## (or a rare part lets it).
 func can_make(m: ShipModule) -> bool:
-	return m != null and m.tier >= 1 and Research.is_module_unlocked(m.id) and (m.tier <= tooling_tier or rare_parts.get(m.id, "") == "stocked")
+	return m != null and m.tier >= 1 and Corps.research(self).is_module_unlocked(m.id) and (m.tier <= tooling_tier or rare_parts.get(m.id, "") == "stocked")
 
 
 ## Why [param m] is not being made, or "".
 func make_block_reason(m: ShipModule) -> String:
-	var locked := Research.module_lock_reason(m.id) if m else ""
+	var locked := Corps.research(self).module_lock_reason(m.id) if m else ""
 	if not locked.is_empty():
 		return locked
 	if not can_make(m):
@@ -446,7 +449,7 @@ func demand_rows(limit: int = 10) -> Array[Dictionary]:
 		var orders := orders_for(m)
 		var miss := float(misses.get(m.id, 0.0))
 		var rank := _role_rank(m, roles)
-		var wanted := stock_of(m) <= 0 and rank >= 0 and Reputation.max_tier_for(rank) >= m.tier and Research.is_module_unlocked(m.id)
+		var wanted := stock_of(m) <= 0 and rank >= 0 and Reputation.max_tier_for(rank) >= m.tier and Corps.research(self).is_module_unlocked(m.id)
 		if orders <= 0 and miss < 0.05 and not wanted:
 			continue
 		var score := float(orders) * 3.0 + miss + (0.5 if wanted else 0.0)
@@ -556,13 +559,13 @@ func tooling_block_reason() -> String:
 		return "Fully tooled"
 	if building and not building.is_active():
 		return "Finish construction first"
-	return Economy.shortfall_text(0, next_tooling_cost())
+	return Corps.economy(self).shortfall_text(0, next_tooling_cost())
 
 
 func upgrade_tooling() -> bool:
 	if not tooling_block_reason().is_empty():
 		return false
-	if not Economy.spend(0, next_tooling_cost()):
+	if not Corps.economy(self).spend(0, next_tooling_cost()):
 		return false
 	tooling_tier += 1
 	_log("Tooled for %s" % ShipModule.TIER_NAMES[tooling_tier])

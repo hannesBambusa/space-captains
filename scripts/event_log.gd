@@ -27,6 +27,14 @@ var _last_by_text: Dictionary = {}
 ## keeps one "attacked" line per captain per window wherever the fight moves.
 ## [param faction] tags a line about a hostile faction (FactionDef id).
 func post(text: String, kind: Kind = Kind.INFO, target: Node3D = null, position: Vector3 = Vector3.INF, key: String = "", faction: StringName = &"") -> void:
+	# The rival corp's own news goes to its private intel, not the feed.
+	var rid := _rival_of(target) if not public_next else &""
+	if not rid.is_empty():
+		var r := Corps.rival(rid)
+		if r and r.mind:
+			r.mind.note(text)
+		return
+	public_next = false
 	var now := SimClock.time
 	var k := text if key.is_empty() else key
 	if _last_by_text.has(k) and now - float(_last_by_text[k]) < repeat_window:
@@ -43,6 +51,33 @@ func post(text: String, kind: Kind = Kind.INFO, target: Node3D = null, position:
 	if entries.size() > MAX_ENTRIES:
 		entries.remove_at(0)
 	posted.emit(e)
+
+
+## The next [method post] reaches the feed even when it is about the rival
+## (RivalCorp's own announcements: first contact, war, treaties).
+var public_next := false
+
+
+## Posts [param text] to the feed even when [param target] is the rival's.
+func post_public(text: String, kind: Kind = Kind.INFO, target: Node3D = null, key: String = "") -> void:
+	public_next = true
+	post(text, kind, target, Vector3.INF, key)
+	public_next = false
+
+
+## The rival a line is about, &"" for the player's feed: its own ships and
+## structures, raiders in its system with no owner, or anything a rival's
+## AI starts with no target (Corps.acting).
+static func _rival_of(target: Node3D) -> StringName:
+	if not Corps.has_rival():
+		return &""
+	if not is_instance_valid(target):
+		return Corps.acting if Corps.is_rival(Corps.acting) else &""
+	var o := Corps.owner_of(target)
+	if Corps.is_rival(o):
+		return o
+	var c := Corps.corp_of_node(target)
+	return c if o.is_empty() and Corps.is_rival(c) else &""
 
 
 ## The system [param n] is in (its viewport's SystemWorld), home without one.

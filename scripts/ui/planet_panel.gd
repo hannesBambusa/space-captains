@@ -276,7 +276,7 @@ func _rebuild_contracts() -> void:
 	for c in _contracts.get_children():
 		_contracts.remove_child(c)
 		c.queue_free()
-	var list := ContractBoard.get_for_target(planet)
+	var list := ContractBoard.get_for_target(planet, Corps.PLAYER)
 	_contracts_header.text = "CONTRACTS  %d" % list.size()
 	if list.is_empty():
 		_contracts.add_child(UIUtil.label("None posted. Landers only raid worlds with a contract.", &"DimLabel"))

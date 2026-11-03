@@ -18,12 +18,15 @@ extends Orbiter
 ## toward the rim), so ships cross it in a lane over or under
 ## ([method lane_altitude]).
 ##
-## Depletion: it holds [member loads_left] loads ([method ClusterDef.get_reserve]).
-## Each drilled load takes one ([method take_load]); the rocks thin out in the
-## shaders as it empties (asteroids whose seed is under [member thin_level]
-## shrink away and are skipped by the queries). The last load emits
-## [signal depleted]; the cluster then fades out over [constant FADE_TIME]
-## sim seconds and emits [signal faded] (SolarSystem removes it).
+## Depletion: it holds [member loads_left] loads ([method ClusterDef.get_reserve])
+## and exactly one rock per load: every rock you see can be mined, and each
+## drilled load removes its own rock ([method take_load] with the rock a
+## miner drilled; it shrinks away in the shaders and the queries skip it).
+## The rocks are [constant ROCK_SCALE] times the def's sizes so a field of
+## 25 to 100 still reads. Which rocks are gone is saved ([method gone_list]).
+## The last load emits [signal depleted]; the dust then fades out over
+## [constant FADE_TIME] sim seconds and it emits [signal faded]
+## (SolarSystem removes it).
 
 signal depleted(belt: AsteroidCluster)
 signal faded(belt: AsteroidCluster)
@@ -41,11 +44,13 @@ const DUST_SIDE_SHARE := 0.22
 const CHUNK_SIZE := 600.0
 ## Thinning share reached just before the last load (the rest goes in the fade).
 const THIN_MAX := 0.8
+## Rock sizes over the def's (one rock per load: fewer, bigger rocks).
+const ROCK_SCALE := 2.2
+## The shaders' thinning level while any rock is gone: rocks keep their seed
+## above it, a removed rock gets seed 0 and shrinks away.
+const GONE_LEVEL := 0.01
 ## Sim seconds a mined-out cluster takes to fade away.
 const FADE_TIME := 12.0
-## A picked rock's seed sits this far above the thinning level, so it stays
-## visible for the next few loads.
-const PICK_MARGIN := 0.08
 ## Hostile bases within this flat distance of the cluster's edge add their
 ## danger bonus, metres.
 const DEN_REACH := 6000.0
@@ -85,6 +90,12 @@ var _chunk_offsets := PackedInt32Array()
 var _grid := 1
 var _chunk_count := 0
 var _variant_names: Array[String] = []
+## 1 per removed rock (mined out).
+var _gone := PackedByteArray()
+## Each rock's mesh MultiMesh and its instance there, for removing it.
+var _rock_mm: Array[MultiMesh] = []
+var _rock_slot := PackedInt32Array()
+var _glint_mm: MultiMesh
 var _dust_mats: Array[ShaderMaterial] = []
 var _glint_mat: ShaderMaterial
 var _mesh_nodes: Array[MultiMeshInstance3D] = []
@@ -128,20 +139,63 @@ func has_ore_for_new_trip() -> bool:
 	return not is_depleted and loads_left - MinerShip.claims_on(self) > 0
 
 
-## One drilled load leaves the rock. The last one starts the fade.
-func take_load() -> void:
+## One drilled load: rock [param rock] (the one the miner drilled; -1 or one
+## already gone: another one) disappears. The last one starts the fade.
+func take_load(rock: int = -1) -> void:
 	if is_depleted:
 		return
 	loads_left = maxi(loads_left - 1, 0)
+	if rock < 0 or rock >= _gone.size() or _gone[rock] != 0:
+		rock = _any_rock()
+	_remove_rock(rock)
 	_apply_thin_from_loads()
 	if loads_left <= 0:
 		_start_fade()
 
 
-## Restores the depletion state (save / load).
-func set_loads_left(left: int, total: int) -> void:
+## Indices of the rocks that are gone (for the save).
+func gone_list() -> PackedInt32Array:
+	var out := PackedInt32Array()
+	for i in _gone.size():
+		if _gone[i] != 0:
+			out.append(i)
+	return out
+
+
+func _any_rock() -> int:
+	for i in range(_gone.size() - 1, -1, -1):
+		if _gone[i] == 0:
+			return i
+	return -1
+
+
+func _remove_rock(i: int) -> void:
+	if i < 0 or i >= _gone.size() or _gone[i] != 0:
+		return
+	_gone[i] = 1
+	_keys[i] = 0.0
+	var mm: MultiMesh = _rock_mm[i] if i < _rock_mm.size() else null
+	if mm:
+		var c := mm.get_instance_custom_data(_rock_slot[i])
+		c.a = 0.0
+		mm.set_instance_custom_data(_rock_slot[i], c)
+	if _glint_mm:
+		var g := _glint_mm.get_instance_custom_data(i)
+		g.a = 0.0
+		_glint_mm.set_instance_custom_data(i, g)
+
+
+## Restores the depletion state (save / load). [param gone]: the rocks
+## already mined; without the list (older saves) rocks from the end go, as
+## many as the loads taken.
+func set_loads_left(left: int, total: int, gone: PackedInt32Array = PackedInt32Array()) -> void:
 	reserve = maxi(total, 1)
 	loads_left = clampi(left, 0, reserve)
+	for i in gone:
+		_remove_rock(i)
+	var extra := (_gone.size() - gone_list().size()) - loads_left
+	for k in maxi(extra, 0):
+		_remove_rock(_any_rock())
 	_apply_thin_from_loads()
 	if loads_left <= 0:
 		_start_fade()
@@ -151,8 +205,12 @@ func fill_fraction() -> float:
 	return float(loads_left) / float(maxi(reserve, 1))
 
 
+## The removed rocks hide through their own seeds; the dust thins with the loads.
 func _apply_thin_from_loads() -> void:
-	_set_thin((1.0 - fill_fraction()) * THIN_MAX)
+	_set_thin(GONE_LEVEL if loads_left < reserve else 0.0)
+	var amount := clampf(0.25 + 0.75 * fill_fraction(), 0.0, 1.0)
+	for m in _dust_mats:
+		m.set_shader_parameter("amount", amount)
 
 
 func _start_fade() -> void:
@@ -169,13 +227,15 @@ func _set_thin(level: float) -> void:
 		mmi.set_instance_shader_parameter("thin_level", level)
 	if _glint_mat:
 		_glint_mat.set_shader_parameter("thin_level", level)
-	var amount := clampf(1.0 - level, 0.0, 1.0)
-	for m in _dust_mats:
-		m.set_shader_parameter("amount", amount)
+	if level > THIN_MAX:
+		# The fade after the last load: the dust goes too.
+		var amount := clampf(1.0 - level, 0.0, 1.0) * 0.25 / maxf(1.0 - THIN_MAX, 0.01)
+		for m in _dust_mats:
+			m.set_shader_parameter("amount", amount)
 
 
 func _is_shown(i: int) -> bool:
-	return thin_level <= 0.0 or _keys[i] >= thin_level
+	return _gone[i] == 0 and not (is_depleted and thin_level > THIN_MAX)
 
 
 # --- Danger -------------------------------------------------------------------
@@ -234,19 +294,16 @@ func get_asteroid_position(i: int) -> Vector3:
 	return global_transform * _positions[i]
 
 
-## Index of the nearest ore-bearing asteroid to [param world_pos] that is
-## still shown (and stays so for a few loads), or -1. [param ore] = -1
-## matches any ore (not plain rock).
-func find_nearest_ore(world_pos: Vector3, ore: int = -1) -> int:
+## Index of the nearest rock still there to [param world_pos], or -1.
+## [param ore] = -1 matches any ore. [param skip]: rock indices to leave out
+## (the ones other miners hold).
+func find_nearest_ore(world_pos: Vector3, ore: int = -1, skip: Dictionary = {}) -> int:
 	var lp := global_transform.affine_inverse() * world_pos
 	var best := -1
 	var best_d2 := INF
-	var margin := PICK_MARGIN if thin_level > 0.0 else 0.0
 	for i in _positions.size():
 		var o := _ores[i]
-		if o == OreType.ROCK or (ore >= 0 and o != ore):
-			continue
-		if margin > 0.0 and _keys[i] < thin_level + margin:
+		if _gone[i] != 0 or skip.has(i) or (ore >= 0 and o != ore):
 			continue
 		var d2 := lp.distance_squared_to(_positions[i])
 		if d2 < best_d2:
@@ -362,7 +419,8 @@ func _chunk_center(ci: int) -> Vector3:
 ## thin halo, then stores them sorted by chunk. Returns the per-asteroid
 ## rotation/custom data needed for the meshes, in sorted order.
 func _generate() -> Dictionary:
-	var n := maxi(def.get_count(), 0)
+	# One rock per load (see the class notes).
+	var n := maxi(def.get_reserve(), 1)
 	var big_r := def.radius()
 	_grid = maxi(1, ceili(def.size / CHUNK_SIZE))
 	_chunk_count = _grid * _grid
@@ -382,8 +440,8 @@ func _generate() -> Dictionary:
 	var halo_share := 0.22
 
 	var ore_fraction := get_ore_fraction()
-	var lo := minf(def.min_scale, def.max_scale)
-	var hi := maxf(def.min_scale, def.max_scale)
+	var lo := minf(def.min_scale, def.max_scale) * ROCK_SCALE
+	var hi := maxf(def.min_scale, def.max_scale) * ROCK_SCALE
 	var rock_count := AsteroidBelt.ROCK_VARIANTS.size()
 	var vs := def.vertical_spread
 
@@ -433,9 +491,10 @@ func _generate() -> Dictionary:
 		var s := lerpf(lo, hi, pow(rng.randf(), size_bias))
 		rad[i] = s
 		_layer_height = maxf(_layer_height, absf(y) + s)
+		# Every rock holds a load: all of them carry ore.
 		var ore := OreType.ROCK
 		var v := rng.randi() % rock_count
-		if rng.randf() < ore_fraction:
+		if def.ore_type != OreType.ROCK or rng.randf() < ore_fraction:
 			ore = def.ore_type
 			if def.secondary_ore != OreType.ROCK and rng.randf() < def.secondary_share:
 				ore = def.secondary_ore
@@ -454,7 +513,8 @@ func _generate() -> Dictionary:
 		customs[i * 4] = rng.randf()
 		customs[i * 4 + 1] = rng.randf()
 		customs[i * 4 + 2] = spin
-		customs[i * 4 + 3] = rng.randf()
+		# The seed stays above the shaders' GONE_LEVEL; a removed rock gets 0.
+		customs[i * 4 + 3] = rng.randf_range(0.05, 1.0)
 		var cell := _cell_of(pos[i])
 		var ci := cell.x + cell.y * _grid
 		chunk[i] = ci
@@ -478,6 +538,10 @@ func _generate() -> Dictionary:
 	_ores.resize(n)
 	_variants.resize(n)
 	_keys.resize(n)
+	_gone.resize(n)
+	_gone.fill(0)
+	_rock_mm.resize(n)
+	_rock_slot.resize(n)
 	var s_quats := PackedFloat32Array()
 	s_quats.resize(n * 4)
 	var s_customs := PackedFloat32Array()
@@ -560,6 +624,9 @@ func _build_chunks(data: Dictionary) -> void:
 			mm.mesh = meshes[v]
 			mm.instance_count = ids.size()
 			mm.buffer = buf
+			for j in ids.size():
+				_rock_mm[ids[j]] = mm
+				_rock_slot[ids[j]] = j
 			var mmi := MultiMeshInstance3D.new()
 			mmi.name = _variant_names[v]
 			mmi.multimesh = mm
@@ -611,6 +678,7 @@ func _build_glints(star_position: Vector3, star_color: Color) -> void:
 	mm.mesh = quad
 	mm.instance_count = n
 	mm.buffer = buf
+	_glint_mm = mm
 	var mmi := MultiMeshInstance3D.new()
 	mmi.name = "Glints"
 	mmi.multimesh = mm

@@ -87,6 +87,7 @@ func post(contract: Contract) -> Contract:
 	contract.created_time = SimClock.time
 	contract.status = Contract.Status.OPEN
 	contract.system_id = _system_of(contract)
+	contract.corp = Corps.acting
 	contract.changed.connect(_on_contract_changed)
 	contracts.append(contract)
 	Sfx.ui(&"contract_posted")
@@ -104,11 +105,12 @@ func post_mining(belt: AsteroidCluster, credits_per_load: int, max_loads: int = 
 ## reward) cannot be posted now, or "". [param reserved] = a bounty, paid
 ## in full now.
 func post_problem(credits: int, reserved: bool = false) -> String:
-	if credits <= 0 or Economy.credits >= credits:
+	var eco := Corps.acting_economy()
+	if credits <= 0 or eco.credits >= credits:
 		return ""
 	if reserved:
-		return "Needs %s cr: a bounty is reserved from your credits when posted (you have %s)" % [Fmt.amount(credits), Fmt.amount(Economy.credits)]
-	return "Needs %s cr: you must be able to pay one %s (you have %s)" % [Fmt.amount(credits), "payment", Fmt.amount(Economy.credits)]
+		return "Needs %s cr: a bounty is reserved from your credits when posted (you have %s)" % [Fmt.amount(credits), Fmt.amount(eco.credits)]
+	return "Needs %s cr: you must be able to pay one %s (you have %s)" % [Fmt.amount(credits), "payment", Fmt.amount(eco.credits)]
 
 
 ## Bounty on a scavenger ship or den. Completes when the target dies. The
@@ -122,7 +124,7 @@ func post_bounty(on_target: Node3D, credits: int, max_takers: int = 3) -> Bounty
 	if have:
 		return have if credits == have.reward or update_bounty(have, credits) else null
 	credits = maxi(credits, 0)
-	if not post_problem(credits, true).is_empty() or not Economy.spend(credits, PackedInt32Array(), Ledger.ESCROW, "Reserved: bounty on %s" % _name_of(on_target)):
+	if not post_problem(credits, true).is_empty() or not Corps.acting_economy().spend(credits, PackedInt32Array(), Ledger.ESCROW, "Reserved: bounty on %s" % _name_of(on_target)):
 		return null
 	var c := BountyContract.new(on_target, credits, max_takers)
 	c.escrow = credits
@@ -131,11 +133,14 @@ func post_bounty(on_target: Node3D, credits: int, max_takers: int = 3) -> Bounty
 	return c
 
 
-## The open bounty on [param target], or null.
-func bounty_on(target: Node) -> BountyContract:
+## The open bounty of [param corp] on [param target] (one per corp and
+## target; "" = the acting corp's), or null.
+func bounty_on(target: Node, corp: StringName = &"") -> BountyContract:
+	if corp.is_empty():
+		corp = Corps.acting
 	for c in contracts:
 		var bc := c as BountyContract
-		if bc and bc.target == target and not bc.is_finished():
+		if bc and bc.target == target and bc.corp == corp and not bc.is_finished():
 			return bc
 	return null
 
@@ -147,8 +152,8 @@ func update_problem(bc: BountyContract, credits: int) -> String:
 	var diff := maxi(credits, 0) - bc.reward
 	if diff < 0 and bc.is_taken():
 		return UPDATE_TAKEN
-	if diff > 0 and Economy.credits < diff:
-		return "Needs %s cr more: the raise is reserved from your credits now (you have %s)" % [Fmt.amount(diff), Fmt.amount(Economy.credits)]
+	if diff > 0 and bc.eco().credits < diff:
+		return "Needs %s cr more: the raise is reserved from your credits now (you have %s)" % [Fmt.amount(diff), Fmt.amount(bc.eco().credits)]
 	return ""
 
 
@@ -165,10 +170,10 @@ func update_bounty(bc: BountyContract, credits: int) -> bool:
 		return false
 	var tname := bc.get_target_name()
 	if diff > 0:
-		if not reserve(diff, "bounty raised on %s +%d" % [tname, diff]):
+		if not reserve(diff, "bounty raised on %s +%d" % [tname, diff], bc.eco()):
 			return false
 	else:
-		release(-diff, "bounty lowered on %s" % tname)
+		release(-diff, "bounty lowered on %s" % tname, bc.eco())
 	bc.reward = credits
 	bc.escrow += diff
 	EventLog.post("Bounty on %s %s to %s cr" % [tname, "raised" if diff > 0 else "lowered", Fmt.amount(credits)], EventLog.Kind.INFO,
@@ -193,7 +198,7 @@ func merge_duplicate_bounties() -> int:
 		var bc := c as BountyContract
 		if bc == null or bc.is_finished() or not is_instance_valid(bc.target):
 			continue
-		var id := bc.target.get_instance_id()
+		var id := "%d|%s" % [bc.target.get_instance_id(), bc.corp]
 		if not first.has(id):
 			first[id] = bc
 			continue
@@ -233,7 +238,7 @@ func explore_escrow_total() -> int:
 	var t := 0
 	for c in contracts + held:
 		var ec := c as ExploreContract
-		if ec and (not ec.is_finished() or held.has(ec)):
+		if ec and ec.corp == Corps.PLAYER and (not ec.is_finished() or held.has(ec)):
 			t += ec.escrow
 	return t
 
@@ -243,15 +248,18 @@ func bounty_escrow_total() -> int:
 	var t := 0
 	for c in contracts:
 		var bc := c as BountyContract
-		if bc and not bc.is_finished():
+		if bc and bc.corp == Corps.PLAYER and not bc.is_finished():
 			t += bc.escrow
 	return t
 
 
-## Credits held in defence zone kill budgets (DefenseZones), every system.
+## The player's credits held in defence zone kill budgets (DefenseZones),
+## every system of its own (a rival's zones hold the rival's).
 func zone_escrow_total() -> int:
 	var t := 0
 	for w in SystemWorld.all(get_tree()):
+		if w.corp_id != Corps.PLAYER:
+			continue
 		var zones := DefenseZones.of(w)
 		t += zones.budget_total() if zones else 0
 	return t
@@ -260,15 +268,21 @@ func zone_escrow_total() -> int:
 ## Reserves [param credits] from the player's credits into an escrow held
 ## outside a contract (defence zone budgets). False when they cannot pay.
 ## [param what] names it in the ledger ("Reserved: zone budget").
-func reserve(credits: int, what: String = "zone budget") -> bool:
-	return credits <= 0 or (Economy.credits >= credits and Economy.spend(credits, PackedInt32Array(), Ledger.ESCROW, "Reserved: " + what))
+## [param eco]: whose credits (null = the acting corp's).
+func reserve(credits: int, what: String = "zone budget", eco: CorpEconomy = null) -> bool:
+	if eco == null:
+		eco = Corps.acting_economy()
+	return credits <= 0 or (eco.credits >= credits and eco.spend(credits, PackedInt32Array(), Ledger.ESCROW, "Reserved: " + what))
 
 
 ## Gives [param credits] of an escrow back to the player (bounties,
 ## defence zone budgets; nothing for 0). [param source] is the ledger
 ## label after "Returned: ".
-func release(credits: int, source: String) -> void:
-	Economy.add_income(credits, Ledger.ESCROW, "Returned: " + source.to_lower())
+## [param eco]: whose credits (null = the acting corp's).
+func release(credits: int, source: String, eco: CorpEconomy = null) -> void:
+	if eco == null:
+		eco = Corps.acting_economy()
+	eco.add_income(credits, Ledger.ESCROW, "Returned: " + source.to_lower())
 
 
 ## A target's name for the ledger.
@@ -322,7 +336,7 @@ func explore_problem(from: StringName, gate: String) -> String:
 ## [param exit]: the target's gate to leave by ("" = the way in).
 func post_explore(from: StringName, gate: String, credits: int, exit: String = "") -> ExploreContract:
 	credits = maxi(credits, 0)
-	if not explore_problem(from, gate).is_empty() or not post_problem(credits, true).is_empty() or not Economy.spend(credits, PackedInt32Array(), Ledger.ESCROW, "Reserved: explore %s" % gate):
+	if not explore_problem(from, gate).is_empty() or not post_problem(credits, true).is_empty() or not Corps.acting_economy().spend(credits, PackedInt32Array(), Ledger.ESCROW, "Reserved: explore %s" % gate):
 		return null
 	var c := ExploreContract.new(from, gate, credits, exit)
 	c.escrow = credits
@@ -344,7 +358,7 @@ func deliver_survey(c: ExploreContract, ship: Ship, survey: Dictionary) -> int:
 	c.escrow -= pay
 	if pay > 0:
 		c.credits_paid += pay
-		Economy.note_escrow_pay(pay, Ledger.CONTRACT_PAY, c.get_title())
+		c.eco().note_escrow_pay(pay, Ledger.CONTRACT_PAY, c.get_title())
 		_credit_captain(ship, pay, c)
 	var back := maxi(c.escrow, 0)
 	c.escrow = 0
@@ -518,13 +532,14 @@ func pay_captain(ship: Ship, amount: int, contract: Contract = null) -> int:
 	if bc:
 		pay = mini(amount, maxi(bc.escrow, 0))
 		bc.escrow -= pay
-		Economy.note_escrow_pay(pay, Ledger.BOUNTIES, bc.get_title())
+		bc.eco().note_escrow_pay(pay, Ledger.BOUNTIES, bc.get_title())
 	else:
-		pay = mini(amount, maxi(Economy.credits, 0))
+		var eco := contract.eco() if contract else Corps.economy(ship)
+		pay = mini(amount, maxi(eco.credits, 0))
 		if pay < amount and contract:
 			note_short_pay(contract, amount, pay)
 		if pay > 0:
-			Economy.spend(pay, PackedInt32Array(), Ledger.CONTRACT_PAY, contract.get_title() if contract else "Captain pay")
+			eco.spend(pay, PackedInt32Array(), Ledger.CONTRACT_PAY, contract.get_title() if contract else "Captain pay")
 	if pay <= 0:
 		return 0
 	if contract:
@@ -536,18 +551,22 @@ func pay_captain(ship: Ship, amount: int, contract: Contract = null) -> int:
 ## Pays [param amount] that was already reserved outside a contract (a
 ## defence zone budget): nothing leaves the player's credits now, the
 ## station fee comes back as usual.
-func pay_from_escrow(ship: Ship, amount: int) -> int:
+func pay_from_escrow(ship: Ship, amount: int, eco: CorpEconomy = null) -> int:
 	if amount <= 0:
 		return 0
-	Economy.note_escrow_pay(amount, Ledger.ZONES, "Zone kill bounty")
-	_credit_captain(ship, amount, null)
+	if eco == null:
+		eco = Corps.economy(ship)
+	eco.note_escrow_pay(amount, Ledger.ZONES, "Zone kill bounty")
+	_credit_captain(ship, amount, null, eco)
 	return amount
 
 
-func _credit_captain(ship: Ship, pay: int, contract: Contract) -> void:
+func _credit_captain(ship: Ship, pay: int, contract: Contract, eco: CorpEconomy = null) -> void:
 	if ship and ship.captain:
 		ship.captain.credits_earned += pay
-		Economy.collect_fees(ship.captain, pay)
+		if eco == null:
+			eco = contract.eco() if contract else Corps.economy(ship)
+		eco.collect_fees(ship.captain, pay)
 	payout_made.emit(contract, ship, pay)
 
 
@@ -659,16 +678,17 @@ func _bounty_takers(bc: BountyContract) -> Array[Ship]:
 func _refund_escrow(bc: BountyContract, source: String) -> int:
 	var left := maxi(bc.escrow, 0)
 	bc.escrow = 0
-	release(left, source)
+	release(left, source, bc.eco())
 	return left
 
 
 ## Contracts a new taker could start on now, optionally of one type and
 ## in one system ([param system_id] "" = any).
-func get_available(type: int = -1, system_id: StringName = &"") -> Array[Contract]:
+## [param corp] "" = any corp's.
+func get_available(type: int = -1, system_id: StringName = &"", corp: StringName = &"") -> Array[Contract]:
 	var out: Array[Contract] = []
 	for c in contracts:
-		if (type < 0 or c.type == type) and (system_id.is_empty() or c.system_id == system_id) and c.is_available():
+		if (type < 0 or c.type == type) and (system_id.is_empty() or c.system_id == system_id) and (corp.is_empty() or c.corp == corp) and c.is_available():
 			out.append(c)
 	return out
 
@@ -683,14 +703,23 @@ static func _system_of(c: Contract) -> StringName:
 
 
 ## Open and active contracts (what the UI lists).
-func get_listed() -> Array[Contract]:
-	return contracts.duplicate()
-
-
-func get_for_target(target: Node) -> Array[Contract]:
+## [param corp]: whose (the player's by default: the UI lists only its own;
+## "" = every corp's).
+func get_listed(corp: StringName = Corps.PLAYER) -> Array[Contract]:
+	if corp.is_empty():
+		return contracts.duplicate()
 	var out: Array[Contract] = []
 	for c in contracts:
-		if c.target == target:
+		if c.corp == corp:
+			out.append(c)
+	return out
+
+
+## [param corp] "" = every corp's (the sim); the UI passes Corps.PLAYER.
+func get_for_target(target: Node, corp: StringName = &"") -> Array[Contract]:
+	var out: Array[Contract] = []
+	for c in contracts:
+		if c.target == target and (corp.is_empty() or c.corp == corp):
 			out.append(c)
 	return out
 
@@ -729,7 +758,7 @@ func deliver_salvage_load(contract: SalvageContract, ship: Node, scrap: int) -> 
 	var sorted := roundi(float(scrap) * SalvageContract.MATERIALS_PER_SCRAP * yield_mult)
 	var bonus := _pay_for_load(contract, roundi(float(contract.reward) * fraction))
 	if bonus > 0 and s and s.captain:
-		Economy.collect_fees(s.captain, bonus)
+		contract.eco().collect_fees(s.captain, bonus)
 	contract.credits_paid += bonus
 	var rare := ""
 	if scrap > 0 and s and SalvageContract.rng.randf() < contract.rare_chance:
@@ -745,7 +774,7 @@ func deliver_salvage_load(contract: SalvageContract, ship: Node, scrap: int) -> 
 	elif sorted > 0:
 		mat = sorted
 		var ti := roundi(float(mat) * SALVAGE_TITANIUM)
-		Economy.add(0, Economy.cost(mat - ti, ti))
+		contract.eco().add(0, Economy.cost(mat - ti, ti))
 	contract.materials_delivered += sorted
 	contract.finish_trip(ship, true)
 	delivery_made.emit(contract, ship, bonus, mat, -1)
@@ -777,11 +806,12 @@ func deliver_raid_load(contract: PlanetRaidContract, ship: Node, units: int, fra
 ## their credits; when short, the feed says so (see the class notes).
 ## Returns the credits paid.
 func _pay_for_load(contract: Contract, full_pay: int) -> int:
-	var pay := mini(full_pay, maxi(Economy.credits, 0))
+	var eco := contract.eco()
+	var pay := mini(full_pay, maxi(eco.credits, 0))
 	if pay < full_pay:
 		note_short_pay(contract, full_pay, pay)
 	if pay > 0:
-		Economy.spend(pay, PackedInt32Array(), Ledger.CONTRACT_PAY, contract.get_title())
+		eco.spend(pay, PackedInt32Array(), Ledger.CONTRACT_PAY, contract.get_title())
 	return pay
 
 
@@ -803,7 +833,7 @@ func _stock_materials(ship: Node, ore: int, amount: int) -> void:
 	if depot:
 		depot.add_stock(ore, amount)
 	else:
-		Economy.add_ore_of(ore as Economy.Ore, amount)
+		Corps.economy(ship).add_ore_of(ore as Economy.Ore, amount)
 
 
 ## The station's fee on [param pay], the trip ends, the escorts are paid.
@@ -811,7 +841,7 @@ func _stock_materials(ship: Node, ore: int, amount: int) -> void:
 func _finish_delivery(contract: LoadContract, ship: Node, pay: int, mat: int, ore: int) -> bool:
 	var s := ship as Ship
 	if s and s.captain and pay > 0:
-		Economy.collect_fees(s.captain, pay)
+		contract.eco().collect_fees(s.captain, pay)
 	contract.finish_trip(ship, true)
 	delivery_made.emit(contract, ship, pay, mat, ore)
 	return _pay_escorts(s, contract) > 0 if s else false

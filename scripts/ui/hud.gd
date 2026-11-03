@@ -75,6 +75,9 @@ var tutorial_card: TutorialCard
 var cluster_map: ClusterMap
 ## Built in code: the credit log (L), a centred overlay above the build bar.
 var ledger: LedgerPanel
+## The rival corporation (rival corporation plan): R or the top bar's RIVAL.
+var rival_panel: RivalPanel
+var treaty_card: TreatyCard
 
 ## Width of the right column (minimap, pilot list, selection panels).
 const RIGHT_WIDTH := 380.0
@@ -205,6 +208,14 @@ func _ready() -> void:
 	$Root.add_child(cluster_map)
 	cluster_map.setup(self)
 	top_bar.map_pressed.connect(cluster_map.toggle)
+	rival_panel = RivalPanel.new()
+	rival_panel.name = "RivalPanel"
+	$Root.add_child(rival_panel)
+	rival_panel.setup(self)
+	top_bar.rival_pressed.connect(rival_panel.toggle)
+	treaty_card = TreatyCard.new()
+	treaty_card.name = "TreatyCard"
+	$Root.add_child(treaty_card)
 	tutorial.setup(self)
 	tutorial_card.setup(self, tutorial)
 	get_viewport().size_changed.connect(_layout_right)
@@ -344,6 +355,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 	elif k and k.pressed and not k.echo and k.physical_keycode == KEY_L and not (k.ctrl_pressed or k.meta_pressed or k.alt_pressed):
 		ledger.toggle()
+		get_viewport().set_input_as_handled()
+	elif k and k.pressed and not k.echo and k.physical_keycode == KEY_R and Corps.has_rival() and not (k.ctrl_pressed or k.meta_pressed or k.alt_pressed):
+		rival_panel.toggle()
 		get_viewport().set_input_as_handled()
 
 

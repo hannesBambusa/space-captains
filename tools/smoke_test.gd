@@ -88,6 +88,28 @@ var long_run := false
 var forward := false
 var save_roundtrip := false
 var colony := false
+## --rival: a rival corp (Normal) in the game (rival corporation plan).
+var rival := false
+## --rivals=N: N rivals (1 to 3; implies --rival).
+var rival_count := 1
+## --rival --war: contact at minute 2, war at minute 3, a player strike at 8.
+var rival_war := false
+## --rival --eliminate: war at minute 2, the rival HQ knocked out at 3: the
+## scuttle must destroy it and the rival must be eliminated (victory).
+var rival_kill := false
+## --rival --expand: the rival has Forward operations, its charts and the
+## money at minute 1; it must found a forward station.
+var rival_expand := false
+## --rival --lab: the rival gets a finished Science Lab and money at minute 1.
+var rival_lab := false
+var _kill_log: PackedStringArray = []
+var _war_log: PackedStringArray = []
+var _station_low := 1.0
+## --rival --save-roundtrip: save and reload at this minute.
+const RIVAL_ROUNDTRIP_MINUTE := 8
+var _rival_rt := ""
+var _rival_rt_note := ""
+var _rival_rt_ok := true
 var net_seed := -1
 var _multi: PackedStringArray = []
 
@@ -150,6 +172,22 @@ func _ready() -> void:
 			colony = true
 		elif a.begins_with("--net-seed="):
 			net_seed = a.trim_prefix("--net-seed=").to_int()
+		elif a == "--rival":
+			rival = true
+		elif a.begins_with("--rivals="):
+			rival = true
+			rival_count = clampi(a.trim_prefix("--rivals=").to_int(), 1, 3)
+		elif a == "--war":
+			rival_war = true
+		elif a == "--eliminate":
+			rival_kill = true
+		elif a == "--expand":
+			rival_expand = true
+		elif a == "--lab":
+			rival_lab = true
+	# Never the player's menu setting: Off unless --rival (Normal).
+	Corps.next_difficulty = CorpRegistry.Difficulty.NORMAL if rival else CorpRegistry.Difficulty.OFF
+	Corps.next_rival_count = rival_count
 	_log = SmokeLogger.new()
 	OS.add_logger(_log)
 	seed(SEED)
@@ -229,6 +267,19 @@ func _run() -> void:
 	while left > 0.0:
 		if multi:
 			_multi_step(minute)
+		if rival and save_roundtrip and minute == RIVAL_ROUNDTRIP_MINUTE:
+			await _rival_roundtrip()
+		if rival_war:
+			_war_step(minute)
+		if rival_kill:
+			_kill_step(minute)
+		if rival_expand and minute == 1:
+			_expand_setup()
+		if rival_lab and minute == 1:
+			var lr := Corps.rivals[0]
+			var lw := Corps.hq_world(get_tree(), lr.id)
+			lr.economy.add(5000, Economy.cost(500, 100), Ledger.OTHER, "Smoke money")
+			lw.buildings.spawn_finished(lw.buildings.def_by_id(&"science_lab"), Vector3.ZERO)
 		if forward:
 			if save_roundtrip and minute == ROUNDTRIP_MINUTE:
 				await _forward_roundtrip()
@@ -250,11 +301,17 @@ func _run() -> void:
 		await _forward_report()
 	if long_run and not forward:
 		_long_report()
+	if rival:
+		_rival_report()
 	var why := "%d trip checks on another system's contract" % _fw_wrong if _fw_wrong > 0 else ""
 	if _fw_factory_bad:
 		why = "a forward Factory keeps its own reserve or held ore (see SMOKE forward factory)"
 	if save_roundtrip and not _rt_ok:
 		why = "save round trip changed the game (see SMOKE forward reload)"
+	if rival and not _rival_rt_ok:
+		why = "save round trip changed the game (see SMOKE rival reload)"
+	if rival and not Corps.has_rival():
+		why = "no rival corp"
 	_finish(Time.get_ticks_msec() - t0, why)
 
 
@@ -648,6 +705,273 @@ func _forward_report() -> void:
 	print("SMOKE forward ms/step home %.3f, forward %.3f, other %.3f (%d steps); ms/frame %.2f over %d real frames" % [
 			_fw_usec.get("home", 0) / 1000.0 / steps, _fw_usec.get("forward", 0) / 1000.0 / steps, _fw_usec.get("other", 0) / 1000.0 / steps,
 			_fw_steps, frame_ms, frames])
+
+
+func _expand_setup() -> void:
+	var r := Corps.rival(Corps.RIVAL_IDS[0])
+	if r == null:
+		return
+	RivalManager.forward_after = 1.0
+	r.research.grant(r.research.catalog().find(&"eng_forward_operations"))
+	var all: Array = []
+	for id in Sector.network.ids:
+		all.append(String(id))
+	r.mind.stats["charted"] = all
+	r.economy.add(6000, Economy.cost(800, 300), Ledger.OTHER, "Smoke money")
+
+
+## --eliminate: see [member rival_kill]. Every rival is knocked out (its
+## HQ hit by a player merc) so the last one ends the game in victory.
+func _kill_step(minute: int) -> void:
+	var rc := RivalCorp.of(get_tree())
+	if rc == null or not Corps.has_rival():
+		return
+	if minute == 2:
+		for r in Corps.rivals:
+			var t := r.mind.tie(Corps.PLAYER)
+			t.i_know_them = true
+			t.they_know_me = true
+			t.contact = true
+			rc.set_stance(r, Corps.PLAYER, RivalMind.Stance.WAR)
+			r.mind.next_meeting = 1e9
+	if minute == 3:
+		var me: Ship = null
+		for n in SystemWorld.nodes_in(SystemWorld.home(get_tree()), Ship.GROUP):
+			if n is MercenaryShip:
+				me = n
+		for r in Corps.rivals:
+			var w := Corps.hq_world(get_tree(), r.id)
+			if w == null or w.buildings == null or w.buildings.station_hull == null:
+				continue
+			var hull := w.buildings.station_hull
+			# No repairs: as if the attackers kept it down.
+			hull.repair_rate = 0.0
+			hull.take_hit(hull.durability.hull + 10.0, me, hull.global_position)
+			_kill_log.append("3:00 %s HQ hit by %s: disabled %s, scuttle %.0f s" % [r.display_name, me.get_display_name() if me else "?", hull.disabled, hull.scuttle_left])
+	if minute == 5:
+		var gone := 0
+		for r in Corps.rivals:
+			var st := Sector.state(Corps.home_of(r.id))
+			gone += 1 if r.mind.eliminated else 0
+			_kill_log.append("5:00 %s eliminated %s, HQ site %s" % [r.display_name, r.mind.eliminated, "gone" if st and st.station.is_empty() else "STILL THERE"])
+		_kill_log.append("end screen %s, player captains %d" % [get_tree().root.get_node_or_null(^"EndScreen") != null, _player_captains()])
+		var es := get_tree().root.get_node_or_null(^"EndScreen")
+		if es:
+			es.queue_free()
+		if gone < Corps.rivals.size():
+			_rival_rt_ok = false
+
+
+func _player_captains() -> int:
+	var n := 0
+	for b in _mgr.buildings if _mgr else []:
+		if is_instance_valid(b):
+			n += b.captains.size()
+	return n
+
+
+## --war: forces first contact and war with rival 1, then a player strike;
+## with two rivals or more also contact and war between rivals 1 and 2.
+func _war_step(minute: int) -> void:
+	var rc := RivalCorp.of(get_tree())
+	var r := Corps.rival(Corps.RIVAL_IDS[0])
+	if rc == null or r == null:
+		return
+	var rid := r.id
+	var hull := _mgr.station_hull.hull_fraction() if _mgr and _mgr.station_hull else 1.0
+	_station_low = minf(_station_low, hull)
+	if minute == 2:
+		var t := r.mind.tie(Corps.PLAYER)
+		t.i_know_them = true
+		t.they_know_me = true
+		var st := Sector.state(Corps.home_of(rid))
+		if st:
+			st.known = true
+		var r2 := Corps.rival(Corps.RIVAL_IDS[1])
+		if r2:
+			r.mind.tie(r2.id).i_know_them = true
+			r2.mind.tie(r.id).they_know_me = true
+	if minute == 3:
+		_war_log.append("3:00 %s" % rc.player_proposes(rid, "war")["text"])
+		var r2b := Corps.rival(Corps.RIVAL_IDS[1])
+		if r2b and r.mind.tie(r2b.id).contact:
+			rc.set_stance(r, r2b.id, RivalMind.Stance.WAR)
+			_war_log.append("3:00 %s at war with %s: %s" % [r.display_name, r2b.display_name, Corps.corps_at_war(rid, r2b.id)])
+	if minute == 8:
+		var res := WarStrikes.launch(get_tree(), Corps.PLAYER, Corps.home_of(rid), 100, 3)
+		_war_log.append("8:00 player strike: %d sent, refused %s" % [(res["sent"] as Array).size(), res["refused"]])
+	if minute == 5 or minute == 12:
+		var hud := get_tree().get_first_node_in_group(HUD.GROUP) as HUD
+		if hud and hud.rival_panel:
+			hud.rival_panel.open_panel()
+			_war_log.append("%d:00 panel: %s / %s / war strike %s" % [minute, hud.rival_panel._status.text, hud.rival_panel._facts.text.replace("\n", "; "),
+					"on" if not hud.rival_panel._strike.disabled else "off"])
+			hud.rival_panel.close_panel()
+		else:
+			_war_log.append("%d:00 panel: NO HUD" % minute)
+	if minute == 14:
+		_war_log.append("14:00 peace: %s" % rc.player_proposes(rid, "peace")["text"])
+	var fo := rc.first_offer()
+	if not fo.is_empty():
+		var o: Dictionary = fo["offer"]
+		_war_log.append("%s offer %s from %s: %s -> %s" % [Fmt.clock(SimClock.time), o["kind"], Corps.display_name(fo["rid"]), o["text"], rc.answer_offer(fo["rid"], "accept")])
+
+
+## Every rival's money and mind, for the round trip.
+func _rival_sig() -> Array:
+	var out := []
+	for r in Corps.rivals:
+		out.append([r.id, r.display_name, r.economy.credits, r.economy.ore, r.mind.to_dict().size(), r.mind.ties.size()])
+	return out
+
+
+## Saves to memory and reloads with rivals: every station system (the
+## rival HQs too) and the rivals' money and minds must match.
+func _rival_roundtrip() -> void:
+	var tree := get_tree()
+	var before := _census()
+	var r0 := _rival_sig()
+	var data: Dictionary = bytes_to_var(var_to_bytes(GameSnapshot.capture(tree)))
+	await SaveManager.load_snapshot(data)
+	# Paused while the scene settles: a payout in those frames is not a save bug.
+	SimClock.paused = true
+	for i in 5:
+		await tree.process_frame
+	_find_home()
+	var after := _census()
+	var r1 := _rival_sig()
+	SimClock.paused = false
+	# Trips can be re-decided on load (ShipCodec): compare the ships without them.
+	var re := RegEx.create_from_string(" on [^,]*")
+	var trips := 0
+	for k: String in before.keys():
+		if k.ends_with(" ships"):
+			var a: String = before[k]
+			var b: String = after.get(k, "")
+			if a != b and re.sub(a, "", true) == re.sub(b, "", true):
+				trips += 1
+				before[k] = re.sub(a, "", true)
+				after[k] = re.sub(b, "", true)
+	var diffs: PackedStringArray = []
+	for k in before:
+		if before[k] != after.get(k):
+			diffs.append("%s: %s -> %s" % [k, before[k], after.get(k, "missing")])
+	for k in after:
+		if not before.has(k):
+			diffs.append("%s: new %s" % [k, after[k]])
+	if trips > 0:
+		_rival_rt_note = " (%d system%s with a trip re-decided on load)" % [trips, "" if trips == 1 else "s"]
+	if r0 != r1:
+		diffs.append("rivals %s -> %s" % [r0, r1])
+	_rival_rt = "at %s: keys %s, %s%s" % [Fmt.clock(SimClock.time), before.keys(), "identical after load" if diffs.is_empty() else "DIFF " + "; ".join(diffs), _rival_rt_note]
+	_rival_rt_ok = diffs.is_empty()
+
+
+## --rival: what each rival corp built and did (rival corporation plan).
+func _rival_report() -> void:
+	print("SMOKE rival ---------------------------------------")
+	if not _rival_rt.is_empty():
+		print("SMOKE rival reload   %s" % _rival_rt)
+	if not Corps.has_rival():
+		print("SMOKE rival FAIL: no rival corp")
+		return
+	var net := Sector.network
+	var homes: PackedStringArray = []
+	for r in Corps.rivals:
+		var hid := Corps.home_of(r.id)
+		homes.append("%s %s (%s, %d jumps, branch %d)" % [r.id, hid, _sys_name(hid), net.depth(hid), net.entry(hid).branch])
+	print("SMOKE rival homes    %s; remote systems %d" % ["; ".join(homes), net.remote_ids().size()])
+	var hud := get_tree().get_first_node_in_group(HUD.GROUP) as HUD
+	var listed := ContractBoard.get_listed()
+	var bad := 0
+	for c in listed:
+		if c.corp != Corps.PLAYER:
+			bad += 1
+	print("SMOKE rival listing  board %d contracts, the player's list %d (%d not the player's), player escrow %d" % [ContractBoard.contracts.size(),
+			listed.size(), bad, ContractBoard.escrow_total()])
+	if bad > 0 or hud == null:
+		_rival_rt_ok = false
+	for i in Corps.rivals.size():
+		for j in range(i + 1, Corps.rivals.size()):
+			var a := Corps.rivals[i]
+			var b := Corps.rivals[j]
+			print("SMOKE rival pair     %s / %s: %d jumps apart, contact %s, at war %s, stance %s / %s" % [a.display_name, b.display_name,
+					net.path(Corps.home_of(a.id), Corps.home_of(b.id)).size() - 1, a.mind.has_tie(b.id) and a.mind.tie(b.id).contact,
+					Corps.corps_at_war(a.id, b.id), a.mind.tie(b.id).stance_name() if a.mind.has_tie(b.id) else "-",
+					b.mind.tie(a.id).stance_name() if b.mind.has_tie(a.id) else "-"])
+	for r in Corps.rivals:
+		_rival_report_one(r)
+	if rival_kill:
+		print("SMOKE rival eliminate %s" % " | ".join(_kill_log))
+	if rival_expand:
+		var fs := ForwardStations.of(get_tree())
+		var rid := Corps.RIVAL_IDS[0]
+		var rids: Array[StringName] = fs.ids(rid) if fs else []
+		for x in rids:
+			print("SMOKE rival expand   site %s: %s" % [x, Sector.state(x).station])
+		print("SMOKE rival expand   forward stations %s, player slots %d, rival slots %d" % [rids, ForwardStations.free_slots(get_tree()),
+				ForwardStations.free_slots(get_tree(), rid)])
+		if rids.is_empty():
+			_rival_rt_ok = false
+	if rival_war:
+		var r := Corps.rivals[0]
+		var t := r.mind.tie(Corps.PLAYER)
+		print("SMOKE rival war      %s" % " | ".join(_war_log))
+		print("SMOKE rival war      %s toward you: %s, strikes %d, ops %d, wars %d, treaties %d, home station lowest %d%%, losses %.1f, weariness %.2f" % [
+				r.display_name, "war" if Corps.corps_at_war(r.id, Corps.PLAYER) else t.stance_name(), int(r.mind.stats.get("strikes", 0)), int(r.mind.stats.get("ops", 0)),
+				int(r.mind.stats.get("wars", 0)), int(r.mind.stats.get("treaties", 0)), roundi(_station_low * 100.0), t.losses, t.weariness])
+		var where: PackedStringArray = []
+		for x in SystemWorld.all(get_tree()):
+			for n in SystemWorld.nodes_in(x, Ship.GROUP):
+				var sh := n as Ship
+				if sh and not sh.dead and sh.role == Ship.Role.MERCENARY:
+					where.append("%s[%s] in %s: %s" % [sh.get_display_name(), Corps.owner_of(sh), x.system_id, sh.get_status_text()])
+		for tr: Dictionary in Sector.transits:
+			where.append("in jump to %s" % tr.get("to", "?"))
+		print("SMOKE rival mercs    %s" % " | ".join(where))
+		var feed: PackedStringArray = []
+		for e in EventLog.entries:
+			var tx := String(e["text"])
+			if tx.contains("strike") or tx.contains("war") or tx.contains("War") or tx.contains("Intel"):
+				feed.append("%s %s" % [Fmt.clock(float(e["time"])), tx])
+		print("SMOKE rival feed     %s" % " | ".join(feed.slice(maxi(feed.size() - 14, 0))))
+
+
+func _rival_report_one(r: Corp) -> void:
+	var id := Corps.home_of(r.id)
+	var w := Corps.hq_world(get_tree(), r.id)
+	var t := r.mind.tie(Corps.PLAYER)
+	print("SMOKE rival corp     %s %s (%s), home %s, live %s, toward you %s%s%s" % [r.id, r.display_name, r.mind.personality_name(),
+			_sys_name(id), w != null, t.stance_name(), ", contact" if t.contact else "", ", ELIMINATED" if r.mind.eliminated else ""])
+	print("SMOKE rival money    %s: %d cr, ore %s" % [r.id, r.economy.credits, r.economy.ore])
+	var builds := {}
+	var roles := {}
+	if w and w.buildings:
+		for b in w.buildings.buildings:
+			if is_instance_valid(b):
+				builds[b.def.display_name] = int(builds.get(b.def.display_name, 0)) + 1
+				for c in b.captains:
+					roles[c.role] = int(roles.get(c.role, 0)) + 1
+	if w and w.buildings:
+		var ed := w.buildings.def_by_id(&"explorer_outpost")
+		var rm := w.get_node_or_null(^"RivalManager") as RivalManager
+		var goal := rm._saving_for() if rm else null
+		print("SMOKE rival explorer %s: limit '%s', count %d, cost %d cr %s, has %d cr %s, saving for %s, projects %s, researchers %d" % [r.id,
+				w.buildings.limit_reason(ed) if ed else "?", w.buildings.count_of(ed) if ed else -1, ed.cost_credits if ed else 0, ed.cost_ore() if ed else [],
+				r.economy.credits, r.economy.ore, goal.id if goal else "-", r.research.projects, r.research.researchers.size()])
+		var lab := r.research.lab()
+		var rs: PackedStringArray = []
+		for x in r.research.researchers:
+			rs.append("%s proj '%s' unpaid %s" % [x.researcher_name, x.project, x.unpaid])
+		print("SMOKE rival lab      %s: lab %s active %s; %s" % [r.id, lab != null, lab.building.is_active() if lab else false, "; ".join(rs)])
+	print("SMOKE rival builds   %s: %s, captains %s, research %s, charted %d" % [r.id, builds, roles, r.research.done.keys(), (r.mind.stats.get("charted", []) as Array).size()])
+	var key: PackedStringArray = []
+	for e in r.mind.intel:
+		var tx := String(e["text"])
+		if bool(e.get("public", false)) or tx.begins_with("Our scouts found") or tx.begins_with("We made contact") or tx.contains("declared war") \
+				or tx.contains("offered") or tx.contains("-> ") and not tx.contains("-> Peace (runner-up Trade pact)"):
+			key.append("%s %s" % [Fmt.clock(float(e["time"])), tx])
+	print("SMOKE rival story    %s: %s" % [r.id, " | ".join(key.slice(maxi(key.size() - 10, 0)))])
 
 
 ## A Factory addon at the forward station for a moment: it must use home's

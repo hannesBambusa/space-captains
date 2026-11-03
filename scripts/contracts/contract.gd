@@ -32,6 +32,8 @@ var target: Node3D
 ## system when posted, explore contracts: their from_system). Not saved
 ## yet (forward plan F3): a load puts every contract at home.
 var system_id: StringName = ClusterNetwork.HOME_ID
+## The corp that posted it and pays (Corps; set by ContractBoard.post).
+var corp: StringName = &"player"
 ## Credits per unit of work (per load, per kill, per trip).
 var reward: int = 0
 var status: Status = Status.OPEN
@@ -43,6 +45,11 @@ var created_time: float = 0.0
 var credits_paid: int = 0
 ## Ships that ever took it (stats).
 var times_taken: int = 0
+
+
+## The poster's credits and ore.
+func eco() -> CorpEconomy:
+	return Corps.economy_of_corp(corp)
 
 
 func is_finished() -> bool:
@@ -89,7 +96,7 @@ func pays_per_delivery() -> bool:
 ## The station cannot pay one payment now: captains do not take it ("Station
 ## can't pay") until credits come in. Trips under way are paid what is there.
 func is_paused() -> bool:
-	return not is_finished() and pays_per_delivery() and reward > 0 and Economy.credits < reward
+	return not is_finished() and pays_per_delivery() and reward > 0 and eco().credits < reward
 
 
 ## Short name of the target, e.g. "Cinder Cluster".

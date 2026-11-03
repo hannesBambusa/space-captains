@@ -34,7 +34,7 @@ static func raise(ctx: Node, site: Node3D, site_name: String, attacker: Node3D) 
 	var a := of(ctx)
 	if a == null or not is_instance_valid(site) or not is_instance_valid(attacker):
 		return
-	if not attacker.has_method(&"get_faction") or int(attacker.call(&"get_faction")) == Combat.Faction.PLAYER:
+	if not attacker.has_method(&"get_faction") or not Combat.hostile(int(attacker.call(&"get_faction")), Combat.faction_of_corp(Corps.corp_of_node(site))):
 		return
 	a._raise(site, site_name, attacker)
 

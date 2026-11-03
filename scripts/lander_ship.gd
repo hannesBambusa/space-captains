@@ -69,8 +69,9 @@ func _on_ready_ship() -> void:
 	if _pod:
 		_pod_base = _pod.position
 	_make_fx()
-	if not Research.tech_completed.is_connected(_on_tech_completed):
-		Research.tech_completed.connect(_on_tech_completed)
+	var res := corp_research()
+	if not res.tech_completed.is_connected(_on_tech_completed):
+		res.tech_completed.connect(_on_tech_completed)
 
 
 ## Heavy dropships and armoured hulls apply at once (ShipLoadout.derive).

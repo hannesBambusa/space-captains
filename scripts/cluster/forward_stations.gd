@@ -53,20 +53,25 @@ func _ready() -> void:
 	_pin_saved.call_deferred()
 
 
-## Ids of the systems with a forward station, network order.
-func ids() -> Array[StringName]:
+## Ids of the systems with a forward station of [param corp] (the
+## player's by default; "" = every station site, the rival's HQ too),
+## network order.
+func ids(corp: StringName = Corps.PLAYER) -> Array[StringName]:
 	var out: Array[StringName] = []
 	if Sector.network == null:
 		return out
 	for id in Sector.network.remote_ids():
 		var st := Sector.state(id)
-		if st and not st.station.is_empty():
+		if st == null or st.station.is_empty():
+			continue
+		# "" lists every site (pinning); a corp's list leaves out its headquarters.
+		if corp.is_empty() or (StringName(st.station.get("corp", Corps.PLAYER)) == corp and not bool(st.station.get("hq", false))):
 			out.append(id)
 	return out
 
 
-func count() -> int:
-	return ids().size()
+func count(corp: StringName = Corps.PLAYER) -> int:
+	return ids(corp).size()
 
 
 ## The live world of station system [param id], or null.
@@ -85,7 +90,7 @@ func found_problem(system_id: StringName, site: Dictionary) -> String:
 		return "No such system"
 	if not st.station.is_empty():
 		return "%s already has a station" % def.system_name
-	if count() >= MAX_STATIONS:
+	if count(StringName(site.get("corp", Corps.PLAYER))) >= MAX_STATIONS:
 		return "At most %d forward stations" % MAX_STATIONS
 	if _planet_def(def, String(site.get("planet", ""))) == null:
 		return "No planet %s in %s" % [site.get("planet", "?"), def.system_name]
@@ -116,6 +121,13 @@ func found(system_id: StringName, site: Dictionary) -> SystemWorld:
 	if w and was_viewed:
 		vm.view_now(system_id)
 	var sys_name := Sector.system_def(system_id).system_name
+	var owner := Corps.rival(StringName(s.get("corp", Corps.PLAYER)))
+	if owner:
+		owner.mind.note("Our forward station is up at %s in %s" % [planet, sys_name])
+		if Sector.state(system_id).known or vm.viewed_id() == system_id:
+			EventLog.post_public("%s founded a station at %s in %s" % [owner.display_name, planet, sys_name], EventLog.Kind.THREAT)
+		founded.emit(system_id, w)
+		return w
 	# Tagged "[<system>]" by the feed (the station is in that system).
 	EventLog.post("Forward station founded at %s" % planet if w and w.sys else "Forward station founded at %s in %s" % [planet, sys_name], EventLog.Kind.INFO,
 			w.sys.home_station if w and w.sys else null)
@@ -151,11 +163,11 @@ static func debug_found(tree: SceneTree, system_id: StringName, planet_name: Str
 ## Station slots left: [constant MAX_STATIONS] minus the stations, the
 ## mobile stations (live or as data) and the Forward Stations under
 ## construction at home.
-static func free_slots(tree: SceneTree) -> int:
+static func free_slots(tree: SceneTree, corp: StringName = Corps.PLAYER) -> int:
 	var fs := of(tree)
-	var used := fs.count() if fs else 0
-	used += MobileStation.count_all(tree)
-	var home := SystemWorld.home(tree)
+	var used := fs.count(corp) if fs else 0
+	used += MobileStation.count_all(tree, corp)
+	var home := Corps.hq_world(tree, corp)
 	var mgr := home.buildings if home else null
 	if mgr:
 		var def := mgr.def_by_id(BUILD_ID)
@@ -220,7 +232,7 @@ func _pin_saved() -> void:
 	var vm := get_parent() as ViewManager
 	if vm == null:
 		return
-	for id in ids():
+	for id in ids(&""):
 		vm.pin(id)
 
 

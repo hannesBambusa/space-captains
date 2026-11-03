@@ -157,13 +157,13 @@ func _in_range(t: Node3D) -> bool:
 func _pick_target() -> void:
 	var best: Node3D = null
 	var best_score := INF
-	for h in Combat.hostiles_near(self, global_position, weapon_range + 60.0, Combat.Faction.PLAYER):
+	for h in Combat.hostiles_near(self, global_position, weapon_range + 60.0, get_faction()):
 		var score := SpaceNav.flat_distance(global_position, h.global_position)
 		var sc := h as ScavengerShip
 		if sc:
 			if sc.is_raider:
 				score -= 200.0
-			if sc.ai and Combat.is_live(sc.ai.target) and int(sc.ai.target.call(&"get_faction")) == Combat.Faction.PLAYER:
+			if sc.ai and Combat.is_live(sc.ai.target) and not Combat.hostile(int(sc.ai.target.call(&"get_faction")), get_faction()):
 				score -= 350.0
 		if h == target:
 			score -= 250.0

@@ -33,7 +33,8 @@ var _hits: Array[bool] = []
 var _targets: Array[WeakRef] = []
 var _attackers: Array[WeakRef] = []
 var _colors: Array[Color] = []
-var _hostile: Array[bool] = []
+## The shooter's side (Combat.Faction), -1 = unknown: a shield bubble stops shots of a hostile side.
+var _side: Array[int] = []
 var hits_applied: int = 0
 ## Tracers stopped by a station shield.
 var shield_hits: int = 0
@@ -97,7 +98,7 @@ func fire(from: Vector3, aim: Vector3, target: Node3D, damage: float, hits: bool
 	_targets.append(weakref(target))
 	_attackers.append(weakref(attacker))
 	_colors.append(color)
-	_hostile.append(is_instance_valid(attacker) and attacker.has_method(&"get_faction") and int(attacker.call(&"get_faction")) != Combat.Faction.PLAYER)
+	_side.append(int(attacker.call(&"get_faction")) if is_instance_valid(attacker) and attacker.has_method(&"get_faction") else -1)
 
 
 func sim_step(dt: float) -> void:
@@ -110,7 +111,8 @@ func sim_step(dt: float) -> void:
 	var i := _pos.size() - 1
 	while i >= 0:
 		var s := minf(step, _left[i])
-		if _hostile[i] and not shields.is_empty() and _hit_shield(i, shields, s):
+		# Only shields of a side hostile to the shooter stop it (_hit_shield).
+		if _side[i] >= 0 and not shields.is_empty() and _hit_shield(i, shields, s):
 			_remove(i)
 			i -= 1
 			continue
@@ -145,7 +147,7 @@ func _hit_shield(i: int, shields: Array[StationShield], s: float) -> bool:
 	var a := _pos[i]
 	var b := a + _dir[i] * s
 	for sh in shields:
-		if not is_instance_valid(sh):
+		if not is_instance_valid(sh) or not Combat.hostile(_side[i], sh.get_faction()):
 			continue
 		var t := sh.intercept(a, b)
 		if t < 0.0:
@@ -171,7 +173,7 @@ func _remove(i: int) -> void:
 	_targets.remove_at(i)
 	_attackers.remove_at(i)
 	_colors.remove_at(i)
-	_hostile.remove_at(i)
+	_side.remove_at(i)
 
 
 func _draw_tracers() -> void:

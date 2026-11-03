@@ -46,6 +46,8 @@ var worlds: Dictionary = {}
 var debug_view_all := false
 var remote_sim: RemoteSim
 var forward: ForwardStations
+## The rival corporation's strategy and diplomacy (idle while it is Off).
+var rival: RivalCorp
 
 ## Remote hosts by id, and the real time each is dropped at (INF while viewed).
 var _hosts: Dictionary = {}
@@ -78,6 +80,9 @@ func _enter_tree() -> void:
 	forward = ForwardStations.new()
 	forward.name = "ForwardStations"
 	add_child(forward)
+	rival = RivalCorp.new()
+	rival.name = "RivalCorp"
+	add_child(rival)
 
 
 func _ready() -> void:

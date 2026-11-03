@@ -8,7 +8,11 @@ extends RefCounted
 ##   get_dodge() -> float, get_display_name() -> String
 ## Ships (Ship) and Scavenger Dens (ScavengerDen) do.
 
-enum Faction { PLAYER, SCAVENGER }
+## RIVAL_1..3: the rival corporations' ships and structures
+## (Ship.get_faction, StaticCombatant.get_faction). Their ships keep
+## Ship.faction PLAYER, the civilised side: pirates hunt every corp alike.
+## Two corps are hostile to each other only while Corps.corps_at_war(a, b).
+enum Faction { PLAYER, SCAVENGER, RIVAL_1, RIVAL_2, RIVAL_3 }
 
 const GROUP := "combatants"
 const PLAYER_TRACER := Color(0.45, 0.85, 1.0)
@@ -42,7 +46,26 @@ static func by_suffix(killer: Variant) -> String:
 
 
 static func hostile(a: int, b: int) -> bool:
-	return a != b
+	if a == b:
+		return false
+	if a != Faction.SCAVENGER and b != Faction.SCAVENGER:
+		return Corps.corps_at_war(corp_of_faction(a), corp_of_faction(b))
+	return true
+
+
+## The combat side of corp [param corp_id] (Corps).
+static func faction_of_corp(corp_id: StringName) -> int:
+	var i := Corps.RIVAL_IDS.find(Corps.norm(corp_id))
+	return Faction.RIVAL_1 + i if i >= 0 else Faction.PLAYER
+
+
+## The corp of combat side [param f] (&"" for the pirates).
+static func corp_of_faction(f: int) -> StringName:
+	if f == Faction.SCAVENGER:
+		return &""
+	if f >= Faction.RIVAL_1:
+		return Corps.RIVAL_IDS[f - Faction.RIVAL_1]
+	return Corps.PLAYER
 
 
 ## Live, targetable combatants hostile to [param faction] within

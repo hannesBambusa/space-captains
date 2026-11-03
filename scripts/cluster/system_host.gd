@@ -48,12 +48,13 @@ func materialise(id: StringName) -> SystemWorld:
 	var w := (load(SYSTEM_SCENE) as PackedScene).instantiate() as SystemWorld
 	w.system_id = id
 	(w.get_node(^"SolarSystem") as SolarSystem).system_def = def
-	if w.has_station:
+	# A forward station has no Factory; a corp headquarters keeps home's setup.
+	if w.has_station and not w.is_hq:
 		var mgr := w.get_node_or_null(^"Buildings") as BuildingManager
 		if mgr:
 			mgr.factory_def = null
 			mgr.forward = true
-	else:
+	elif not w.has_station:
 		for n: NodePath in [^"Buildings", ^"ContractMarkers"]:
 			var x := w.get_node_or_null(n)
 			if x:
@@ -66,8 +67,13 @@ func materialise(id: StringName) -> SystemWorld:
 	viewport.add_child(w)
 	world = w
 	apply_state(Sector.state(id))
+	# A rival corp's headquarters runs its AI there (rival corporation plan).
+	if w.has_station and Corps.is_rival(w.corp_id):
+		var mgr_ai := RivalManager.new()
+		mgr_ai.name = "RivalManager"
+		w.add_child(mgr_ai)
 	# A forward station's upkeep, water and hauling fee (F4).
-	if w.has_station:
+	if w.has_station and not w.is_hq:
 		var supply := StationSupply.new()
 		supply.name = "StationSupply"
 		w.add_child(supply)
@@ -90,7 +96,7 @@ func apply_state(st: RemoteSystemState) -> void:
 		for b in sys.belts:
 			var cd: Dictionary = st.clusters.get(b.def.name, {})
 			if not cd.is_empty():
-				b.set_loads_left(int(cd.get("left", b.reserve)), int(cd.get("total", b.reserve)))
+				b.set_loads_left(int(cd.get("left", b.reserve)), int(cd.get("total", b.reserve)), PackedInt32Array(cd.get("gone", [])))
 	var den_data := {}
 	if sys:
 		for den in sys.dens:
@@ -131,7 +137,7 @@ func capture_into_state() -> void:
 	if sys:
 		st.clusters.clear()
 		for b in sys.belts:
-			st.clusters[b.def.name] = {"left": b.loads_left, "total": b.reserve}
+			st.clusters[b.def.name] = {"left": b.loads_left, "total": b.reserve, "gone": Array(b.gone_list())}
 		for den in sys.dens:
 			if is_instance_valid(den) and den.def:
 				st.dens[den.def.name] = den.save_state()

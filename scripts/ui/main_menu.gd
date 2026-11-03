@@ -23,6 +23,13 @@ var _backup: Button
 var _fullscreen: Button
 var _tutorial: CheckButton
 var _newest: Dictionary = {}
+## The New game page: rivals (0 to 3) and their difficulty, then Start.
+var _new: VBoxContainer
+var _pick_count := 0
+var _pick_diff: CorpRegistry.Difficulty = CorpRegistry.Difficulty.NORMAL
+var _count_buttons: Array[Button] = []
+var _diff_buttons: Array[Button] = []
+var _new_hint: Label
 var _last_hover := -1.0
 
 
@@ -118,7 +125,7 @@ func _build() -> void:
 	_main.add_child(_error)
 	_backup = _button("Load the backup", _on_backup)
 	_main.add_child(_backup)
-	_main.add_child(_button("New game", func() -> void: SaveManager.new_game()))
+	_main.add_child(_button("New game", _show_new))
 	_main.add_child(_button("Load game", _show_loads))
 	_main.add_child(_button("Settings", _show_settings))
 	_main.add_child(_button("Quit", func() -> void: get_tree().quit()))
@@ -126,6 +133,8 @@ func _build() -> void:
 	_loads = SaveList.new()
 	_loads.back.connect(_show_main)
 	stack.add_child(_loads)
+
+	_build_new(stack)
 
 	_settings = VBoxContainer.new()
 	_settings.custom_minimum_size = Vector2(380, 0)
@@ -196,6 +205,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _show_main() -> void:
+	_new.hide()
 	_loads.hide()
 	_settings.hide()
 	_graphics.hide()
@@ -215,6 +225,7 @@ func _show_main() -> void:
 
 func _show_loads() -> void:
 	_main.hide()
+	_new.hide()
 	_settings.hide()
 	_graphics.hide()
 	_loads.playing_slot = ""
@@ -224,6 +235,7 @@ func _show_loads() -> void:
 
 func _show_settings() -> void:
 	_main.hide()
+	_new.hide()
 	_loads.hide()
 	_graphics.hide()
 	_update_fullscreen()
@@ -234,6 +246,96 @@ func _show_settings() -> void:
 func _show_graphics() -> void:
 	_settings.hide()
 	_graphics.show()
+
+
+# --- New game ---------------------------------------------------------------------
+
+## The New game page (rival corporation plan): how many rival corps (none,
+## 1, 2 or 3) and one difficulty for all of them, remembered for next time
+## (Corps.set_next_difficulty / set_next_rival_count), then Start.
+func _build_new(stack: Control) -> void:
+	_new = VBoxContainer.new()
+	_new.custom_minimum_size = Vector2(420, 0)
+	_new.add_theme_constant_override("separation", 12)
+	stack.add_child(_new)
+	_new.add_child(UIUtil.label("NEW GAME", &"TitleLabel"))
+	_new.add_child(UIUtil.label("RIVAL CORPORATIONS", &"SubHeaderLabel"))
+	var counts := HBoxContainer.new()
+	counts.add_theme_constant_override("separation", 6)
+	_new.add_child(counts)
+	var cg := ButtonGroup.new()
+	for n in Corps.MAX_RIVALS + 1:
+		var b := _choice(["NONE", "1", "2", "3"][n], cg, "No rival: the sector is yours and the pirates'" if n == 0
+				else "%d rival AI corporation%s, each in its own corner of the sector 4 to 5 jumps out" % [n, "" if n == 1 else "s"])
+		b.pressed.connect(func() -> void:
+			_pick_count = n
+			_update_new())
+		counts.add_child(b)
+		_count_buttons.append(b)
+	_new.add_child(UIUtil.label("DIFFICULTY", &"SubHeaderLabel"))
+	var diffs := HBoxContainer.new()
+	diffs.add_theme_constant_override("separation", 6)
+	_new.add_child(diffs)
+	var dg := ButtonGroup.new()
+	for d: int in [CorpRegistry.Difficulty.EASY, CorpRegistry.Difficulty.NORMAL, CorpRegistry.Difficulty.HARD]:
+		var b := _choice(Corps.DIFFICULTY_NAMES[d].to_upper(), dg, ["", "Smaller grant (x0.8), slower boards, less war", "The same rules as you",
+				"Bigger grant (x1.3), faster boards and scouts, more war"][d])
+		b.pressed.connect(func() -> void:
+			_pick_diff = d as CorpRegistry.Difficulty
+			_update_new())
+		diffs.add_child(b)
+		_diff_buttons.append(b)
+	_new_hint = UIUtil.label("", &"DimLabel")
+	_new_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_new_hint.custom_minimum_size.x = 420.0
+	_new.add_child(_new_hint)
+	_new.add_child(_button("Start game", _start_new))
+	_new.add_child(_button("Back", _show_main))
+	_new.hide()
+
+
+func _choice(text: String, group: ButtonGroup, tip: String) -> Button:
+	var b := UIUtil.button(text, &"ChipButton")
+	b.toggle_mode = true
+	b.button_group = group
+	b.custom_minimum_size = Vector2(96, 40)
+	b.focus_mode = Control.FOCUS_NONE
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	b.tooltip_text = tip
+	b.mouse_entered.connect(_play_hover)
+	return b
+
+
+func _show_new() -> void:
+	_main.hide()
+	_loads.hide()
+	_settings.hide()
+	_graphics.hide()
+	var off := Corps.next_difficulty == CorpRegistry.Difficulty.OFF
+	_pick_count = 0 if off else Corps.next_rival_count
+	_pick_diff = CorpRegistry.Difficulty.NORMAL if off else Corps.next_difficulty
+	_update_new()
+	_new.show()
+
+
+func _update_new() -> void:
+	for i in _count_buttons.size():
+		_count_buttons[i].set_pressed_no_signal(i == _pick_count)
+	for i in _diff_buttons.size():
+		_diff_buttons[i].set_pressed_no_signal(i + 1 == int(_pick_diff))
+		_diff_buttons[i].disabled = _pick_count == 0
+	if _pick_count == 0:
+		_new_hint.text = "No rival corporation: only you and the pirates."
+	else:
+		_new_hint.text = "%d rival corporation%s on %s. They build, explore and choose peace, pacts, harassment or war on their own, with you and with each other. Losing your home station ends the game." % [
+				_pick_count, "" if _pick_count == 1 else "s", Corps.DIFFICULTY_NAMES[_pick_diff]]
+
+
+func _start_new() -> void:
+	Corps.set_next_difficulty(CorpRegistry.Difficulty.OFF if _pick_count == 0 else _pick_diff)
+	if _pick_count > 0:
+		Corps.set_next_rival_count(_pick_count)
+	SaveManager.new_game()
 
 
 func _on_continue() -> void:

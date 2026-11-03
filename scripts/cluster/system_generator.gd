@@ -14,7 +14,11 @@ extends RefCounted
 
 ## Bump when the same seed would make different systems (saves keep their
 ## seed and regenerate; the save notes the version it was made with).
-const VERSION := 2
+## v3: the rival region (systems 4 and 5 jumps out, ClusterNetwork).
+const VERSION := 3
+## The version mixed into [method system_seed]. Kept at 2 on purpose: v3 only
+## added systems, so the systems of v2 keep their content.
+const SEED_VERSION := 2
 
 ## Gates sit past every body: at least this far out, metres.
 const GATE_RADIUS_MIN := 30000.0
@@ -39,8 +43,10 @@ const STARS := [
 	{"cls": "B", "w": 0.04, "temp": Vector2(11000.0, 18000.0), "radius": Vector2(880.0, 1080.0), "light": 1.25},
 ]
 
-## Primary ore weights (iron, titanium, crystal) by gate depth 1..3.
-const ORE_WEIGHTS := [[0.5, 0.35, 0.15], [0.3, 0.4, 0.3], [0.15, 0.4, 0.45]]
+## Primary ore weights (iron, titanium, crystal) by gate depth 1..5.
+const ORE_WEIGHTS := [[0.5, 0.35, 0.15], [0.3, 0.4, 0.3], [0.15, 0.4, 0.45], [0.1, 0.35, 0.55], [0.05, 0.3, 0.65]]
+## Deepest depth the tables know.
+const MAX_DEPTH := 5
 ## Base faction weights (scavenger, corsair, syndicate) by danger 1..5.
 const FACTION_WEIGHTS := [[1.0, 0.0, 0.0], [1.0, 0.15, 0.0], [0.6, 0.4, 0.0], [0.45, 0.4, 0.15], [0.3, 0.4, 0.3]]
 const FACTION_IDS := [&"scavenger", &"corsair", &"syndicate"]
@@ -52,27 +58,32 @@ var _rng := RandomNumberGenerator.new()
 var _names: NamePool.Allocator
 var _def: SystemDef
 var _depth := 1
+var _rival_home := false
 
 
 ## The def of system [param id] (display name [param system_name], gate
 ## depth [param depth] from home, [param danger] 1..5). [param gates]: one
 ## Dictionary per link, {name, target_system, target_gate, target_danger}.
+## [param rival_home]: a rival corp's home (ClusterNetwork.rival_ids): its
+## first two clusters are iron, the first a calm one (like home's Cinder
+## Cluster), so it can build.
 static func generate(net_seed: int, id: StringName, system_name: String, depth: int, danger: int,
-		gates: Array[Dictionary], names: NamePool.Allocator) -> SystemDef:
+		gates: Array[Dictionary], names: NamePool.Allocator, rival_home: bool = false) -> SystemDef:
 	var g := SystemGenerator.new()
+	g._rival_home = rival_home
 	return g._generate(net_seed, id, system_name, depth, danger, gates, names)
 
 
 ## Stable seed for system [param id] of network [param net_seed].
 static func system_seed(net_seed: int, id: StringName) -> int:
-	return hash("%d:%s:v%d" % [net_seed, id, VERSION])
+	return hash("%d:%s:v%d" % [net_seed, id, SEED_VERSION])
 
 
 func _generate(net_seed: int, id: StringName, system_name: String, depth: int, danger: int,
 		gates: Array[Dictionary], names: NamePool.Allocator) -> SystemDef:
 	_rng.seed = system_seed(net_seed, id)
 	_names = names
-	_depth = clampi(depth, 1, 3)
+	_depth = clampi(depth, 1, MAX_DEPTH)
 	_def = SystemDef.new()
 	_def.system_name = system_name
 	_def.danger = clampi(danger, 1, 5)
@@ -260,6 +271,8 @@ func _clusters(gate_r: float) -> void:
 	var w := PackedFloat32Array(ORE_WEIGHTS[_depth - 1])
 	for i in n:
 		var ore: AsteroidBelt.OreType = ores[_rng.rand_weighted(w)]
+		if _rival_home and i < 2:
+			ore = ORE.IRON
 		var size := snappedf(_rng.randf_range(1500.0, 2800.0) + (200.0 if ore == ORE.CRYSTAL else 0.0), 50.0)
 		var r := _cluster_radius(size, gate_r)
 		var c := ClusterDef.new()
@@ -278,6 +291,8 @@ func _clusters(gate_r: float) -> void:
 		c.max_scale = roundf(_rng.randf_range(18.0, 25.0))
 		c.richness = snappedf(clampf(0.15 + 0.12 * _depth + _rng.randf_range(0.0, 0.2) + (0.15 if ore == ORE.CRYSTAL else 0.0), 0.2, 0.9), 0.05)
 		c.danger = clampi(_def.danger - 1 + (1 if ore == ORE.CRYSTAL else 0), 1, 4)
+		if _rival_home and i == 0:
+			c.danger = 1
 		c.reserve_loads = clampi(roundi(float(c.get_reserve()) * (1.0 + 0.3 * (_depth - 1))), 25, 100)
 		c.seed = _rng.randi_range(1, 99999)
 		c.glow = snappedf(_rng.randf_range(1.2, 1.7), 0.1) if ore == ORE.CRYSTAL else 1.0

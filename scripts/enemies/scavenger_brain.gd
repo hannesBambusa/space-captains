@@ -710,9 +710,9 @@ func _raid_step(dt: float) -> void:
 	_loot_clock += dt
 	if _loot_clock >= RAID_LOOT_INTERVAL:
 		_loot_clock = 0.0
-		var amount := mini(roundi(RAID_LOOT_CREDITS * fac.raid_loot_mult), maxi(Economy.credits, 0))
+		var amount := mini(roundi(RAID_LOOT_CREDITS * fac.raid_loot_mult), maxi(Corps.economy(_raid_target).credits, 0))
 		if amount > 0:
-			Economy.spend(amount, PackedInt32Array(), Ledger.OTHER, "Looted by raiders")
+			Corps.economy(_raid_target).spend(amount, PackedInt32Array(), Ledger.OTHER, "Looted by raiders")
 			credits_looted += amount
 			var who := fac.raiders_label()
 			EventLog.post("%s are looting %s" % [who, _raid_target.display_name], EventLog.Kind.THREAT, _raid_target, Vector3.INF, "", fac.id)

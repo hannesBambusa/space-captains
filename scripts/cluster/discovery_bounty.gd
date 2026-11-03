@@ -53,7 +53,7 @@ static func pay(id: StringName, captain_id: int, captain: Captain) -> Dictionary
 	var out := {"finds": finds, "credits": total, "cut": 0}
 	if total <= 0:
 		return out
-	Economy.add_income(total, SOURCE, "Finds in %s" % (Sector.system_def(id).system_name if Sector.system_def(id) else String(id)))
+	Corps.economy(captain.ship if captain and is_instance_valid(captain.ship) else null).add_income(total, SOURCE, "Finds in %s" % (Sector.system_def(id).system_name if Sector.system_def(id) else String(id)))
 	var cut := roundi(float(total) * FINDER_CUT)
 	out["cut"] = cut
 	if captain and cut > 0:

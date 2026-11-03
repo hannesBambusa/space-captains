@@ -34,6 +34,7 @@ func _launch() -> void:
 	var yaw := building.global_rotation.y
 	var ms := MobileStation.new()
 	ms.setup_station(0, building.get_tree())
+	ms.corp = Corps.corp_of_node(building)
 	SpaceNav.space_root(building).add_child(ms)
 	ms.mover.avoid_enabled = true
 	ms.place_in_space(at, yaw, SpaceNav.world_velocity(building))

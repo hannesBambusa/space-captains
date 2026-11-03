@@ -1,15 +1,14 @@
-[gd_resource type="AudioBusLayout" load_steps=3 format=3]
-
-[sub_resource type="AudioEffectCompressor" id="AudioEffectCompressor_sfx"]
-resource_name = "Compressor"
-threshold = -14.0
-ratio = 4.0
-attack_us = 2000.0
-release_ms = 180.0
+[gd_resource type="AudioBusLayout" format=3 uid="uid://bcmfroyyqlart"]
 
 [sub_resource type="AudioEffectHardLimiter" id="AudioEffectHardLimiter_master"]
 resource_name = "HardLimiter"
 ceiling_db = -0.5
+
+[sub_resource type="AudioEffectCompressor" id="AudioEffectCompressor_sfx"]
+resource_name = "Compressor"
+threshold = -14.0
+attack_us = 2000.0
+release_ms = 180.0
 
 [resource]
 bus/0/effect/0/effect = SubResource("AudioEffectHardLimiter_master")

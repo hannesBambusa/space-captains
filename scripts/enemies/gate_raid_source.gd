@@ -197,6 +197,42 @@ func form(id: StringName, rng: RandomNumberGenerator = null, lead: float = -1.0)
 	return true
 
 
+## A raid the rival corp paid for (its harassment, RivalCorp): [param size]
+## raiders from the living base nearest home on the way toward the rival
+## (else any), through the home gate on that way. Deniable: it is an
+## ordinary gate raid, warned only when its source is scouted. False when
+## one is already forming or no base is left anywhere.
+func form_hired(size: int, corp: StringName, lead: float = 75.0) -> bool:
+	if not pending.is_empty() or Sector.network == null:
+		return false
+	var toward := Corps.home_of(corp)
+	var best := &""
+	var best_d := 99
+	for id in Sector.network.remote_ids():
+		if living_dens(id).is_empty():
+			continue
+		var d := Sector.network.depth(id)
+		# Systems on the way to the rival come first.
+		var on_way := not toward.is_empty() and Sector.network.path(ClusterNetwork.HOME_ID, toward).has(id)
+		var score := d - (10 if on_way else 0)
+		if score < best_d:
+			best_d = score
+			best = id
+	if best.is_empty():
+		return false
+	var path := Sector.network.path(ClusterNetwork.HOME_ID, best)
+	if path.size() < 2:
+		return false
+	var names := living_dens(best)
+	var rng := _rng_for(20000 + checks + int(SimClock.time))
+	pending = {"source": String(best), "den": names[rng.randi() % names.size()], "gate": Sector.gate_between(ClusterNetwork.HOME_ID, path[1]),
+			"size": size, "at": SimClock.time + lead, "warned": false, "seed": rng.randi(), "hired": String(corp)}
+	if is_scouted(best):
+		_warn()
+	changed.emit()
+	return true
+
+
 ## "Raid forming in Ostra, through Ostra Gate in ~1 min" (the forming raid).
 func warning_text() -> String:
 	if pending.is_empty():

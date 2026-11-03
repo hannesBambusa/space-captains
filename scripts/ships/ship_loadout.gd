@@ -175,7 +175,10 @@ func modules() -> Array[ShipModule]:
 
 
 ## Stats for this loadout flown by [param captain] (null = average pilot).
-func derive(captain: Captain = null) -> ShipStats:
+## [param res]: whose research bonuses (null = the player's).
+func derive(captain: Captain = null, res: CorpResearch = null) -> ShipStats:
+	if res == null:
+		res = Research
 	var s := ShipStats.new()
 	s.max_hull = base_hull
 	s.max_shields = base_shields
@@ -207,13 +210,13 @@ func derive(captain: Captain = null) -> ShipStats:
 			s.drill_mult = m.drill_mult
 	s.fire_rate *= fire_mult
 	if role_name == "Mercenary":
-		s.accuracy_bonus += Research.merc_accuracy()
+		s.accuracy_bonus += res.merc_accuracy()
 	elif role_name == "Miner":
-		s.cargo += Research.miner_hold()
+		s.cargo += res.miner_hold()
 	if role_name == "Lander":
-		if Research.is_done(HEAVY_DROPSHIPS):
+		if res.is_done(HEAVY_DROPSHIPS):
 			s.cargo += HEAVY_CARGO_BONUS
-		if Research.is_done(ARMOURED_DROPSHIPS):
+		if res.is_done(ARMOURED_DROPSHIPS):
 			s.max_hull *= ARMOURED_HULL_MULT
 			s.max_shields += ARMOURED_SHIELD_BONUS
 	if captain:

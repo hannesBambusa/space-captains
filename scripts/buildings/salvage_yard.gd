@@ -156,7 +156,7 @@ func accept_load(ship: Ship, amount: int, fraction: float, den_ruins: bool, rare
 		funds -= paid
 		total_paid += paid
 		if cap:
-			Economy.collect_fees(cap, paid)
+			Corps.economy(self).collect_fees(cap, paid)
 	var short := due - paid
 	if short > 0 and cap:
 		owed.append({"captain": cap, "amount": short})
@@ -184,7 +184,7 @@ func _pay_debts() -> void:
 		d["amount"] = int(d["amount"]) - pay
 		if cap:
 			cap.credits_earned += pay
-			Economy.collect_fees(cap, pay)
+			Corps.economy(self).collect_fees(cap, pay)
 		if int(d["amount"]) <= 0:
 			owed.remove_at(0)
 
@@ -209,7 +209,7 @@ func price_of(ore: int, units: int) -> int:
 
 ## Most units of [param ore] the player can buy keeping [param floor_credits].
 func affordable(ore: int, floor_credits: int = 0) -> int:
-	var budget := Economy.credits - floor_credits
+	var budget := Corps.economy(self).credits - floor_credits
 	if budget <= 0:
 		return 0
 	return mini(stock[ore], floori(float(budget) / maxf(ask(ore), 0.01)))
@@ -221,7 +221,7 @@ func buy(ore: int, units: int, floor_credits: int = 0) -> int:
 	if units <= 0:
 		return 0
 	var cost := price_of(ore, units)
-	if not Economy.spend(cost, PackedInt32Array(), Ledger.SALVAGE, "Bought %s at the Salvage Yard" % Economy.ore_name(ore)):
+	if not Corps.economy(self).spend(cost, PackedInt32Array(), Ledger.SALVAGE, "Bought %s at the Salvage Yard" % Economy.ore_name(ore)):
 		return 0
 	stock[ore] -= units
 	# Paid now; the ore waits at the yard's depot for a cargo shuttle.
@@ -231,7 +231,7 @@ func buy(ore: int, units: int, floor_credits: int = 0) -> int:
 	else:
 		var got := PackedInt32Array([0, 0, 0])
 		got[ore] = units
-		Economy.add(0, got)
+		Corps.economy(self).add(0, got)
 	funds += cost
 	total_sold[ore] += units
 	total_sales += cost
@@ -252,11 +252,11 @@ func _auto_buy() -> void:
 	for i in TYPES:
 		if stock[i] <= 0:
 			continue
-		var before := Economy.credits
+		var before := Corps.economy(self).credits
 		var n := buy(i, stock[i], credit_floor)
 		if n > 0:
 			parts.append("%d %s" % [n, Economy.ore_name(i)])
-			spent += before - Economy.credits
+			spent += before - Corps.economy(self).credits
 	if not parts.is_empty():
 		EventLog.post("Bought %s from the Salvage Yard (-%s cr)" % [", ".join(parts), Fmt.amount(spent)],
 				EventLog.Kind.INFO, building, Vector3.INF, "salvage_yard_buy")

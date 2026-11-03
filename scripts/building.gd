@@ -296,7 +296,7 @@ func hire_block_reason() -> String:
 	var supply := StationSupply.hire_block(self)
 	if not supply.is_empty():
 		return supply
-	return Economy.shortfall_text(def.hire_cost_credits)
+	return Corps.economy(self).shortfall_text(def.hire_cost_credits)
 
 
 ## Pays the hire cost and spawns a ship with a new captain. Null on failure.
@@ -304,7 +304,7 @@ func hire_block_reason() -> String:
 func hire(personality: int = -1) -> Ship:
 	if not hire_block_reason().is_empty():
 		return null
-	if not Economy.spend(def.hire_cost_credits, PackedInt32Array(), Ledger.HIRES, "Hire at %s" % display_name):
+	if not Corps.economy(self).spend(def.hire_cost_credits, PackedInt32Array(), Ledger.HIRES, "Hire at %s" % display_name):
 		return null
 	if captain_rng == null:
 		captain_rng = RandomNumberGenerator.new()
@@ -382,7 +382,7 @@ func replacement_block_reason(captain: Captain, player_pays: bool) -> String:
 	if not supply.is_empty():
 		return supply.replace("no hiring here", "no new ships here")
 	if player_pays:
-		return Economy.shortfall_text(def.ship_cost)
+		return Corps.economy(self).shortfall_text(def.ship_cost)
 	if captain.wallet < def.ship_cost:
 		return "Wallet %s of %s cr" % [Fmt.amount(captain.wallet), Fmt.amount(def.ship_cost)]
 	return ""
@@ -394,11 +394,11 @@ func buy_replacement(captain: Captain, player_pays: bool) -> Ship:
 	if not replacement_block_reason(captain, player_pays).is_empty():
 		return null
 	if player_pays:
-		if not Economy.spend(def.ship_cost, PackedInt32Array(), Ledger.SHIPS, "New ship at %s" % display_name):
+		if not Corps.economy(self).spend(def.ship_cost, PackedInt32Array(), Ledger.SHIPS, "New ship at %s" % display_name):
 			return null
 	else:
 		captain.wallet -= def.ship_cost
-		Economy.add_income(roundi(def.ship_cost * SHIP_SALE_SHARE), Ledger.SHIP_SALES, "Ship sold at %s" % display_name)
+		Corps.economy(self).add_income(roundi(def.ship_cost * SHIP_SALE_SHARE), Ledger.SHIP_SALES, "Ship sold at %s" % display_name)
 	captain.add_history("New %s from %s" % ["ship paid by the station" if player_pays else "ship bought", display_name])
 	var ship := adopt(captain)
 	EventLog.post("%s is flying again (%s)" % [captain.captain_name, "station paid" if player_pays else "bought a ship for %s cr" % Fmt.amount(def.ship_cost)],

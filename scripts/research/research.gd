@@ -1,3 +1,4 @@
+class_name CorpResearch
 extends Node
 ## Autoload "Research". What the colony has researched, the funded projects
 ## and the researchers hired at the Science Lab (ScienceLab, a station addon).
@@ -39,6 +40,8 @@ const START_MODULES: Array[StringName] = [
 	&"salvage_claw_1", &"salvage_hold_1", &"wreck_scanner_1",
 ]
 
+## The corp this research belongs to (Corps; the autoload is the player's).
+var corp_id: StringName = &"player"
 ## Tech id -> sim time it was done.
 var done: Dictionary = {}
 ## Tech id -> {credits: int (reserved), ore: PackedInt32Array (spent),
@@ -166,7 +169,7 @@ func unlock_text(t: TechDef) -> String:
 			mods.append(m.display_name)
 	if not mods.is_empty():
 		parts.append("The Factory can make %s." % " and ".join(mods) if mods.size() <= 2 else "The Factory can make %s and %s." % [", ".join(mods.slice(0, mods.size() - 1)), mods[mods.size() - 1]])
-	var mgr := BuildingManager.of(SystemWorld.home(get_tree())) if is_inside_tree() else null
+	var mgr := BuildingManager.of(Corps.hq_world(get_tree(), corp_id)) if is_inside_tree() else null
 	for id in t.unlock_buildings:
 		var def := mgr.def_by_id(id) if mgr else null
 		parts.append("Unlocks the %s." % (def.display_name if def else String(id).capitalize()))
@@ -179,7 +182,15 @@ func unlock_text(t: TechDef) -> String:
 # --- Funding -----------------------------------------------------------------------
 
 func lab() -> ScienceLab:
-	return ScienceLab.find(self) if is_inside_tree() else null
+	if not is_inside_tree():
+		return null
+	var hq := Corps.hq_world(get_tree(), corp_id)
+	return ScienceLab.find(hq) if hq else null
+
+
+## This corp's credits and ore.
+func eco() -> CorpEconomy:
+	return Corps.economy_of_corp(corp_id)
 
 
 ## Why [param t] cannot be funded now, or "".
@@ -198,7 +209,7 @@ func fund_problem(t: TechDef) -> String:
 		return "Needs research: %s first" % " and ".join(names)
 	if lab() == null:
 		return "Build a Science Lab first"
-	var short := Economy.shortfall_text(t.cost_credits, t.cost_ore())
+	var short := eco().shortfall_text(t.cost_credits, t.cost_ore())
 	if not short.is_empty():
 		return short + ": funding reserves the credits now"
 	return ""
@@ -208,7 +219,7 @@ func fund_problem(t: TechDef) -> String:
 func fund(t: TechDef) -> bool:
 	if not fund_problem(t).is_empty():
 		return false
-	if not Economy.spend(t.cost_credits, t.cost_ore(), Ledger.RESEARCH, "Funded %s" % t.display_name):
+	if not eco().spend(t.cost_credits, t.cost_ore(), Ledger.RESEARCH, "Funded %s" % t.display_name):
 		return false
 	projects[t.id] = {"credits": t.cost_credits, "ore": t.cost_ore(), "progress": 0.0, "funded_at": SimClock.time}
 	_log("Funded %s: %s reserved" % [t.display_name, t.cost_text()])
@@ -246,8 +257,8 @@ func cancel(t: TechDef) -> void:
 		return
 	var c := cancel_terms(t)
 	projects.erase(t.id)
-	Economy.add_income(int(c["credits"]), Ledger.RESEARCH_REFUND, "Cancelled %s" % t.display_name)
-	Economy.add(0, c["ore"])
+	eco().add_income(int(c["credits"]), Ledger.RESEARCH_REFUND, "Cancelled %s" % t.display_name)
+	eco().add(0, c["ore"])
 	var r := researcher_on(t.id)
 	if r:
 		r.project = &""
@@ -289,11 +300,11 @@ func hire_problem(a: Researcher) -> String:
 		return "The lab has room for %d researchers" % MAX_RESEARCHERS
 	if a == null or not applicants.has(a):
 		return "No such applicant"
-	return Economy.shortfall_text(a.hire_cost)
+	return eco().shortfall_text(a.hire_cost)
 
 
 func hire(a: Researcher) -> bool:
-	if not hire_problem(a).is_empty() or not Economy.spend(a.hire_cost, PackedInt32Array(), Ledger.HIRES, "Hired %s" % a.researcher_name):
+	if not hire_problem(a).is_empty() or not eco().spend(a.hire_cost, PackedInt32Array(), Ledger.HIRES, "Hired %s" % a.researcher_name):
 		return false
 	applicants.erase(a)
 	a.hired_at = SimClock.time
@@ -381,7 +392,7 @@ func _pay_wage(r: Researcher, dt: float) -> void:
 	if whole < 1 and not r.unpaid:
 		return
 	whole = maxi(whole, 1)
-	if Economy.spend(whole, PackedInt32Array(), Ledger.UPKEEP, "Researcher wages"):
+	if eco().spend(whole, PackedInt32Array(), Ledger.UPKEEP, "Researcher wages"):
 		r.wage_due = maxf(r.wage_due - float(whole), 0.0)
 		if r.unpaid:
 			r.unpaid = false
@@ -446,7 +457,7 @@ func grant(t: TechDef) -> void:
 	if projects.has(t.id):
 		var c := int(projects[t.id].get("credits", 0))
 		projects.erase(t.id)
-		Economy.add_income(c, Ledger.RESEARCH_REFUND, "Funding back: %s" % t.display_name)
+		eco().add_income(c, Ledger.RESEARCH_REFUND, "Funding back: %s" % t.display_name)
 		var r := researcher_on(t.id)
 		if r:
 			r.project = &""
@@ -526,7 +537,7 @@ func load_state(d: Dictionary) -> void:
 		var p: Dictionary = d["projects"][id]
 		if cat.find(StringName(id)) == null:
 			# A tech that no longer exists: give its reserve back.
-			Economy.add(int(p.get("credits", 0)), PackedInt32Array(p.get("ore", [])), Ledger.RESEARCH_REFUND, "Removed research project")
+			eco().add(int(p.get("credits", 0)), PackedInt32Array(p.get("ore", [])), Ledger.RESEARCH_REFUND, "Removed research project")
 			continue
 		projects[StringName(id)] = {"credits": int(p.get("credits", 0)), "ore": PackedInt32Array(p.get("ore", [0, 0, 0])),
 				"progress": float(p.get("progress", 0.0)), "funded_at": float(p.get("funded_at", 0.0))}

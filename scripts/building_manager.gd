@@ -288,7 +288,7 @@ func addon_problem(def: BuildingDef, bay: int, check_cost: bool = true) -> Strin
 	if addon_in_bay(bay):
 		return "Bay %d holds the %s" % [bay, addon_in_bay(bay).display_name]
 	if check_cost:
-		return Economy.shortfall_text(def.cost_credits, def.cost_ore())
+		return Corps.economy(self).shortfall_text(def.cost_credits, def.cost_ore())
 	return ""
 
 
@@ -298,7 +298,7 @@ func addon_problem(def: BuildingDef, bay: int, check_cost: bool = true) -> Strin
 func install_addon(def: BuildingDef, bay: int, finished: bool = false, label: String = "") -> Building:
 	if not addon_problem(def, bay, not finished).is_empty():
 		return null
-	if not finished and not Economy.spend(def.cost_credits, def.cost_ore(), Ledger.BUILDINGS, def.display_name):
+	if not finished and not Corps.economy(self).spend(def.cost_credits, def.cost_ore(), Ledger.BUILDINGS, def.display_name):
 		return null
 	var b := _spawn(def, Vector3.ZERO, 0.0, label, bay)
 	if finished:
@@ -330,8 +330,8 @@ func plan_placement(def: BuildingDef, offset: Vector3, check_cost: bool = true, 
 	var pos := StationKeepouts.flat(offset)
 	p.yaw = fixed_yaw if not is_nan(fixed_yaw) else default_yaw(def, pos)
 	p.problem = _base_problem(def, pos, p.yaw)
-	if p.is_valid() and check_cost and not Economy.can_afford(def.cost_credits, def.cost_ore()):
-		p.problem = Economy.shortfall_text(def.cost_credits, def.cost_ore())
+	if p.is_valid() and check_cost and not Corps.economy(self).can_afford(def.cost_credits, def.cost_ore()):
+		p.problem = Corps.economy(self).shortfall_text(def.cost_credits, def.cost_ore())
 	return p
 
 
@@ -499,7 +499,7 @@ func count_of(def: BuildingDef) -> int:
 ## (ForwardStations.free_slots).
 func max_count_for(def: BuildingDef) -> int:
 	if def.id == ForwardStations.BUILD_ID and is_inside_tree():
-		return count_of(def) + ForwardStations.free_slots(get_tree())
+		return count_of(def) + ForwardStations.free_slots(get_tree(), Corps.corp_of_node(self))
 	if forward and def.forward_max_count >= 0:
 		return def.forward_max_count
 	return def.max_count
@@ -516,7 +516,7 @@ func allows(def: BuildingDef) -> bool:
 func limit_reason(def: BuildingDef) -> String:
 	if not allows(def):
 		return "Home station only: not built at a forward station"
-	var locked := Research.building_lock_reason(def.id)
+	var locked := Corps.research(self).building_lock_reason(def.id)
 	if not locked.is_empty():
 		return locked
 	if not def.in_service:
@@ -544,7 +544,7 @@ func place(def: BuildingDef, offset: Vector3, yaw: float = NAN) -> Building:
 	var p := plan_placement(def, offset, true, yaw)
 	if not p.is_valid():
 		return null
-	if not Economy.spend(def.cost_credits, def.cost_ore(), Ledger.BUILDINGS, def.display_name):
+	if not Corps.economy(self).spend(def.cost_credits, def.cost_ore(), Ledger.BUILDINGS, def.display_name):
 		return null
 	return _spawn(def, offset, p.yaw)
 

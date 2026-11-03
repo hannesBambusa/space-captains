@@ -22,6 +22,8 @@ const COST_PER_HULL := RepairBay.COST_PER_HULL * (1.0 - RepairBay.PLAYER_SHARE)
 const FIELDS: PackedStringArray = ["repairing", "repair_session_paid", "repair_total_paid", "_repair_credit"]
 
 var repairing := false
+## A node of the owning structure: whose credits pay (Corps.economy).
+var owner_node: Node
 ## Credits paid for repairs this session / ever.
 var repair_session_paid: int = 0
 var repair_total_paid: int = 0
@@ -52,7 +54,7 @@ func _repair(d: Durability, dt: float, rate: float) -> void:
 	if _repair_credit < cost:
 		# Whole credits up front; the change is kept for the next step.
 		var need := ceili(cost - _repair_credit)
-		if Economy.credits < need or not Economy.spend(need, PackedInt32Array(), Ledger.REPAIRS, "Structure repairs"):
+		if _eco().credits < need or not _eco().spend(need, PackedInt32Array(), Ledger.REPAIRS, "Structure repairs"):
 			if repairing:
 				end_session()
 			return
@@ -88,3 +90,7 @@ func load_state(d: Dictionary) -> void:
 	for n in FIELDS:
 		if d.has(n):
 			set(n, d[n])
+
+
+func _eco() -> CorpEconomy:
+	return Corps.economy(owner_node) if is_instance_valid(owner_node) else Economy

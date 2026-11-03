@@ -257,7 +257,7 @@ func remove_cluster(belt: AsteroidCluster) -> void:
 			_label_radii.remove_at(j)
 	cluster_removed.emit(belt)
 	# Contracts pointing at it (escorts linked to its mining) lose the target.
-	for c in ContractBoard.get_listed():
+	for c in ContractBoard.get_listed(&""):
 		if c.target == belt:
 			c.target = null
 	remove_child(belt)

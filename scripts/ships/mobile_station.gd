@@ -68,6 +68,8 @@ const AMBUSH_HULL := Vector2(0.08, 0.3)
 const AMBUSH_ESCORT_HULL := Vector2(0.15, 0.45)
 
 var number: int = 1
+## The corp it belongs to (Corps; the yard's station's), founded as its station.
+var corp: StringName = &"player"
 var state: State = State.PARKED
 ## Destination system and site ({planet, orbit_radius, period, angle}).
 var dest: StringName = &""
@@ -133,7 +135,7 @@ func _fallback_model() -> Node3D:
 
 
 func get_display_name() -> String:
-	return "Forward Station %d" % number
+	return "Forward Station %d" % number if corp == Corps.PLAYER else "%s convoy %d" % [Corps.display_name(corp), number]
 
 
 func get_status_text() -> String:
@@ -195,8 +197,7 @@ func warp_destination() -> String:
 
 
 func _on_destroyed(_killer: Node3D) -> void:
-	EventLog.post("%s was destroyed in %s: the station is lost, nothing refunded" % [get_display_name(), _system_name(_here())],
-			EventLog.Kind.LOSS, null, global_position)
+	_feed(corp, "%s was destroyed in %s: the station is lost, nothing refunded" % [get_display_name(), _system_name(_here())], EventLog.Kind.LOSS, global_position)
 
 
 ## Leaving this world (a jump, the system going to data, destroyed): the
@@ -217,6 +218,8 @@ func _leave_world() -> void:
 func destination_problem(system_id: StringName, planet: PlanetBody) -> String:
 	if state != State.PARKED and state != State.WAITING:
 		return "%s is already on its way" % get_display_name()
+	if corp != Corps.PLAYER:
+		return "Not your station"
 	var why := ForwardStations.site_problem(get_tree(), system_id, planet, self)
 	if not why.is_empty():
 		return why
@@ -243,6 +246,29 @@ func set_destination(system_id: StringName, planet: PlanetBody) -> bool:
 	note = ""
 	EventLog.post("%s will fly to %s in %s: escort contract posted (%d cr per escort)" % [get_display_name(), planet.def.name, _system_name(dest), escort_pay],
 			EventLog.Kind.INFO, self)
+	status_changed.emit(self)
+	return true
+
+
+## The rival AI's order (rival corporation plan, R8): [param target] at
+## planet [param planet_name], checked on the defs (the system may be data).
+## The escort contract goes up for the acting corp. False with a warning.
+func set_destination_site(target: StringName, planet_name: String) -> bool:
+	if state != State.PARKED:
+		return false
+	var s := ForwardStations.site_on(target, planet_name)
+	if s.is_empty():
+		return false
+	dest = target
+	site = s
+	var c := ContractBoard.post_escort(self, escort_pay, MAX_ESCORTS)
+	if c == null:
+		dest = &""
+		site = {}
+		return false
+	_link_contract(c)
+	state = State.WAITING
+	note = ""
 	status_changed.emit(self)
 	return true
 
@@ -472,6 +498,8 @@ func _deploy_step(dt: float) -> void:
 func _found() -> void:
 	var sid := _here()
 	var s := site.duplicate()
+	if corp != Corps.PLAYER:
+		s["corp"] = String(corp)
 	var fs := ForwardStations.of(get_tree())
 	var why := fs.found_problem(sid, s) if fs else "No forward stations"
 	if not why.is_empty():
@@ -514,7 +542,7 @@ static func finish_convoy(_tree: SceneTree, w: SystemWorld, c: EscortContract, w
 	c.trips_completed += 1
 	c._set_status(Contract.Status.COMPLETED)
 	if n > 0:
-		EventLog.post("%s escorts paid: %d escort%s, %s cr" % [who, n, "" if n == 1 else "s", Fmt.amount(paid)], EventLog.Kind.REWARD)
+		_feed(c.corp, "%s escorts paid: %d escort%s, %s cr" % [who, n, "" if n == 1 else "s", Fmt.amount(paid)], EventLog.Kind.REWARD)
 
 
 # --- Site ------------------------------------------------------------------------------
@@ -585,7 +613,7 @@ static func _system_name(id: StringName) -> String:
 # --- Save ---------------------------------------------------------------------------
 
 func save_fields() -> Dictionary:
-	return {"number": number, "state": state, "dest": String(dest), "site": site.duplicate(true), "pay": escort_pay,
+	return {"number": number, "corp": String(corp), "state": state, "dest": String(dest), "site": site.duplicate(true), "pay": escort_pay,
 			"park": park_offset if park_offset != Vector3.INF else null, "deploy_t": deploy_t, "note": note,
 			"contract": SaveIds.of(contract) if contract and not contract.is_finished() else 0}
 
@@ -596,6 +624,7 @@ static func create_from(ctx: Node, d: Dictionary, refs: SaveRefs) -> MobileStati
 	var md: Dictionary = d.get("mobile", {})
 	var s := MobileStation.new()
 	s.setup_station(int(md.get("number", 0)))
+	s.corp = StringName(md.get("corp", String(Corps.PLAYER)))
 	s.state = int(md.get("state", State.PARKED)) as State
 	s.dest = StringName(md.get("dest", ""))
 	s.site = (md.get("site", {}) as Dictionary).duplicate(true)
@@ -662,8 +691,18 @@ static func next_number(tree: SceneTree) -> int:
 
 
 ## Live or as data, every mobile station.
-static func count_all(tree: SceneTree) -> int:
-	return _all_dicts().size() + (tree.get_nodes_in_group(MOBILE_GROUP).filter(func(n: Node) -> bool: return not (n as MobileStation).dead).size() if tree else 0)
+## [param of_corp] "" = every corp's.
+static func count_all(tree: SceneTree, of_corp: StringName = &"") -> int:
+	var n := 0
+	for d in _all_dicts():
+		if of_corp.is_empty() or StringName((d.get("mobile", {}) as Dictionary).get("corp", String(Corps.PLAYER))) == of_corp:
+			n += 1
+	if tree:
+		for x in tree.get_nodes_in_group(MOBILE_GROUP):
+			var ms := x as MobileStation
+			if not ms.dead and (of_corp.is_empty() or ms.corp == of_corp):
+				n += 1
+	return n
 
 
 ## A mobile station (other than [param skip]) is headed for [param id].
@@ -723,7 +762,7 @@ static func end_transit_data(sid: StringName, d: Dictionary) -> bool:
 	md["state"] = State.CRUISE
 	var s: Dictionary = md.get("site", {})
 	s["angle"] = facing_angle(s, _planet_position(sid, s, SimClock.time), d["position"] as Vector3, SimClock.time)
-	EventLog.post("Forward Station %d arrived in %s: flying to %s" % [int(md.get("number", 0)), _system_name(sid), String(s.get("planet", "?"))], EventLog.Kind.INFO)
+	_feed(StringName(md.get("corp", String(Corps.PLAYER))), "Forward Station %d arrived in %s: flying to %s" % [int(md.get("number", 0)), _system_name(sid), String(s.get("planet", "?"))], EventLog.Kind.INFO)
 	return true
 
 
@@ -757,6 +796,8 @@ static func _found_data(tree: SceneTree, sid: StringName, st: RemoteSystemState,
 	var md: Dictionary = d["mobile"]
 	var fs := ForwardStations.of(tree)
 	var s: Dictionary = (md.get("site", {}) as Dictionary).duplicate(true)
+	if StringName(md.get("corp", String(Corps.PLAYER))) != Corps.PLAYER:
+		s["corp"] = String(md["corp"])
 	var why := fs.found_problem(sid, s) if fs else "No forward stations"
 	if not why.is_empty():
 		md["state"] = State.CRUISE
@@ -813,8 +854,18 @@ static func ambush_data(sid: StringName, d: Dictionary) -> bool:
 		hurt += 1
 	var who := "Forward Station %d" % int(md.get("number", 0))
 	if float(dur["hull"]) <= 0.0:
-		EventLog.post("%s was destroyed by raiders in %s: the station is lost, nothing refunded" % [who, _system_name(sid)], EventLog.Kind.LOSS)
+		_feed(StringName(md.get("corp", String(Corps.PLAYER))), "%s was destroyed by raiders in %s: the station is lost, nothing refunded" % [who, _system_name(sid)], EventLog.Kind.LOSS)
 		return true
-	EventLog.post("Raiders ambushed %s in %s: hull -%s%s" % [who, _system_name(sid), Fmt.amount(roundi(loss)),
+	_feed(StringName(md.get("corp", String(Corps.PLAYER))), "Raiders ambushed %s in %s: hull -%s%s" % [who, _system_name(sid), Fmt.amount(roundi(loss)),
 			", %d escort%s damaged" % [hurt, "" if hurt == 1 else "s"] if hurt > 0 else ", no escort to cover it"], EventLog.Kind.COMBAT)
 	return false
+
+
+## A feed line about a mobile station of [param of_corp]: the rival's go to
+## its private intel, not the player's feed.
+static func _feed(of_corp: StringName, text: String, kind: EventLog.Kind, at: Vector3 = Vector3.INF) -> void:
+	var r := Corps.rival(of_corp)
+	if r:
+		r.mind.note(text)
+		return
+	EventLog.post(text, kind, null, at)

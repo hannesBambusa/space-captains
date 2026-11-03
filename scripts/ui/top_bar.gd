@@ -28,6 +28,8 @@ extends PanelContainer
 signal home_pressed
 ## Emitted by the MAP button (the HUD opens the cluster map).
 signal map_pressed
+## Emitted by the RIVAL button (the HUD opens the Rival panel).
+signal rival_pressed
 ## Emitted by a click on the credits (the HUD opens the ledger).
 signal ledger_pressed
 ## Emitted by a click on the research box (the HUD selects the Science Lab).
@@ -115,6 +117,9 @@ class TipLabel:
 		return RichTooltip.make(tip, accent, 340.0)
 
 
+## The RIVAL button (hidden without a rival); tinted red at war.
+var _rival: Button
+
 func _ready() -> void:
 	theme_type_variation = &"TopBarPanel"
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -161,6 +166,15 @@ func _ready() -> void:
 	map.pressed.connect(func() -> void: map_pressed.emit())
 	sys_box.add_child(UIUtil.spacer(4.0))
 	sys_box.add_child(map)
+	# The rival corporation (only in games with one).
+	_rival = UIUtil.button("RIVAL", &"ChipButton")
+	_rival.custom_minimum_size.y = 24.0
+	_rival.tooltip_text = "The rival corporation: diplomacy, war and intel (R)"
+	_rival.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_rival.pressed.connect(func() -> void: rival_pressed.emit())
+	_rival.visible = Corps.has_rival()
+	sys_box.add_child(UIUtil.spacer(4.0))
+	sys_box.add_child(_rival)
 	h.add_child(UIUtil.spacer())
 	# Centre: resources.
 	var res := HBoxContainer.new()
@@ -326,6 +340,7 @@ func _process(delta: float) -> void:
 		_shield_timer = 0.2
 		_update_shield()
 		_update_research()
+		_update_rival()
 	var t := int(SimClock.time)
 	var text := "%02d:%02d:%02d" % [floori(t / 3600.0), floori(t / 60.0) % 60, t % 60]
 	if _time.text != text:
@@ -728,3 +743,37 @@ func _update_speed() -> void:
 	else:
 		_speed.text = "%dx" % int(SimClock.speed) if SimClock.speed >= 1.0 else "%.2fx" % SimClock.speed
 		_speed.remove_theme_color_override("font_color")
+
+
+## The RIVALS button: shown with rivals; one rival's stance after contact,
+## with several the count met and at war; red while any is at war with you.
+func _update_rival() -> void:
+	if _rival == null:
+		return
+	_rival.visible = Corps.has_rival()
+	if not Corps.has_rival():
+		return
+	var war := 0
+	var met := 0
+	var gone := 0
+	for r in Corps.rivals:
+		if r.mind.eliminated:
+			gone += 1
+		elif Corps.corps_at_war(r.id, Corps.PLAYER):
+			war += 1
+		if r.mind.tie(Corps.PLAYER).contact:
+			met += 1
+	var text := "RIVALS"
+	if Corps.rivals.size() == 1:
+		var r := Corps.rivals[0]
+		var t := r.mind.tie(Corps.PLAYER)
+		text = "RIVAL: GONE" if gone > 0 else "RIVAL: WAR" if war > 0 else "RIVAL" if not t.contact else "RIVAL: %s" % t.stance_name().to_upper()
+	else:
+		text = "RIVALS %d" % Corps.rivals.size()
+		if met > 0:
+			text += ": %d MET" % met
+		if war > 0:
+			text += ", %d AT WAR" % war
+	if _rival.text != text:
+		_rival.text = text
+	_rival.add_theme_color_override("font_color", HudStyle.BAD if war > 0 else HudStyle.TEXT_BRIGHT)

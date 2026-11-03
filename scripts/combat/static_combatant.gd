@@ -7,7 +7,15 @@ extends Node3D
 
 
 func get_faction() -> int:
-	return Combat.Faction.PLAYER
+	if not Corps.has_rival():
+		return Combat.Faction.PLAYER
+	# The corp of the system it stands in (a structure never moves system).
+	if _corp_faction < 0 and is_inside_tree():
+		_corp_faction = Combat.faction_of_corp(Corps.corp_of_node(self))
+	return _corp_faction if _corp_faction >= 0 else Combat.Faction.PLAYER
+
+
+var _corp_faction := -1
 
 
 func get_aim_velocity() -> Vector3:

@@ -38,7 +38,7 @@ const KIND_MOBILE := "mobile"
 const SLOTS: Array[int] = [ShipModule.Slot.TOOL, ShipModule.Slot.CARGO, ShipModule.Slot.DEFENSE, ShipModule.Slot.ENGINE, ShipModule.Slot.SENSOR]
 
 const BRAIN_FIELDS: PackedStringArray = ["last_refusal", "last_refusal_target", "last_decision", "_timer", "_resting_on_break", "_calm_time", "_threat_timer", "_escort_wait_home"]
-const MERC_FIELDS: PackedStringArray = ["retreating", "solo_brave", "_patrol_until", "_patrol_angle", "_patrol_point", "_wait_time", "_ward_was_out", "_passing_timer", "_patrol_zone_id"]
+const MERC_FIELDS: PackedStringArray = ["retreating", "solo_brave", "_patrol_until", "_patrol_angle", "_patrol_point", "_wait_time", "_ward_was_out", "_passing_timer", "_patrol_zone_id", "strike_system", "strike_until"]
 const SHIP_FIELDS: PackedStringArray = ["trip_lowest_hull", "trip_was_hit", "repair_credit", "repair_session_paid", "repair_from", "_visit_timer", "_visit_pending", "_trait_timer"]
 
 

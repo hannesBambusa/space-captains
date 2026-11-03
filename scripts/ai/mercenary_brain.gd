@@ -54,7 +54,10 @@ extends CaptainBrain
 ## no hop while hit in the last few seconds or with a hostile near (the
 ## spool is dropped and tried again once clear).
 
-enum Mode { NONE, PATROL, DEFEND, BOUNTY, ESCORT }
+## STRIKE: a corp war raid (rival corporation plan, [WarStrikes]): through
+## the gates to [member strike_system], then at the other corp's station,
+## then home.
+enum Mode { NONE, PATROL, DEFEND, BOUNTY, ESCORT, STRIKE }
 
 ## Sim seconds between target / retreat checks.
 const AI_INTERVAL := 0.3
@@ -106,6 +109,8 @@ const SHIP_WARP_DROP := 1700.0
 ## Self-defence: hits remembered this long (damage fades over it), sim
 ## seconds; attackers turned on within this range, metres.
 const HIT_MEMORY := 6.0
+## A war strike gives up after this long at the target, sim seconds.
+const STRIKE_TIME := 420.0
 const RETARGET_RANGE := 3500.0
 ## A switch to an attacker holds this long, sim seconds; after it, another
 ## attacker takes over only with this much more recent damage.
@@ -113,6 +118,10 @@ const RETARGET_LOCK := 6.0
 const RETARGET_MARGIN := 1.3
 
 var mode: Mode = Mode.NONE
+## The system of a war strike ([method strike_to]), "" = none.
+var strike_system: StringName = &""
+## Sim time a strike gives up at the target (stuck, nothing left to hit).
+var strike_until: float = 0.0
 var combat_target: Node3D
 ## True while heading home to repair.
 var retreating: bool = false
@@ -172,6 +181,8 @@ func get_status_text() -> String:
 				return "Waiting for %s" % w.get_display_name()
 			return "Escorting %s" % w.get_display_name()
 		State.HUNTING:
+			if mode == Mode.STRIKE:
+				return "War strike on %s" % _system_label(strike_system)
 			if fleet:
 				var tn := trip.contract.get_target_name() if trip and trip.contract else "?"
 				match fleet.state:
@@ -402,7 +413,7 @@ func _decide_merc() -> void:
 		return
 	if _rejoin_fleet():
 		return
-	var e := evaluator.pick(self, ContractBoard.get_available(-1, system_id()))
+	var e := evaluator.pick(self, ContractBoard.get_available(-1, system_id(), corp_id()))
 	if e and e.accept and _take(e.contract, e):
 		return
 	if e and not e.accept:
@@ -573,7 +584,7 @@ func _enter_work_state() -> void:
 	match mode:
 		Mode.PATROL, Mode.DEFEND:
 			_set_state(State.PATROLLING)
-		Mode.BOUNTY:
+		Mode.BOUNTY, Mode.STRIKE:
 			_set_state(State.HUNTING)
 		Mode.ESCORT:
 			_set_state(State.ESCORTING)
@@ -586,6 +597,8 @@ func return_home(for_repairs: bool) -> void:
 	if for_repairs and not retreating and captain:
 		EventLog.post("%s returning for repairs" % captain.captain_name, EventLog.Kind.COMBAT, ship)
 	retreating = for_repairs
+	if mode == Mode.STRIKE:
+		strike_system = &""
 	_end_trip()
 	_clear_guard()
 	_patrol_zone_id = 0
@@ -595,8 +608,10 @@ func return_home(for_repairs: bool) -> void:
 
 
 func begin_transit() -> void:
+	var strike := strike_system
 	return_home(false)
 	mode = Mode.NONE
+	strike_system = strike
 
 
 ## Heading home from another system (an escort after a forward station's
@@ -615,7 +630,84 @@ func _gate_home() -> bool:
 func end_transit() -> void:
 	mode = Mode.NONE
 	retreating = false
+	if takes_ship_back():
+		# At the strike's target: the attack starts here.
+		_begin_strike()
+		return
+	strike_system = &""
 	super.end_transit()
+
+
+# --- War strikes (rival corporation plan) -------------------------------------
+
+## Sends the ship on a war strike to [param system_id]: through the gates,
+## then against the other corp's station there. False when it cannot go.
+func strike_to(system_id: StringName) -> bool:
+	var here := SystemWorld.of(ship)
+	if here == null or ship.dead or ship.transit:
+		return false
+	strike_system = system_id
+	if here.system_id == system_id:
+		_begin_strike()
+		return true
+	var hops := Sector.hops_between(here.system_id, system_id)
+	if hops.is_empty() or GateTransit.start(ship, hops) == null:
+		strike_system = &""
+		return false
+	return true
+
+
+## A gate trip on a strike ends at the target: the brain flies on.
+func takes_ship_back() -> bool:
+	if strike_system.is_empty() or not is_instance_valid(ship):
+		return false
+	var w := SystemWorld.of(ship)
+	return w != null and w.system_id == strike_system
+
+
+func _begin_strike() -> void:
+	mode = Mode.STRIKE
+	trip = null
+	combat_target = null
+	_closing = false
+	strike_until = SimClock.time + STRIKE_TIME
+	if captain:
+		note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "War strike on %s" % _system_label(strike_system), "Sent by the corp at war")
+	_set_state(State.HUNTING)
+
+
+## What a strike shoots at in this system, best first: the shield bubble,
+## the turrets and shield generators, the station and the other
+## structures, then the other corp's ships.
+func strike_targets() -> Array[Node3D]:
+	var out: Array[Node3D] = []
+	var me := ship.get_faction()
+	var ranks := {}
+	for n in SystemWorld.nodes_in(ship, Combat.GROUP):
+		var c := n as Node3D
+		if c == null or not Combat.is_live_target(c):
+			continue
+		var f := int(c.call(&"get_faction"))
+		if f == Combat.Faction.SCAVENGER or not Combat.hostile(f, me):
+			continue
+		var r := 4
+		if c is StationShield:
+			r = 0
+		elif c is DefenseStructure:
+			r = 1
+		elif c is StructureHull:
+			r = 2
+		elif c is Ship:
+			r = 3
+		ranks[c] = r * 1e7 + SpaceNav.flat_distance(ship.global_position, c.global_position)
+		out.append(c)
+	out.sort_custom(func(a: Node3D, b: Node3D) -> bool: return float(ranks[a]) < float(ranks[b]))
+	return out
+
+
+static func _system_label(id: StringName) -> String:
+	var def := Sector.system_def(id) if not id.is_empty() else null
+	return def.system_name if def else "home" if id == ClusterNetwork.HOME_ID else "?"
 
 
 func _end_trip() -> void:
@@ -694,6 +786,11 @@ func _space_update(dt: float) -> void:
 		Mode.PATROL, Mode.DEFEND:
 			_patrol_step(dt)
 			_reconsider_contracts(dt)
+		Mode.STRIKE:
+			var w := SystemWorld.of(ship)
+			var st := w.sys.home_station if w and w.sys else null
+			if st:
+				ship.set_world_goal(st.global_position, Vector3.ZERO, Vector3.ZERO, 300.0)
 		Mode.BOUNTY:
 			if fleet:
 				fleet.steer(ship)
@@ -760,7 +857,7 @@ func _reconsider_contracts(dt: float) -> void:
 	_timer = rng.randf_range(profile.evaluate_interval.x, profile.evaluate_interval.y)
 	if mode != Mode.PATROL or ship.hull_fraction() < MercenaryEvaluator.MIN_HULL:
 		return
-	var e := evaluator.pick(self, ContractBoard.get_available(-1, system_id()))
+	var e := evaluator.pick(self, ContractBoard.get_available(-1, system_id(), corp_id()))
 	if e and e.accept:
 		_take(e.contract, e)
 
@@ -799,6 +896,15 @@ func _check_job() -> bool:
 			if _patrol_zone_id != 0 and patrol_zone() == null:
 				_patrol_zone_id = 0
 			if SimClock.time > _patrol_until and defence_threats().is_empty():
+				return_home(false)
+				return false
+		Mode.STRIKE:
+			var foe := Corps.corp_at_home(strike_system)
+			var war := Corps.corps_at_war(corp_id(), foe)
+			if SimClock.time > strike_until or not war or strike_targets().is_empty():
+				if captain:
+					note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "War strike on %s is over, heading home" % _system_label(strike_system),
+							"Nothing left to hit" if war else "The war is over")
 				return_home(false)
 				return false
 		Mode.BOUNTY:
@@ -842,6 +948,10 @@ func _pick_target() -> Node3D:
 	if Combat.is_live_target(la) and not (la is Ship) and ship.durability.seconds_since_hit() < 5.0 and pos.distance_to(la.global_position) < RETALIATE_RANGE:
 		return la
 	match mode:
+		Mode.STRIKE:
+			var st := strike_targets()
+			if not st.is_empty():
+				return st[0]
 		Mode.BOUNTY:
 			if fleet:
 				# Engaging: the focus. Forming up or on the way: the ship
@@ -967,7 +1077,7 @@ func claim_constructors() -> Array[Node3D]:
 	var site := _guard()
 	for n in SystemWorld.nodes_in(ship, Combat.GROUP):
 		var c := n as ClaimConstructor
-		if c == null or not Combat.is_live_target(c) or not Combat.hostile(c.get_faction(), ship.faction):
+		if c == null or not Combat.is_live_target(c) or not Combat.hostile(c.get_faction(), ship.get_faction()):
 			continue
 		var d := SpaceNav.flat_distance(ship.global_position, c.global_position)
 		var near := d <= CONSTRUCTOR_REACH
@@ -1149,7 +1259,7 @@ func answer_alarm(site: Node3D, site_name: String, attacker: Node3D, until: floa
 
 func _hostile_ships_near(ctx: Node, pos: Vector3, radius: float) -> Array[Node3D]:
 	var out: Array[Node3D] = []
-	for h in Combat.hostiles_near(ctx, pos, radius, ship.faction):
+	for h in Combat.hostiles_near(ctx, pos, radius, ship.get_faction()):
 		if h is Ship:
 			out.append(h)
 	return out

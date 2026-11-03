@@ -38,7 +38,7 @@ static func why(brain: CaptainBrain, e: RoleEvaluator.Evaluation) -> String:
 		return String(t["why"])
 	match e.reason:
 		RoleEvaluator.CANT_PAY:
-			return "The station has %s cr, one payout is %s cr" % [Fmt.amount(Economy.credits), Fmt.amount(e.contract.reward)]
+			return "The station has %s cr, one payout is %s cr" % [Fmt.amount(e.contract.eco().credits), Fmt.amount(e.contract.reward)]
 		RoleEvaluator.NOT_WORTH_TRIP:
 			if t.has("jumps"):
 				return "%s through the gates and back costs %.2f for a %s, too much for pay worth %.2f: better pay would do it" % [
@@ -136,7 +136,7 @@ static func merc_refusal_reason(brain: CaptainBrain, e: RoleEvaluator.Evaluation
 		MercenaryEvaluator.FLEET_TOO_WEAK:
 			return "too strong for any fleet, needs about %d mercs like ours, at most %d fly together" % [int(t.get("fleet_estimate", 0)), int(t.get("fleet_cap", MercFleet.MAX_SIZE))]
 		RoleEvaluator.CANT_PAY:
-			return "the station can't pay (%s cr on hand)" % Fmt.amount(Economy.credits)
+			return "the station can't pay (%s cr on hand)" % Fmt.amount(e.contract.eco().credits if e.contract else Economy.credits)
 		RoleEvaluator.NOT_WORTH_TRIP:
 			return "not worth the trip, %s (%.1f km, danger %d, %s)" % [wants, float(t.get("km", 0.0)), danger, pname]
 		RoleEvaluator.NOT_WORTH_IT:

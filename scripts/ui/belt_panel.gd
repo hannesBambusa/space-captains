@@ -214,7 +214,7 @@ func _rebuild_contracts() -> void:
 	for c in _contracts.get_children():
 		_contracts.remove_child(c)
 		c.queue_free()
-	var list := ContractBoard.get_for_target(belt)
+	var list := ContractBoard.get_for_target(belt, Corps.PLAYER)
 	_contracts_header.text = "CONTRACTS  %d" % list.size()
 	if list.is_empty():
 		_contracts.add_child(UIUtil.label("None posted. Miners only work clusters with a contract.", &"DimLabel"))
@@ -229,7 +229,7 @@ func _rebuild_contracts() -> void:
 func _update_escort_warning() -> void:
 	var lines: PackedStringArray = []
 	if belt:
-		for c in ContractBoard.get_for_target(belt):
+		for c in ContractBoard.get_for_target(belt, Corps.PLAYER):
 			var w := c.get_warning_text()
 			if not w.is_empty():
 				lines.append("%s. %s." % [w, c.get_warning_hint()])

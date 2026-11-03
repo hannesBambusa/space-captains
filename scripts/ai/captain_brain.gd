@@ -345,8 +345,14 @@ static func lower_first(text: String) -> String:
 ## best refused one, or null when there is nothing for this role).
 func score_contracts(contracts: Array[Contract] = []) -> RoleEvaluator.Evaluation:
 	if contracts.is_empty():
-		contracts = ContractBoard.get_available(-1, system_id())
+		contracts = ContractBoard.get_available(-1, system_id(), corp_id())
 	return evaluator.pick(self, contracts)
+
+
+## The corp this captain works for (its home building's, Corps.owner_of).
+func corp_id() -> StringName:
+	var c := Corps.owner_of(ship) if is_instance_valid(ship) else &""
+	return c if not c.is_empty() else Corps.PLAYER
 
 
 ## The system the ship is in (its contracts are there), "" = unknown (any).
@@ -361,7 +367,7 @@ func _decide() -> void:
 		note_repairs_first()
 		_back_to_docked()
 		return
-	var contracts := ContractBoard.get_available(-1, system_id())
+	var contracts := ContractBoard.get_available(-1, system_id(), corp_id())
 	var e := evaluator.pick(self, contracts)
 	if e == null:
 		last_decision = "No contracts posted"
@@ -794,7 +800,7 @@ func assess_threat() -> float:
 	if ship.durability.seconds_since_hit() < 4.0:
 		t += 0.55
 	var pos := ship.global_position
-	var hostiles := Combat.hostiles_near(ship, pos, THREAT_RADIUS, ship.faction)
+	var hostiles := Combat.hostiles_near(ship, pos, THREAT_RADIUS, ship.get_faction())
 	for h in hostiles:
 		var d := SpaceNav.flat_distance(pos, h.global_position)
 		t += 0.1 + 0.35 * (1.0 - d / THREAT_RADIUS)

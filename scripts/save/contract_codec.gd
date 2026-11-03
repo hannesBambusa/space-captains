@@ -52,6 +52,8 @@ static func save_contract(c: Contract, listed: bool) -> Dictionary:
 	d["target"] = SaveIds.of(c.target) if is_instance_valid(c.target) else 0
 	d["takers"] = SaveUtil.ids(c.takers)
 	d["system"] = String(system_of(c))
+	if c.corp != Corps.PLAYER:
+		d["corp"] = String(c.corp)
 	if c is MiningContract:
 		var mc := c as MiningContract
 		d["belt"] = mc.belt.def.name if is_instance_valid(mc.belt) else ""
@@ -204,6 +206,7 @@ static func _make(s: Dictionary, refs: SaveRefs, belts: Dictionary, ctx: Node) -
 	SaveUtil.apply_props(c, base)
 	# Old saves: every contract was home's.
 	c.system_id = StringName(s.get("system", String(ClusterNetwork.HOME_ID)))
+	c.corp = StringName(s.get("corp", String(Corps.PLAYER)))
 	if c is EscortContract and target and (c as EscortContract).ward == null:
 		c.target = target
 	return c

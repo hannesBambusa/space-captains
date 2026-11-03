@@ -122,6 +122,7 @@ static func capture_globals(tree: SceneTree) -> Dictionary:
 	d["ledger"] = Economy.ledger.save_state()
 	d["planets"] = PlanetRaidContract.save_records()
 	d["cluster"] = Sector.save_state()
+	d["corps"] = Corps.save_state()
 	var tut := Tutorial.of(tree)
 	d["tutorial"] = tut.save_state() if tut else {}
 	return d
@@ -171,6 +172,7 @@ static func _save_clusters(sys: SolarSystem) -> Dictionary:
 		var bd := b.def.to_dict()
 		bd["left"] = b.loads_left
 		bd["total"] = b.reserve
+		bd["gone"] = Array(b.gone_list())
 		list.append(bd)
 	return {"list": list, "spawner": sys.cluster_spawner.save_state() if sys.cluster_spawner else {}}
 
@@ -184,7 +186,7 @@ static func _restore_clusters(sys: SolarSystem, cd: Dictionary) -> void:
 			# Was fading out: gone (its contracts end with their trips).
 			continue
 		var b := sys.add_cluster(ClusterDef.from_dict(bd))
-		b.set_loads_left(int(bd.get("left", b.reserve)), int(bd.get("total", b.reserve)))
+		b.set_loads_left(int(bd.get("left", b.reserve)), int(bd.get("total", b.reserve)), PackedInt32Array(bd.get("gone", [])))
 	if sys.cluster_spawner:
 		sys.cluster_spawner.load_state(cd.get("spawner", {}))
 
@@ -271,6 +273,8 @@ static func apply_globals(d: Dictionary) -> void:
 	PlanetRaidContract.load_records(d.get("planets", {}))
 	# Before the scene builds: home's gates get their targets.
 	Sector.load_state(d.get("cluster", {}))
+	# After the network (the rival's name and home come from its seed).
+	Corps.load_state(d.get("corps", {}))
 	var rng: Dictionary = d.get("rng", {})
 	SaveUtil.set_rng(SalvageContract.rng, rng.get("salvage", {}))
 	SaveUtil.set_rng(Career.rng, rng.get("career", {}))

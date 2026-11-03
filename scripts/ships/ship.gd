@@ -139,6 +139,9 @@ var home: Building
 ## Berth index at [member home].
 var slot_index: int = 0
 var faction: Combat.Faction = Combat.Faction.PLAYER
+var _corp_home: Object = null
+var _corp_known := false
+var _corp_faction := Combat.Faction.PLAYER
 var loadout: ShipLoadout
 var stats: ShipStats
 var durability: Durability
@@ -194,6 +197,11 @@ var _evade_want := 0.0
 
 
 ## Call before adding to the tree.
+## Research of this ship's corp (its home building's; the player's without one).
+func corp_research() -> CorpResearch:
+	return Corps.research(home) if is_instance_valid(home) and home.is_inside_tree() else Research
+
+
 func setup_ship(ship_captain: Captain, model_path: String, home_building: Building, berth: int) -> void:
 	captain = ship_captain
 	home = home_building
@@ -219,9 +227,10 @@ func _ready() -> void:
 		# The hull is what this ship is, whatever loadout it was handed.
 		loadout.role_name = ROLE_NAMES[role]
 		loadout.unlocked_slots = Reputation.slots_for(captain.rank)
-	stats = loadout.derive(captain)
-	if faction == Combat.Faction.PLAYER and not Research.tech_completed.is_connected(_on_research_done):
-		Research.tech_completed.connect(_on_research_done)
+	stats = loadout.derive(captain, corp_research())
+	var res := corp_research()
+	if faction == Combat.Faction.PLAYER and not res.tech_completed.is_connected(_on_research_done):
+		res.tech_completed.connect(_on_research_done)
 	max_speed = stats.max_speed
 	acceleration = stats.acceleration
 	turn_rate_deg = stats.turn_rate_deg
@@ -410,7 +419,14 @@ func _on_warp_changed(_m: ShipMover, state: ShipMover.Warp) -> void:
 # --- Combatant API (see Combat) ---------------------------------------------
 
 func get_faction() -> int:
-	return faction
+	if faction != Combat.Faction.PLAYER or not Corps.has_rival():
+		return faction
+	# A rival corp's ship (its home building's corp); cached per home.
+	if not _corp_known or not is_same(_corp_home, home):
+		_corp_known = true
+		_corp_home = home
+		_corp_faction = Combat.faction_of_corp(Corps.owner_of(self))
+	return _corp_faction
 
 
 func is_alive() -> bool:
@@ -472,6 +488,7 @@ func destroy(killer: Node3D = null) -> void:
 		if _leaves_scrap():
 			world.spawn_scrap(pos, world.ship_scrap, world.ship_scrap_life, 26.0, "%s wreck" % get_display_name(), self)
 	_on_destroyed(killer)
+	RivalCorp.note_destroyed(self, killer)
 	destroyed.emit(self, killer)
 	if world:
 		world.notify_destroyed(self, killer)
@@ -489,7 +506,7 @@ func refit() -> void:
 		loadout.unlocked_slots = Reputation.slots_for(captain.rank)
 	var hf := durability.fraction() if durability else 1.0
 	var sf := durability.shield_fraction() if durability else 1.0
-	stats = loadout.derive(captain)
+	stats = loadout.derive(captain, corp_research())
 	max_speed = stats.max_speed
 	acceleration = stats.acceleration
 	turn_rate_deg = stats.turn_rate_deg

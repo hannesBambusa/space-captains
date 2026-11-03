@@ -48,6 +48,17 @@ var station_site: Dictionary:
 		var st := Sector.state(system_id)
 		return st.station if st else {}
 
+## The corp owning this system's station (Corps; the player without one).
+var corp_id: StringName:
+	get:
+		return Corps.corp_of_system(system_id) if not system_id.is_empty() else Corps.PLAYER
+
+## A corp headquarters: home, or a site with "hq" (the rival's home
+## station: full bays, its own Factory and Science Lab, no upkeep).
+var is_hq: bool:
+	get:
+		return is_home or bool(station_site.get("hq", false))
+
 var sys: SolarSystem:
 	get:
 		return _member(^"SolarSystem", SolarSystem.GROUP) as SolarSystem

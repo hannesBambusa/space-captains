@@ -9,9 +9,9 @@ extends Node
 ##   Sfx.ui(&"ui_click")                  # flat cue (UI bus or SFX bus, see SOUNDS)
 ## Signals wired here, no hooks: Research.tech_completed (research_done),
 ## every BaseButton's pressed (ui_click).
-## Files: recorded Kenney CC0 packs, levelled to one loudness (loudest
-## 100 ms at -14 dBFS); the mix lives in the "db" column below
-## (assets/audio/sfx/CREDITS.md).
+## Files: assets/audio/sfx/README.md lists them; tools/prep_sfx.py turns
+## source sounds into takes levelled to one loudness (loudest 100 ms at
+## -14 dBFS); the mix lives in the "db" column below.
 ##
 ## Only the viewed system is heard ([ViewManager]): a sound in any other
 ## World3D is dropped before it takes a player. Each live system gets its
@@ -30,7 +30,7 @@ extends Node
 ## jitter (pitch +-), zoom (max camera distance, m; 3D only), unit (unit
 ## size per metre of camera distance; 3D only).
 const SOUNDS := {
-	&"autocannon": {"path": "autocannon", "variants": 3, "db": -10.0, "limit": 4, "gap": 0.08, "jitter": 0.08, "zoom": 9000.0, "unit": 0.5},
+	&"autocannon": {"path": "laser_bolt", "variants": 4, "db": -10.0, "limit": 4, "gap": 0.08, "jitter": 0.08, "zoom": 9000.0, "unit": 0.5},
 	&"missile_launch": {"path": "missile_launch", "db": -7.0, "limit": 3, "gap": 0.2, "jitter": 0.06, "zoom": 15000.0, "unit": 0.6},
 	&"hull_hit": {"path": "hull_hit", "variants": 3, "db": -9.0, "limit": 4, "gap": 0.07, "jitter": 0.12, "zoom": 6000.0, "unit": 0.45},
 	&"shield_hit": {"path": "shield_hit", "db": -12.0, "limit": 3, "gap": 0.08, "jitter": 0.1, "zoom": 6000.0, "unit": 0.45},

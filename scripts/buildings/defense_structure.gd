@@ -41,6 +41,7 @@ var _own_mats: Dictionary = {}
 
 ## Called by Building after the node is added (see BuildingDef.service_script).
 func setup(owner_building: Building) -> void:
+	repair.owner_node = self
 	building = owner_building
 	position = Vector3(0.0, aim_height, 0.0)
 	durability = Durability.new(max_hull, max_shields, shield_regen)

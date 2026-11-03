@@ -163,7 +163,7 @@ func expected_rate(ore: int) -> float:
 
 ## Player ore above the reserve and the held yard ore.
 func surplus(ore: int) -> int:
-	return maxi(Economy.ore[ore] - kept(ore) - held_units(ore), 0)
+	return maxi(Corps.economy(self).ore[ore] - kept(ore) - held_units(ore), 0)
 
 
 ## The market whose reserve and held yard ore count: home's Factory's. A
@@ -173,7 +173,7 @@ func surplus(ore: int) -> int:
 func primary() -> FactoryMarket:
 	if not is_inside_tree():
 		return self
-	var home := SystemWorld.home(get_tree())
+	var home := Corps.hq_world(get_tree(), Corps.corp_of_node(self))
 	for n in SystemWorld.nodes_in(home, Factory.GROUP) if home else []:
 		var f := n as Factory
 		if f and f.market and is_instance_valid(f.building):
@@ -213,7 +213,7 @@ func held_units(ore: int) -> int:
 	var p := primary()
 	if p != self:
 		return p.held_units(ore)
-	return mini(held[ore], Economy.ore[ore])
+	return mini(held[ore], Corps.economy(self).ore[ore])
 
 
 ## Sets the ask by hand: follow market goes off for this type.
@@ -285,7 +285,7 @@ func consume(cost: PackedInt32Array) -> bool:
 ## Sells [param units] of [param ore] at once at the Factory's willingness,
 ## unit by unit (the price sinks as its stock fills). Returns credits paid.
 func sell_now(ore: int, units: int) -> int:
-	units = mini(units, Economy.ore[ore])
+	units = mini(units, Corps.economy(self).ore[ore])
 	if units <= 0:
 		return 0
 	var credits := 0.0
@@ -318,7 +318,7 @@ func can_refine(ore: int) -> bool:
 func refine_batches(ore: int) -> int:
 	if not REFINE.has(ore):
 		return 0
-	return floori(float(Economy.ore[ore]) / float(int(REFINE[ore]["batch"])))
+	return floori(float(Corps.economy(self).ore[ore]) / float(int(REFINE[ore]["batch"])))
 
 
 ## "10 heavy ore into 12 iron and 4 titanium".
@@ -338,13 +338,13 @@ func refine(ore: int, batches: int = 1) -> int:
 	var r: Dictionary = REFINE[ore]
 	var take := Economy.zero_ore()
 	take[ore] = int(r["batch"]) * n
-	if not Economy.spend(0, take):
+	if not Corps.economy(self).spend(0, take):
 		return 0
 	var out := Economy.zero_ore()
 	var per: Array = r["out"]
 	for i in per.size():
 		out[i] = int(per[i]) * n
-	Economy.add(0, out)
+	Corps.economy(self).add(0, out)
 	EventLog.post("Factory refined %d %s into %s" % [take[ore], Economy.ore_name(ore), Economy.cost_text(out).replace(" + ", " and ")],
 			EventLog.Kind.INFO, null, Vector3.INF, "factory_refine")
 	changed.emit()
@@ -357,7 +357,7 @@ func sim_step(dt: float) -> void:
 	if dt <= 0.0:
 		return
 	for i in TYPES:
-		held[i] = mini(held[i], Economy.ore[i])
+		held[i] = mini(held[i], Corps.economy(self).ore[i])
 		var draw := (export_base_per_min[i] + export_share_per_min[i] * stock[i]) * dt / 60.0
 		stock[i] = maxf(stock[i] - draw, 0.0)
 		if follow[i]:
@@ -407,8 +407,8 @@ func _pay(ore: int, units: int, credits: float) -> int:
 	_credit_carry = total - float(paid)
 	var cost := Economy.zero_ore()
 	cost[ore] = units
-	Economy.spend(0, cost)
-	Economy.add_income(paid, Ledger.FACTORY, "Ore sold to the Factory")
+	Corps.economy(self).spend(0, cost)
+	Corps.economy(self).add_income(paid, Ledger.FACTORY, "Ore sold to the Factory")
 	total_units[ore] += units
 	total_credits += paid
 	sold.emit(ore, units, paid)

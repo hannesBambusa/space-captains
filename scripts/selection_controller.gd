@@ -84,6 +84,13 @@ func get_selected_planet() -> PlanetBody:
 func select(target: Node3D) -> void:
 	if target == selected:
 		return
+	# The rival corp's stations, buildings, zones and ships are not yours to run.
+	if is_instance_valid(target) and Corps.has_rival() and not (target is PlanetBody or target is JumpGate or target is AsteroidCluster or target is ScavengerDen or target is ScrapField) \
+			and Corps.is_rival(Corps.owner_of(target)):
+		var pm := get_tree().root.get_node_or_null(^"PauseMenu")
+		if pm and pm.has_method(&"toast"):
+			pm.call(&"toast", "%s: %s (the Rival panel, R)" % [Corps.display_name(Corps.owner_of(target)), Combat.name_of(target, String(target.name))])
+		return
 	_clear_ring()
 	selected = target
 	if target is Building:

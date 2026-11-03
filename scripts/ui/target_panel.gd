@@ -283,7 +283,7 @@ func _refresh() -> void:
 ## with the numbers.
 func _fleet_text() -> String:
 	var bounty: BountyContract = null
-	for c in ContractBoard.get_for_target(target):
+	for c in ContractBoard.get_for_target(target, Corps.PLAYER):
 		if c is BountyContract:
 			bounty = c as BountyContract
 	var probe := bounty if bounty else BountyContract.new(target, reward, MercFleet.MAX_SIZE)
@@ -319,7 +319,7 @@ func _rebuild_bounties() -> void:
 		c.queue_free()
 	if not is_instance_valid(target):
 		return
-	var list := ContractBoard.get_for_target(target)
+	var list := ContractBoard.get_for_target(target, Corps.PLAYER)
 	if list.is_empty():
 		_bounties.add_child(UIUtil.label("None posted. Salvagers work it anyway when it is worth the trip; a contract adds a bonus." if target is ScrapField else "None posted. Mercenaries only hunt it for a bounty, or when it comes near home.", &"DimLabel"))
 		(_bounties.get_child(0) as Label).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

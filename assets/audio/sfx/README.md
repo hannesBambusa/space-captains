@@ -11,13 +11,13 @@ positioned), mono or stereo for UI cues. Trim leading silence.
 
 | File | When it plays | Length | Notes |
 |---|---|---|---|
-| `autocannon_1.wav`, `_2`, `_3` | Every gun shot (ships, turrets, dens) | 0.1-0.4 s | Very frequent; 3 variants, picked at random |
+| `laser_bolt_1.wav` .. `_4` | Every gun shot (ships, turrets, dens) | 1 s | Done (from `laser bolt/`); 4 variants, picked at random |
 | `hull_hit_1.wav`, `_2`, `_3` | A shot hits hull | 0.1-0.4 s | Very frequent; 3 variants |
-| `shield_hit.wav` | A shot hits a ship whose shield holds | 0.2-0.5 s | |
+| `shield_hit.wav` | A shot hits a ship whose shield holds | 0.8 s | Done (from `shiled hit/`) |
 | `explosion_small_1.wav`, `_2`, `_3` | A ship dies | 1-2 s | 3 variants |
 | `explosion_big.wav` | A station, den or building dies | 2-4 s | Heavy, low |
-| `warp_spool.wav` | Ship charges its warp drive | about 2.5 s | Rising |
-| `warp_jump.wav` | Ship jumps to warp | 0.5-1.5 s | |
+| `warp_spool.wav` | Ship charges its warp drive | 3 s | Done (from `warp spooling/`) |
+| `warp_jump.wav` | Ship jumps to warp | 2.5 s | Done (from `starting warp/`) |
 | `gate_transit.wav` | Ship goes through a jump gate (in and out) | 1-2 s | |
 | `dock.wav` | Ship docks at a station | 0.5-1.5 s | Mechanical clunk |
 | `undock.wav` | Ship leaves a station | 0.5-1.5 s | |
@@ -36,6 +36,11 @@ positioned), mono or stereo for UI cues. Trim leading silence.
 | `contract_posted.wav` | Player posts a contract | 0.2-0.6 s | |
 
 Income makes no sound, by design.
+
+Source sounds in any format can go in a subfolder; turn them into takes with
+`python3 tools/prep_sfx.py "assets/audio/sfx/<folder>" <stem> --max 1.0`
+(trims leading silence, mono, fade-out, levels; adds a .gdignore so the
+sources do not ship). More variants: bump `variants` in `SOUNDS`.
 
 After adding files, open the project in Godot once (or run a build) so they
 get imported. Then tune loudness in the `db` column of `SOUNDS`.
