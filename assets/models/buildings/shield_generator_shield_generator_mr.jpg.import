@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://c3xqhr1odgv3c"
-path="res://.godot/imported/shield_generator_shield_mr.jpg-2aac39409b18cb161097cfd9faac735f.ctex"
+uid="uid://dxrnabf85m2y2"
+path="res://.godot/imported/shield_generator_shield_generator_mr.jpg-b909d7213655f099c53d19dfb5168287.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "09d07d4247a06ef1c79e9bd4f97ac16b"
+"md5": "ec184ffdf2f8aeafeb1e130537c82deb"
 }
 
 [deps]
 
-source_file="res://assets/models/buildings/shield_generator_shield_mr.jpg"
-dest_files=["res://.godot/imported/shield_generator_shield_mr.jpg-2aac39409b18cb161097cfd9faac735f.ctex"]
+source_file="res://assets/models/buildings/shield_generator_shield_generator_mr.jpg"
+dest_files=["res://.godot/imported/shield_generator_shield_generator_mr.jpg-b909d7213655f099c53d19dfb5168287.ctex"]
 
 [params]
 

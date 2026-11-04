@@ -1,10 +1,9 @@
-[gd_scene load_steps=32 format=3]
+[gd_scene load_steps=31 format=3]
 
 [ext_resource type="Shader" path="res://shaders/space_sky.gdshader" id="1_sky"]
 [ext_resource type="Script" path="res://scripts/system_world.gd" id="0_world"]
 [ext_resource type="Script" path="res://scripts/solar_system.gd" id="2_system"]
 [ext_resource type="Resource" path="res://data/systems/home_system.tres" id="3_def"]
-[ext_resource type="Script" path="res://scripts/space_dust.gd" id="4_dust"]
 [ext_resource type="PackedScene" path="res://scenes/rts_camera.tscn" id="5_cam"]
 [ext_resource type="Script" path="res://scripts/building_manager.gd" id="7_bm"]
 [ext_resource type="Resource" path="res://data/buildings/mining_outpost.tres" id="8_outpost"]
@@ -66,11 +65,6 @@ environment = SubResource("env")
 [node name="SolarSystem" type="Node3D" parent="."]
 script = ExtResource("2_system")
 system_def = ExtResource("3_def")
-
-[node name="SpaceDust" type="MultiMeshInstance3D" parent="."]
-script = ExtResource("4_dust")
-mote_count = 5000
-max_camera_distance = 2600.0
 
 [node name="RTSCamera" parent="." instance=ExtResource("5_cam")]
 min_distance = 80.0

@@ -434,13 +434,19 @@ func _science() -> bool:
 	var res := research()
 	if res.lab() == null:
 		return false
-	if res.researchers.size() < (1 if _minutes() < 20.0 else 2) and not res.applicants.is_empty():
-		var a := res.applicants[0]
+	# Researchers turn work outside their field down: hire for the field the
+	# next project needs, one extra when nobody on staff would take it.
+	var need := _research_need(res)
+	var cap := (1 if _minutes() < 20.0 else 2) + (1 if need >= 0 and not res.researchers.is_empty() else 0)
+	if res.researchers.size() < mini(cap, CorpResearch.MAX_RESEARCHERS) and not res.applicants.is_empty():
+		var a: Researcher = null
 		for x in res.applicants:
-			if x.skill > a.skill:
+			var fits := need < 0 or int(x.field) == need
+			var a_fits := a != null and (need < 0 or int(a.field) == need)
+			if a == null or (fits and not a_fits) or (fits == a_fits and x.skill > a.skill):
 				a = x
-		if spare() >= a.hire_cost + 300 and res.hire(a):
-			_note("", "Hired researcher %s" % a.researcher_name)
+		if (need < 0 or int(a.field) == need or res.researchers.is_empty()) and spare() >= a.hire_cost + 300 and res.hire(a):
+			_note("", "Hired researcher %s (%s)" % [a.researcher_name, a.field_name()])
 			return true
 	# No new funding while it saves for the Explorer Outpost (tech costs ore too).
 	var goal := _saving_for()
@@ -450,7 +456,7 @@ func _science() -> bool:
 		return false
 	for id in TECH_ORDER:
 		var t := res.catalog().find(id)
-		if t == null or not res.fund_problem(t).is_empty():
+		if t == null or not res.fund_problem(t).is_empty() or not _someone_takes(res, t):
 			continue
 		if spare() < t.cost_credits + 300:
 			return false
@@ -458,6 +464,36 @@ func _science() -> bool:
 			_note("", "Funded research: %s" % t.display_name)
 			return true
 	return false
+
+
+## True when an idle researcher would take [param t] (or nobody is hired yet).
+func _someone_takes(res: CorpResearch, t: TechDef) -> bool:
+	if res.researchers.is_empty():
+		return true
+	for r in res.researchers:
+		if r.is_idle() and ResearchChoice.accepts(r, t):
+			return true
+	return false
+
+
+## Field (TechDef.Field) the research needs a researcher for: a funded
+## project every researcher turned down, else the first fundable tech of
+## [constant TECH_ORDER] no researcher would take; -1 when none.
+func _research_need(res: CorpResearch) -> int:
+	for id: StringName in res.projects:
+		if res.researcher_on(id) == null and not res.refusal_of(id).is_empty():
+			var ft := res.catalog().find(id)
+			if ft:
+				return int(ft.field)
+	for id in TECH_ORDER:
+		var t := res.catalog().find(id)
+		if t == null or not res.fund_problem(t).is_empty():
+			continue
+		for r in res.researchers:
+			if ResearchChoice.accepts(r, t):
+				return -1
+		return int(t.field)
+	return -1
 
 
 ## A defence zone over the station once it has mercenaries.

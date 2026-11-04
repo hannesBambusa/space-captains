@@ -3,7 +3,9 @@ extends RoleEvaluator
 ## Mercenary scoring for bounty and escort contracts.
 ##   pay      = pay_weight * Greed * reward / PAY_SCALE (bounty or escort scale)
 ##   distance = distance_weight * one-way travel time from the home outpost
-##              (warp hop plus flight) / MERC_TRAVEL_SCALE_S. Distance alone
+##              (from the ship itself when chaining bounties,
+##              MercenaryBrain.job_origin; warp hop plus flight) /
+##              MERC_TRAVEL_SCALE_S. Distance alone
 ##              never refuses a job inside the system: a low score is "not
 ##              worth it" (or too dangerous), never a distance limit
 ##   danger   = danger_weight * Nerve * (danger - 1)^2 / 4 (escorts: half,
@@ -71,6 +73,9 @@ const JOIN_PER_TEAMWORK := 0.08
 const JOIN_PERSONALITY: Array[float] = [0.0, 0.15, -0.1, -0.05]
 ## Join chance lost per km from the rally point.
 const JOIN_PER_KM := 0.04
+## Most join chance distance can take: a merc out on a far zone patrol
+## still answers a fleet call instead of always saying no.
+const JOIN_KM_CAP := 0.15
 ## Join danger scale by how far the fleet with this ship falls short of the
 ## need (need / power), clamped to this range.
 const JOIN_COVER := Vector2(0.6, 1.3)
@@ -92,8 +97,9 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 		return evaluate_fleet_join(brain, bounty.fleet)
 	var e := Evaluation.new()
 	e.contract = contract
-	var site := contract.get_site_position(brain.home_position())
-	var km := SpaceNav.flat_distance(site, brain.home_position()) / 1000.0
+	var from := (brain as MercenaryBrain).job_origin() if brain is MercenaryBrain else brain.home_position()
+	var site := contract.get_site_position(from)
+	var km := SpaceNav.flat_distance(site, from) / 1000.0
 	var danger := contract.get_danger()
 	var escort := contract is EscortContract
 	var scale := ESCORT_PAY_SCALE if escort else BOUNTY_PAY_SCALE
@@ -210,7 +216,7 @@ func evaluate_fleet_join(brain: CaptainBrain, fleet: MercFleet) -> Evaluation:
 	var chance := JOIN_BASE + JOIN_PER_TEAMWORK * float((cap.effective_teamwork() if cap else 5) - 1)
 	if cap:
 		chance += JOIN_PERSONALITY[cap.personality]
-	chance += clampf((pay - 1.0) * 0.05, -0.2, 0.2) - JOIN_PER_KM * km
+	chance += clampf((pay - 1.0) * 0.05, -0.2, 0.2) - minf(JOIN_PER_KM * km, JOIN_KM_CAP)
 	# This ship would make the fleet strong enough to set out.
 	var completes := fleet.is_short() and with_me >= goal
 	if completes:

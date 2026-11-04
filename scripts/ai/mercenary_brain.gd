@@ -16,7 +16,9 @@ extends CaptainBrain
 ## - Alarms (ColonyAlarm): a structure, shuttle or the shield bubble under
 ##   fire within 5 km calls free mercs ([method answer_alarm]); they fly to
 ##   it and fight its attackers until the alarm is over.
-## - Bounty (HUNTING): fly to the target and fight it until it dies.
+## - Bounty (HUNTING): fly to the target and fight it until it dies. Then,
+##   with no repairs due, it takes the closest open bounty it would accept,
+##   weighed from where it is ([method _chain_bounty]), else it goes home.
 ## - Escort (ESCORTING): join a miner (or wait at its outpost for it to
 ##   launch), fly in formation, engage what comes near it, and finish when it
 ##   delivers (the board pays per trip) or docks.
@@ -152,6 +154,8 @@ var _closing: bool = false
 var _hits: Dictionary = {}
 ## The attacker turned on, and until when that choice holds.
 var _locked: WeakRef
+## True while weighing the next bounty from space (see [method job_origin]).
+var _chaining: bool = false
 var _lock_until: float = 0.0
 
 
@@ -862,6 +866,41 @@ func _reconsider_contracts(dt: float) -> void:
 		_take(e.contract, e)
 
 
+## Where job distances are measured from: the ship itself while it weighs
+## the next bounty out in space ([method _chain_bounty]), else its home.
+func job_origin() -> Vector3:
+	return ship.global_position if _chaining else home_position()
+
+
+## A bounty just ended out in space. With no repairs due, it weighs the
+## open bounties from where it is and takes the closest one it would accept
+## instead of flying home first. True when it took one.
+func _chain_bounty(done_name: String, done_why: String) -> bool:
+	if retreating or ship.dead or ship.transit or RepairBay.should_repair(ship, MercenaryEvaluator.MIN_HULL):
+		return false
+	var here := SystemWorld.of(ship)
+	if here == null or not is_instance_valid(ship.home) or here != SystemWorld.of(ship.home):
+		return false
+	var bounties := ContractBoard.get_available(Contract.Type.BOUNTY, system_id(), corp_id())
+	if bounties.is_empty():
+		return false
+	_end_trip()
+	_chaining = true
+	evaluator.pick(self, bounties)
+	_chaining = false
+	var best: RoleEvaluator.Evaluation = null
+	for e in evaluator.scored:
+		if e.accept and (best == null or float(e.terms.get("km", 0.0)) < float(best.terms.get("km", 0.0))):
+			best = e
+	if best == null:
+		return false
+	if captain and not done_name.is_empty():
+		note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Bounty on %s is over, on to %s" % [done_name, best.contract.get_target_name()],
+				"%s; hull %d%% needs no repairs and it is the closest bounty worth taking, %.1f km from here" % [done_why,
+				roundi(ship.hull_fraction() * 100.0), float(best.terms.get("km", 0.0))])
+	return _take(best.contract, best)
+
+
 ## Hull fraction below which a patrol ends early for repairs (profile minus
 ## half the Nerve offset).
 func repair_level() -> float:
@@ -909,9 +948,12 @@ func _check_job() -> bool:
 				return false
 		Mode.BOUNTY:
 			if trip == null or trip.contract.is_finished() or not Combat.is_live(trip.contract.target):
-				if trip and trip.contract:
-					note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Bounty on %s is over, heading home" % trip.contract.get_target_name(),
-							"The target is destroyed" if not Combat.is_live(trip.contract.target) else "The contract closed")
+				var done_name := trip.contract.get_target_name() if trip and trip.contract else ""
+				var done_why := "The target is destroyed" if trip and trip.contract and not Combat.is_live(trip.contract.target) else "The contract closed"
+				if _chain_bounty(done_name, done_why):
+					return false
+				if not done_name.is_empty():
+					note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Bounty on %s is over, heading home" % done_name, done_why)
 				return_home(false)
 				return false
 		Mode.ESCORT:

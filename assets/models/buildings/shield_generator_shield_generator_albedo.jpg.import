@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://yqtvwx6vl8op"
-path="res://.godot/imported/shield_generator_shield_normal.jpg-339bade4a9f33dc2cc4bcb6f5549611d.ctex"
+uid="uid://iruwmhl73yl3"
+path="res://.godot/imported/shield_generator_shield_generator_albedo.jpg-3ef9b0353281ffc278d16a479490ddbc.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "7af387492c079481a173492042756621"
+"md5": "2b210fb52adc7c53a5718e1840b374d9"
 }
 
 [deps]
 
-source_file="res://assets/models/buildings/shield_generator_shield_normal.jpg"
-dest_files=["res://.godot/imported/shield_generator_shield_normal.jpg-339bade4a9f33dc2cc4bcb6f5549611d.ctex"]
+source_file="res://assets/models/buildings/shield_generator_shield_generator_albedo.jpg"
+dest_files=["res://.godot/imported/shield_generator_shield_generator_albedo.jpg-3ef9b0353281ffc278d16a479490ddbc.ctex"]
 
 [params]
 

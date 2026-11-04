@@ -1,6 +1,11 @@
 // Sun surface: a burning plasma sphere in the star's colour (Star.build).
-// Layers, all in object space on the unit sphere, slowly turning with
-// differential rotation (the equator runs ahead of the poles):
+// Layers, all in object space on the unit sphere. The whole surface turns
+// as one (SPIN_CYCLES), so every layer rides the rotation; the motion inside
+// it is bounded loops in noise space (loop3), so the patterns boil in place
+// and never slide off or shear into streaks however long the game runs.
+// (A latitude-dependent spin winds the pattern up without end.) Every rate
+// is a whole number of cycles per LOOP s, Godot's TIME rollover, so the
+// hourly wrap of TIME shows no jump.
 //  - plasma: domain-warped fbm, the big churning flows;
 //  - granulation: Worley cells, bright tops and dark lanes between them,
 //    drifting and boiling;
@@ -24,6 +29,22 @@ uniform float flow_speed : hint_range(0.0, 4.0) = 1.0;
 uniform float spots : hint_range(0.0, 1.0) = 0.5;
 
 varying vec3 local_pos;
+
+// Godot's TIME rolls over every hour (rendering/limits/time/time_rollover_secs).
+const float LOOP = 3600.0;
+// Turns of the surface per LOOP: 6 = one turn every 10 minutes.
+const float SPIN_CYCLES = 6.0;
+
+// Angle that runs [param cycles] whole turns per LOOP.
+float cyc(float t, float cycles) {
+	return TAU * cycles * t / LOOP;
+}
+
+// A bounded wander in noise space: a Lissajous loop, cycles per LOOP on x
+// and a little faster on y and z so it does not read as a circle.
+vec3 loop3(float t, float cycles, vec3 phase) {
+	return vec3(sin(cyc(t, cycles) + phase.x), sin(cyc(t, cycles + 3.0) + phase.y), sin(cyc(t, cycles + 7.0) + phase.z));
+}
 
 vec3 hash33(vec3 p) {
 	p = fract(p * vec3(0.1031, 0.1030, 0.0973));
@@ -98,36 +119,38 @@ void vertex() {
 void fragment() {
 	float t = TIME * flow_speed;
 	vec3 n = normalize(local_pos);
-	// Differential rotation: the equator turns faster than the poles.
-	n = rotate_y(n, t * 0.01 * (1.0 - 0.4 * n.y * n.y));
+	// Rigid rotation: every layer below turns with the surface.
+	n = rotate_y(n, cyc(t, SPIN_CYCLES));
 	vec3 s = vec3(seed * 1.37, seed * 0.71, seed * 2.13);
 
 	// Big churning flows: fbm warped by fbm.
 	vec3 q = n * 2.6 + s;
-	vec3 warp = vec3(fbm(q + vec3(0.0, 0.0, t * 0.018)), fbm(q + vec3(5.2, 1.3, -t * 0.015)), fbm(q + vec3(9.7, 4.4, t * 0.012)));
+	vec3 warp = vec3(fbm(q + loop3(t, 17.0, vec3(0.0, 1.1, 2.3)) * 0.5),
+			fbm(q + vec3(5.2, 1.3, 0.0) + loop3(t, 13.0, vec3(2.9, 0.4, 1.7)) * 0.5),
+			fbm(q + vec3(9.7, 4.4, 0.0) + loop3(t, 11.0, vec3(1.3, 3.8, 0.6)) * 0.5));
 	vec3 p = n * 5.0 + warp * 1.8 + s;
-	float plasma = fbm(p + vec3(t * 0.02, -t * 0.015, 0.0));
+	float plasma = fbm(p + loop3(t, 19.0, vec3(0.7, 2.2, 4.1)) * 0.5);
 
 	// Granulation: rounded cell tops, soft dark lanes between them. The
 	// sample point is warped by small-scale noise so no cell is a polygon,
 	// and the lanes fade in and out so the grid never reads as a grid.
 	vec3 gp = n * 30.0 + warp * 2.2 + s;
-	gp += (vec3(vnoise(gp * 0.9 + t * 0.1), vnoise(gp * 0.9 + 7.3), vnoise(gp * 0.9 - 3.1)) - 0.5) * 1.1;
-	vec2 w = worley(gp, t * 0.35);
+	gp += (vec3(vnoise(gp * 0.9 + loop3(t, 60.0, vec3(0.0, 2.0, 4.0))), vnoise(gp * 0.9 + 7.3), vnoise(gp * 0.9 - 3.1)) - 0.5) * 1.1;
+	vec2 w = worley(gp, cyc(t, 200.0));
 	float lane = 1.0 - smoothstep(0.0, 0.42, w.y - w.x);
 	float dome = 1.0 - smoothstep(0.0, 0.9, w.x);
-	float cells = clamp(1.0 - lane * mix(0.35, 0.8, vnoise(n * 6.0 + s + t * 0.05)) + dome * 0.15, 0.0, 1.1);
+	float cells = clamp(1.0 - lane * mix(0.35, 0.8, vnoise(n * 6.0 + s + loop3(t, 30.0, vec3(1.0, 3.0, 5.0)))) + dome * 0.15, 0.0, 1.1);
 	vec3 fp = n * 85.0 + warp * 3.0 + s * 2.0;
 	fp += (vec3(vnoise(fp * 0.8), vnoise(fp * 0.8 + 4.2), vnoise(fp * 0.8 - 6.6)) - 0.5) * 1.2;
-	vec2 w2 = worley(fp, t * 0.6);
+	vec2 w2 = worley(fp, cyc(t, 344.0));
 	float fine_cells = 1.0 - (1.0 - smoothstep(0.0, 0.45, w2.y - w2.x)) * 0.5;
 
 	// Thin white-hot filaments along the flows.
-	float ridge = 1.0 - abs(fbm(p * 1.7 + vec3(-t * 0.03, t * 0.02, 0.0)) * 2.0 - 1.0);
+	float ridge = 1.0 - abs(fbm(p * 1.7 + loop3(t, 23.0, vec3(3.3, 0.9, 2.6)) * 0.6) * 2.0 - 1.0);
 	float filament = pow(ridge, 7.0);
 
 	// Sunspots: rare dark umbrae, a lighter ring of penumbra round each.
-	float spot_n = fbm(n * 4.2 + s * 0.53 + vec3(0.0, t * 0.002, 0.0));
+	float spot_n = fbm(n * 4.2 + s * 0.53 + loop3(t, 2.0, vec3(0.5, 1.5, 2.5)) * 0.3);
 	float th = mix(0.8, 0.58, spots);
 	float umbra = smoothstep(th + 0.035, th + 0.06, spot_n);
 	float penumbra = smoothstep(th, th + 0.035, spot_n) - umbra;

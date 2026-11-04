@@ -319,7 +319,9 @@ static func tech_line(t: TechDef) -> String:
 				miss.append(m.display_name)
 			return "Needs research: %s.  %s, %s" % [", ".join(miss), t.cost_text(), UIUtil.clock(t.research_time)]
 		"funded":
-			return "Waiting for a researcher, %d%% done. Reserved %s cr" % [roundi(Research.progress_of(t) * 100.0), UIUtil.amount(int(Research.projects[t.id]["credits"]))]
+			var no := Research.refusal_of(t.id)
+			return "%s, %d%% done. Reserved %s cr" % ["Turned down by " + no if not no.is_empty() else "Waiting for a researcher",
+					roundi(Research.progress_of(t) * 100.0), UIUtil.amount(int(Research.projects[t.id]["credits"]))]
 		"in_progress":
 			var r := Research.researcher_on(t.id)
 			return "%s, %d%%, %s left" % [r.researcher_name, roundi(Research.progress_of(t) * 100.0), UIUtil.clock(Research.eta_of(t))]
@@ -439,7 +441,14 @@ static func researcher_line(r: Researcher) -> String:
 	if r.unpaid:
 		return "Unpaid: the station cannot pay %s cr/min, research paused" % wage_text(r)
 	if r.is_idle():
-		return "Idle: fund a project to start" if Research.projects.is_empty() else "Idle: every funded project is taken"
+		if Research.projects.is_empty():
+			return "Idle: fund a project to start"
+		if not r.refused.is_empty():
+			var id: StringName = r.refused.keys()[0]
+			var rt := Research.catalog().find(id)
+			var more := r.refused.size() - 1
+			return "Idle: turned down %s, %s%s" % [rt.display_name if rt else String(id), r.refused[id], " (and %d more)" % more if more > 0 else ""]
+		return "Idle: every funded project is taken"
 	var t := Research.catalog().find(r.project)
 	if t == null:
 		return "Idle"

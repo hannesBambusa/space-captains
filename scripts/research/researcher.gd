@@ -1,9 +1,9 @@
 class_name Researcher
 extends RefCounted
 ## A scientist hired at the Science Lab (not a ship). Field, skill and
-## personality are rolled like a captain's. They pick their own project
-## among the funded ones ([ResearchChoice]); skill and a field match set how
-## fast they work ([method speed_on]).
+## personality are rolled like a captain's. They decide on the funded
+## projects themselves ([ResearchChoice]: take one, or turn it down with a
+## reason); skill and a field match set how fast they work ([method speed_on]).
 
 enum Personality { AMBITIOUS, CAUTIOUS, CURIOUS, METHODICAL }
 
@@ -49,6 +49,11 @@ var reason: String = ""
 var wage_due: float = 0.0
 ## The station could not pay the wage: no work until it can.
 var unpaid: bool = false
+## Sim time they went idle, -1 while on a project (restlessness, ResearchChoice).
+var idle_since: float = -1.0
+## Funded projects they turned down now: tech id -> reason (not saved,
+## rebuilt on the next lab step).
+var refused: Dictionary = {}
 
 
 static func generate(rng: RandomNumberGenerator, new_id: int) -> Researcher:
@@ -96,7 +101,8 @@ func is_idle() -> bool:
 
 func save_state() -> Dictionary:
 	return {"id": id, "name": researcher_name, "field": int(field), "skill": skill, "personality": int(personality), "hire_cost": hire_cost,
-			"project": project, "hired_at": hired_at, "completed": completed, "reason": reason, "wage_due": wage_due, "unpaid": unpaid}
+			"project": project, "hired_at": hired_at, "completed": completed, "reason": reason, "wage_due": wage_due, "unpaid": unpaid,
+			"idle_since": idle_since}
 
 
 static func from_save(d: Dictionary) -> Researcher:
@@ -113,4 +119,5 @@ static func from_save(d: Dictionary) -> Researcher:
 	r.reason = String(d.get("reason", ""))
 	r.wage_due = float(d.get("wage_due", 0.0))
 	r.unpaid = bool(d.get("unpaid", false))
+	r.idle_since = float(d.get("idle_since", -1.0))
 	return r

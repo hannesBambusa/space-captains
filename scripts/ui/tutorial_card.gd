@@ -390,7 +390,7 @@ func _text_for(id: StringName) -> PackedStringArray:
 		&"fund":
 			return ["Fund a project",
 					"Researchers choose their own projects, but only from the ones you pay for. Funding sets the credits aside at once.",
-					"Fund a project in the Science Lab panel. Survival systems or Ballistic calibration are cheap first picks."]
+					"Fund a project in your researcher's field (they may turn others down). Survival systems, Ballistic calibration and Cargo racks are cheap first picks."]
 		&"tech_done":
 			return ["Finish a project",
 					"Work has begun. Science is slow, so feel free to let the hours pass. I will report when it is done.",

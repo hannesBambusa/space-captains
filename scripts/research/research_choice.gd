@@ -1,35 +1,78 @@
 class_name ResearchChoice
 extends RefCounted
-## How a researcher picks a project among the funded ones nobody works on
-## (indirect control: you fund, they choose). Score = field factor x
-## personality factor x resume factor:
+## How a researcher decides on the funded projects nobody works on
+## (indirect control: you fund, they choose, like captains on contracts).
+## Score = field factor x personality factor x resume factor x restlessness:
 ##   field       1.0 in their field, 0.55 outside it
 ##   Ambitious   x(1 + 0.5 per tier above I) x(1 + credits / 1500)
 ##   Cautious    x1.8 defensive work, x0.6 weapons
 ##   Curious     x2.2 Planetary, x1.4 unlocks a building
 ##   Methodical  x1.5 tier I, x1.0 tier II, x0.7 tier III, x1.4 on cheap ones (under 600 cr)
 ##   resume      x1.3 when the project already has progress (x1.6 Methodical)
-## The best score wins; [method pick] returns it with a reason line that
-## names the factors and the runner-up.
+##   restless    x(1 + 0.08 per idle minute), at most x1.4
+## A project scoring under [constant ACCEPT] is turned down, with a reason
+## ([method refusal]): plain work outside their field never reaches it, a
+## personality pull (Curious on Planetary, Cautious on defence, Methodical on
+## small tier I steps) or picking up started work can. In-field work they
+## dislike they take once restless. The best accepted score wins; [method pick]
+## returns it with a reason line naming the factors and the runner-up, and
+## the turned-down ones with their reasons.
 
 const OFF_FIELD := 0.55
+## Score a project needs before a researcher takes it.
+const ACCEPT := 0.8
+## Restlessness per idle sim minute, and its cap.
+const RESTLESS_PER_MIN := 0.08
+const RESTLESS_MAX := 1.4
 
 
-## {tech: TechDef or null, score: float, reason: String}.
+## {tech: TechDef or null, score: float, reason: String,
+## refused: {tech id: reason}}.
 static func pick(r: Researcher, candidates: Array[TechDef], progress: Dictionary) -> Dictionary:
 	var scored: Array[Dictionary] = []
+	var refused := {}
 	for t in candidates:
 		var s := score(r, t, float(progress.get(t.id, 0.0)) > 0.0)
+		if float(s["score"]) < ACCEPT:
+			refused[t.id] = refusal(r, t)
+			continue
 		scored.append({"tech": t, "score": s["score"], "why": s["why"]})
 	if scored.is_empty():
-		return {"tech": null, "score": 0.0, "reason": "No funded project free"}
+		return {"tech": null, "score": 0.0, "reason": "No funded project free" if refused.is_empty() else "Turned down every free project", "refused": refused}
 	scored.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a["score"]) > float(b["score"]))
 	var best := scored[0]
 	var t := best["tech"] as TechDef
 	var reason := "Picked %s: %s, score %.2f" % [t.display_name, best["why"], float(best["score"])]
 	if scored.size() > 1:
 		reason += " over %s %.2f" % [(scored[1]["tech"] as TechDef).display_name, float(scored[1]["score"])]
-	return {"tech": t, "score": best["score"], "reason": reason}
+	return {"tech": t, "score": best["score"], "reason": reason, "refused": refused}
+
+
+## True when [param r] would take [param t] now.
+static func accepts(r: Researcher, t: TechDef, started: bool = false) -> bool:
+	return float(score(r, t, started)["score"]) >= ACCEPT
+
+
+## Why [param r] turns [param t] down, short: "outside their field",
+## "Cautious, dislikes weapons work", "not keen (tier III)".
+static func refusal(r: Researcher, t: TechDef) -> String:
+	var p := personality_factor(r, t)
+	if t.field != r.field and float(p["factor"]) * OFF_FIELD * restless(r) < ACCEPT:
+		return "outside their field (%s)" % r.field_name()
+	if float(p["factor"]) < 1.0:
+		match r.personality:
+			Researcher.Personality.CAUTIOUS:
+				return "Cautious, dislikes weapons work"
+			Researcher.Personality.METHODICAL:
+				return "Methodical, wants smaller steps than %s" % TechDef.TIER_NAMES[t.tier]
+	return "not keen on it"
+
+
+## Restlessness factor from the time [param r] has been idle.
+static func restless(r: Researcher) -> float:
+	if r.idle_since < 0.0:
+		return 1.0
+	return minf(1.0 + RESTLESS_PER_MIN * maxf(SimClock.time - r.idle_since, 0.0) / 60.0, RESTLESS_MAX)
 
 
 ## {score: float, why: String} for [param r] on [param t].
@@ -49,6 +92,10 @@ static func score(r: Researcher, t: TechDef, started: bool) -> Dictionary:
 		var resume := 1.6 if r.personality == Researcher.Personality.METHODICAL else 1.3
 		s *= resume
 		parts.append("already started x%.1f" % resume)
+	var rest := restless(r)
+	if rest > 1.0:
+		s *= rest
+		parts.append("idle a while x%.2f" % rest)
 	return {"score": s, "why": ", ".join(parts)}
 
 

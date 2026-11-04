@@ -210,7 +210,9 @@ static func pause_reason(t: TechDef) -> String:
 	var r := Research.researcher_on(t.id)
 	if r:
 		return "Out of credits for wages" if r.unpaid else ""
-	return "No researchers" if Research.researchers.is_empty() else "Waiting for a researcher"
+	if Research.researchers.is_empty():
+		return "No researchers"
+	return "Turned down" if not Research.refusal_of(t.id).is_empty() else "Waiting for a researcher"
 
 
 ## The home system's Science Lab, from any view (research is global).

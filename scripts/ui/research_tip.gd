@@ -158,6 +158,8 @@ static func _paused_text(why: String) -> String:
 			return "no researchers hired. Hire one in the Science Lab's Staff tab"
 		"Waiting for a researcher":
 			return "every researcher is busy. It starts when one is free, or hire another"
+		"Turned down":
+			return "the free researchers do not want it. Hire one in its field"
 		"Out of credits for wages":
 			return "the station cannot pay the researcher's wage. Work goes on when credits come in"
 	return why.to_lower()

@@ -15,9 +15,12 @@ extends Node
 ##
 ## Researchers (1 to [constant MAX_RESEARCHERS]) are hired from a pool of
 ## [constant APPLICANTS] applicants that changes every [constant
-## APPLICANT_REFRESH] sim seconds. An idle researcher picks among the funded
-## projects nobody works on by field and personality ([ResearchChoice]) and
-## keeps it until done. Speed: [method Researcher.speed_on]. Every second
+## APPLICANT_REFRESH] sim seconds. An idle researcher weighs the funded
+## projects nobody works on by field and personality ([ResearchChoice]):
+## takes the best one it likes and keeps it until done, or turns them down
+## (Researcher.refused, shown in the lab and logged once). Funding is an
+## offer, not an order: plain work outside their field waits for someone in
+## that field. Speed: [method Researcher.speed_on]. Every second
 ## completed project raises their skill by 1. Work only runs while a Science
 ## Lab is built ([method sim_step] is driven by the lab).
 ## Wages: every hired researcher draws [method Researcher.wage_per_min]
@@ -308,6 +311,7 @@ func hire(a: Researcher) -> bool:
 		return false
 	applicants.erase(a)
 	a.hired_at = SimClock.time
+	a.idle_since = SimClock.time
 	researchers.append(a)
 	applicants.append(_new_applicant())
 	_log("Hired %s (%s, skill %d, %s) for %s cr" % [a.researcher_name, a.field_name(), a.skill, a.personality_name(), Fmt.amount(a.hire_cost)])
@@ -405,11 +409,17 @@ func _pay_wage(r: Researcher, dt: float) -> void:
 		changed.emit()
 
 
-## Idle researchers pick among the funded projects nobody works on.
+## Idle researchers weigh the funded projects nobody works on: take one or
+## turn them down (logged once per researcher and project).
 func _assign_idle() -> void:
 	for r in researchers:
 		if not r.is_idle():
+			r.idle_since = -1.0
+			if not r.refused.is_empty():
+				r.refused = {}
 			continue
+		if r.idle_since < 0.0:
+			r.idle_since = SimClock.time
 		var free: Array[TechDef] = []
 		var progress := {}
 		for id: StringName in projects:
@@ -418,22 +428,42 @@ func _assign_idle() -> void:
 				if t:
 					free.append(t)
 					progress[id] = float(projects[id]["progress"])
-		if free.is_empty():
-			return
 		var pick := ResearchChoice.pick(r, free, progress)
+		var refused: Dictionary = pick["refused"]
+		var news := false
+		for id: StringName in refused:
+			if r.refused.get(id, "") != refused[id]:
+				news = true
+				var rt := catalog().find(id)
+				_log("%s turned down %s: %s" % [r.researcher_name, rt.display_name if rt else String(id), refused[id]])
+		if news or refused.size() != r.refused.size():
+			r.refused = refused
+			changed.emit()
 		var t := pick["tech"] as TechDef
 		if t == null:
 			continue
 		r.project = t.id
 		r.reason = String(pick["reason"])
+		r.idle_since = -1.0
+		r.refused = {}
 		_log("%s: %s" % [r.researcher_name, r.reason])
 		changed.emit()
+
+
+## "Dr. Ada Cho: outside their field (Weapons)" for the first researcher who
+## turned [param tech_id] down, "" when nobody did.
+func refusal_of(tech_id: StringName) -> String:
+	for r in researchers:
+		if r.refused.has(tech_id):
+			return "%s: %s" % [r.researcher_name, r.refused[tech_id]]
+	return ""
 
 
 func _complete(t: TechDef, r: Researcher) -> void:
 	projects.erase(t.id)
 	done[t.id] = SimClock.time
 	r.project = &""
+	r.idle_since = SimClock.time
 	r.completed += 1
 	var grew := r.completed % 2 == 0 and r.skill < Researcher.MAX_SKILL
 	if grew:

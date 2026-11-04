@@ -12,12 +12,13 @@ extends Node3D
 ## shortened (12 s instead of 45 s) so the loop stays watchable.
 ##
 ## Run: Godot --path . res://tools/shield_preview.tscn [-- --model=/abs/gen.glb] [--shot=/abs/out.png]
+##      [--shot-after=<s>] (default 4.5 s) [--close] (frame the generator, not the bubble)
 ## Mouse: left drag orbit, right drag pan, wheel zoom. Keys: H hit, R restart,
 ## Space pause (SimClock), 1..4 sim speed (SimClock), F reset view, Q quit.
 
 const FIELD_CORE := preload("res://scripts/buildings/shield_field_core.gd")
 const STATION_GLB := "res://assets/models/station/station_home.glb"
-const GEN_GLB := "res://ongoing-implementations/shield-generator-redesign/out/shield_generator.glb"
+const GEN_GLB := "res://assets/models/buildings/shield_generator.glb"
 ## Generator spot in the station frame, m (a typical slot in the complex).
 const GEN_POS := Vector3(110.0, 0.0, 60.0)
 const GEN_FOOTPRINT := 22.0
@@ -61,6 +62,12 @@ func _ready() -> void:
 			gen_path = a.substr(8)
 		elif a.begins_with("--shot="):
 			_shot = a.substr(7)
+		elif a.begins_with("--shot-after="):
+			_shot_wait = float(a.substr(13))
+		elif a == "--close":
+			_focus = GEN_POS + Vector3(0.0, 16.0, 0.0)
+			_dist = 85.0
+			_pitch = 28.0
 	_build_stage()
 	var station := _load(STATION_GLB)
 	if station:
