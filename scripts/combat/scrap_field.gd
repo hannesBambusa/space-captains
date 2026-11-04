@@ -211,7 +211,7 @@ static func find_anchor(ctx: Node, id: String) -> Node3D:
 		var mgr := BuildingManager.of(ctx)
 		return mgr.frame if mgr else null
 	if id.begins_with("planet:"):
-		return PlanetRaidContract.find_planet(ctx, id.trim_prefix("planet:"))
+		return PlanetInfo.find_planet(ctx, id.trim_prefix("planet:"))
 	if id.begins_with("cluster:"):
 		var sys := SolarSystem.of(ctx)
 		return sys.find_cluster(id.trim_prefix("cluster:")) if sys else null

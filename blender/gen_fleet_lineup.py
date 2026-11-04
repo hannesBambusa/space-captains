@@ -14,7 +14,7 @@ import bpy
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
 
-SHIPS = (("merc_fighter", -16.0), ("scavenger", -8.0), ("miner", 0.0), ("salvager", 8.0),
+SHIPS = (("merc_fighter_old", -16.0), ("scavenger", -8.0), ("miner", 0.0), ("salvager", 8.0),
          ("escape_pod", 14.5))
 
 

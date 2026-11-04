@@ -121,7 +121,7 @@ func _ready() -> void:
 	for i in FactoryMarket.TYPES:
 		if i == Economy.BASE_COUNT:
 			_goods_header = UIUtil.label("PLANET GOODS", &"SubHeaderLabel")
-			_goods_header.tooltip_text = "Brought back from planet raids (Raider Dock). Shown once raids are researched or you hold some."
+			_goods_header.tooltip_text = "Harvested by planet outposts and lifted up by shuttle. Shown once Surface operations is researched or you hold some."
 			v.add_child(_goods_header)
 		_ore_rows.append(_make_ore_row(v, i))
 
@@ -388,7 +388,7 @@ func _refresh_live() -> void:
 	if _tab != 1:
 		return
 	var m := f.market
-	var goods_on := Research.is_building_unlocked(&"raider_dock")
+	var goods_on := Research.is_done(OutpostState.TECH)
 	for i in range(Economy.BASE_COUNT, _ore_rows.size()):
 		goods_on = goods_on or Economy.ore[i] > 0 or m.stock[i] >= 1.0
 	if _goods_header:

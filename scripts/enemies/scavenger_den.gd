@@ -20,7 +20,8 @@ extends StaticCombatant
 ## Model: the faction's den model, else res://assets/models/buildings/scavenger_den.glb
 ## tinted in the faction colour (den_rock, den_salvage, den_hangar_glow
 ## pulsing, den_lights flickering, spawn_point with local -Z pointing out of
-## the mouth).
+## the mouth, den_gun_1..6 at turret muzzles: each volley fires from the
+## muzzles nearest the target; without them from random spots on the base).
 
 signal destroyed(den: ScavengerDen, killer: Node3D)
 signal spawned(den: ScavengerDen, ship: ScavengerShip)
@@ -56,6 +57,7 @@ const CALL_INTERVAL := 3.0
 const ALERT_RESPAWN_MULT := 1.5
 ## Defenders fight hostiles this close to the base, metres.
 const GUARD_RADIUS := 1600.0
+const MAX_GUN_POINTS := 6
 
 var _model: Node3D
 var _glow_mats: Array[StandardMaterial3D] = []
@@ -67,6 +69,8 @@ var _respawn_clock: float = 0.0
 var _gun_cooldown: float = 0.0
 var _gun_target: Node3D
 var _gun_timer: float = 0.0
+## Turret muzzles in the model ("den_gun_1".."den_gun_6"); empty: random spots.
+var _gun_points: Array[Node3D] = []
 var _rng := RandomNumberGenerator.new()
 var _spawn_seq: int = 0
 ## A loaded game brings its own scavengers: no start-up launches.
@@ -107,6 +111,10 @@ func _ready() -> void:
 	MeshUtil.set_layers_recursive(_model, RENDER_LAYER)
 	_collect_mats("den_hangar_glow", _glow_mats, _glow_base)
 	_collect_mats("den_lights", _light_mats, _light_base)
+	for i in range(1, MAX_GUN_POINTS + 1):
+		var gp := _model.find_child("den_gun_%d" % i, true, false) as Node3D
+		if gp:
+			_gun_points.append(gp)
 	_hangar_light = OmniLight3D.new()
 	_hangar_light.name = "HangarLight"
 	_hangar_light.light_color = faction_def.light_color
@@ -459,9 +467,15 @@ func _guns(dt: float) -> void:
 	if pool == null:
 		return
 	var spread := f.den_scale()
+	var tp := _gun_target.global_position
+	var guns := _gun_points.duplicate()
+	guns.sort_custom(func(a: Node3D, b: Node3D) -> bool:
+		return a.global_position.distance_squared_to(tp) < b.global_position.distance_squared_to(tp))
 	for g in f.den_guns:
+		# The draws stay even with turret muzzles, so the rng sequence does not change.
 		var from := global_transform * (Vector3(_rng.randf_range(-25.0, 25.0), 14.0, _rng.randf_range(-20.0, 20.0)) * spread)
-		var tp := _gun_target.global_position
+		if not guns.is_empty():
+			from = (guns[g % guns.size()] as Node3D).global_position
 		var hits := _rng.randf() < 0.55 * (1.0 - float(_gun_target.call(&"get_dodge")))
 		var aim := tp + (_gun_target.call(&"get_aim_velocity") as Vector3) * (from.distance_to(tp) / ProjectilePool.SPEED)
 		if not hits:

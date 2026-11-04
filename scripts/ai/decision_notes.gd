@@ -233,8 +233,6 @@ static func detail(brain: CaptainBrain, e: RoleEvaluator.Evaluation) -> String:
 		if t.has("rich"):
 			lines.append("Rich world: one load is %d %s, about %s cr at the Factory, %+.2f (%s taste x%.2f with Greed)" % [int(t.get("units", 0)), String(t.get("loot_name", "loot")),
 					Fmt.amount(roundi(float(t.get("loot_value", 0.0)))), float(t["rich"]), cap.get_personality_name() if cap else "captain", float(t.get("taste", 1.0))])
-			if int(t.get("landers", 0)) > 0:
-				lines.append("Crowding: %d lander%s already on it -%.2f" % [int(t["landers"]), "" if int(t["landers"]) == 1 else "s", float(t.get("crowd", 0.0))])
 		if int(t.get("bonus", 0)) > 0:
 			lines.append("Pay is the yard's %d cr plus your %d cr bonus" % [int(t["reward"]) - int(t["bonus"]), int(t["bonus"])])
 		lines.append("Loyalty %+.2f, traits %+.2f, luck %+.2f" % [float(t.get("loyal", 0.0)), float(t.get("traits", 0.0)), float(t.get("noise", 0.0))])

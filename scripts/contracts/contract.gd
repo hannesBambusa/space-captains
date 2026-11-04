@@ -7,8 +7,7 @@ extends RefCounted
 ## now; BountyContract (target: an enemy ship or den, paid on destruction) and
 ## EscortContract (target: a miner or a mining contract, paid per completed
 ## trip) later; SalvageContract (target: a scrap field, paid per load) in
-## stage 3; PlanetRaidContract (target: a planet or moon, paid per load) in
-## phase C2; ExploreContract (target: a jump gate, paid once on the
+## stage 3; ExploreContract (target: a jump gate, paid once on the
 ## explorer's return with the survey) in P3. The board, the UI rows and the
 ## brain only use this base API.
 ##

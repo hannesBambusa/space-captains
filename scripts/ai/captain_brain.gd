@@ -570,14 +570,6 @@ func _deliver() -> void:
 		var owed: int = res["owed"]
 		_record_delivery(res, Reputation.SALVAGE_LOAD * clampf(float(scrap) / float(SalvageContract.LOAD_SCRAP), 0.3, 1.5),
 				"+%d cr, %d scrap to the yard%s" % [int(res["credits"]), int(res["scrap"]), ", %d cr owed" % owed if owed > 0 else ""])
-	elif trip.loaded and c is PlanetRaidContract:
-		var rc := c as PlanetRaidContract
-		var units := roundi(float(trip.meta.get("units", 0)) * trip.cargo / maxf(float(trip.meta.get("cargo_full", 1.0)), 0.01))
-		var res := ContractBoard.deliver_raid_load(rc, ship, units, trip.cargo / maxf(float(trip.meta.get("cargo_full", 1.0)), 0.01))
-		if captain:
-			captain.loads_delivered += 1
-			captain.raid_loads += 1
-		_record_delivery(res, Reputation.for_load(AsteroidBelt.OreType.TITANIUM, c.get_danger()), "+%d %s" % [int(res["materials"]), Economy.ore_name(rc.loot)])
 	else:
 		_release(c)
 	trip = null

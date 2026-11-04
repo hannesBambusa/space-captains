@@ -37,10 +37,16 @@ var hold_fill: float = 0.0
 var hold_ore: int = -1
 
 const DRILL_NODE := "drill_point"
+## Model empties of the laser's emitter heads ("laser_emitter_1".."4"). Their
+## feeder beams converge on [constant DRILL_NODE], where the main beam starts.
+const EMITTER_PREFIX := "laser_emitter_"
+const MAX_EMITTERS := 4
 
 var _beam: DrillBeam
 ## Model empty the drill beam fires from (null: [member nose_offset]).
 var _drill_point: Node3D
+## Model emitter empties (empty: a single beam from the drill point).
+var _emitters: Array[Node3D] = []
 var _claim_key := ""
 var _rng := RandomNumberGenerator.new()
 
@@ -56,6 +62,12 @@ func _on_ready_ship() -> void:
 	_beam.name = "DrillBeam"
 	add_child(_beam)
 	_drill_point = _model.find_child(DRILL_NODE, true, false) as Node3D if _model else null
+	_emitters.clear()
+	if _model:
+		for i in range(1, MAX_EMITTERS + 1):
+			var e := _model.find_child(EMITTER_PREFIX + str(i), true, false) as Node3D
+			if e:
+				_emitters.append(e)
 
 
 func _exit_tree() -> void:
@@ -264,7 +276,15 @@ func _update_beam() -> void:
 	if facing < 0.9:
 		_beam.set_active(false)
 		return
-	_beam.aim(nose, contact)
+	_beam.aim(nose, contact, _emitter_points())
+
+
+## World positions of the model's emitter heads (empty without any).
+func _emitter_points() -> PackedVector3Array:
+	var pts := PackedVector3Array()
+	for e in _emitters:
+		pts.append(e.global_position)
+	return pts
 
 
 # --- Claims -------------------------------------------------------------------

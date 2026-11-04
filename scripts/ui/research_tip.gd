@@ -45,10 +45,10 @@ static func benefits(t: TechDef) -> PackedStringArray:
 		out.append("Every mercenary: %+d accuracy points, no refit needed" % roundi(t.merc_accuracy * 100.0))
 	if t.miner_hold != 0.0:
 		out.append("Every miner: %+d%% load per trip, no refit needed" % roundi(t.miner_hold * 100.0))
-	if t.id == ShipLoadout.HEAVY_DROPSHIPS:
-		out.append("Every lander: %+d%% loot per planet raid" % roundi(ShipLoadout.HEAVY_CARGO_BONUS * 100.0))
-	if t.id == ShipLoadout.ARMOURED_DROPSHIPS:
-		out.append("Every lander: %+d%% hull and %+d shields" % [roundi((ShipLoadout.ARMOURED_HULL_MULT - 1.0) * 100.0), roundi(ShipLoadout.ARMOURED_SHIELD_BONUS)])
+	if t.id == OutpostState.HEAVY_SHUTTLES:
+		out.append("Every outpost shuttle: %+d%% load per lift" % roundi(OutpostState.HEAVY_SHUTTLE_BONUS * 100.0))
+	if t.id == OutpostState.ARMOURED_ROVERS:
+		out.append("Every harvester and soldier: %+d%% hull" % roundi((OutpostState.ARMOURED_HULL_MULT - 1.0) * 100.0))
 	var next: PackedStringArray = []
 	for o in Research.catalog().techs:
 		if o and not o.hidden and o.prerequisites.has(t.id):

@@ -6,10 +6,15 @@ extends DefenseStructure
 ## generator). The generator itself can be shot once the bubble is down;
 ## destroyed, the bubble goes down until a new one is built.
 ## Look: shield_emitter_glow pulses with the bubble's charge and dims while
-## it is down; shield_capacitors fill (scale Y) with the charge.
+## it is down; shield_capacitors fill (scale Y) with the charge; a
+## [ShieldFieldCore] (an animated force-field orb with pulse rings) sits at
+## the model's shield_emitter_point and follows the bubble's state (none
+## when the model has no such empty).
 
 const EMITTER := "shield_emitter_glow"
 const CAPACITORS := "shield_capacitors"
+const EMITTER_POINT := "shield_emitter_point"
+const FIELD_CORE := preload("res://scripts/buildings/shield_field_core.gd")
 
 var shield: StationShield
 
@@ -18,6 +23,7 @@ var _glow_base := 2.0
 var _caps: Node3D
 var _caps_scale := Vector3.ONE
 var _shown_charge := 0.0
+var _core: FIELD_CORE
 
 
 func _init() -> void:
@@ -44,6 +50,11 @@ func _on_setup() -> void:
 	_caps = model.find_child(CAPACITORS, true, false) as Node3D if model else null
 	if _caps:
 		_caps_scale = _caps.scale
+	var point := model.find_child(EMITTER_POINT, true, false) as Node3D if model else null
+	if point:
+		_core = FIELD_CORE.new()
+		_core.setup(building, point)
+		building.add_child(_core)
 
 
 ## Only once the bubble is down: inside it, the generator is shielded anyway.
@@ -84,6 +95,8 @@ func _animate(delta: float) -> void:
 		var up := is_instance_valid(shield) and shield.is_up() and is_active()
 		var pulse := 0.85 + 0.15 * sin(SimClock.time * lerpf(1.2, 3.5, 1.0 - _shown_charge) * TAU * 0.5)
 		_glow_mat.emission_energy_multiplier = _glow_base * (lerpf(0.35, 1.0, _shown_charge) * pulse if up else 0.12)
+	if _core:
+		_core.update_look(shield, is_active(), _shown_charge, delta)
 
 
 func _save_extra(d: Dictionary) -> void:

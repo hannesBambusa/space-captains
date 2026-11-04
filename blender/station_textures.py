@@ -865,7 +865,9 @@ def build_worn_surface(nb, kind, cfg, masks_img, seed, pad_centres, scorch=(), d
                   clamp=True)
     pit = nb.inv(nb.ss(0.05, 0.11, nb.voronoi(pos, 6.0)))
     pit = nb.m("MULTIPLY", pit, nb.ss(0.5, 0.68, nb.noise(pos, 0.3, 2.0)))
-    chip_n = nb.noise(pos, 2.6, 6.0, 0.62)
+    chip_n = nb.noise(pos, cfg.get("chip_scale", 2.6), 6.0, 0.62)
+    if cfg.get("edge_cut"):   # optional: crisp edge band (small parts), default unchanged
+        edge = nb.ss(cfg["edge_cut"][0], cfg["edge_cut"][1], edge)
     chip = nb.m("MULTIPLY", edge, nb.ss(0.46, 0.56, chip_n))
     # scattered small chips on flat paint too, where the paint is old
     chip2 = nb.m("MULTIPLY", nb.ss(0.66, 0.7, nb.noise(pos, 5.0, 4.0, 0.6)), patch)
@@ -1087,7 +1089,7 @@ def decal(cell_index, centre, normal, up, height, colour, opacity=0.85, depth=0.
                 opacity=opacity)
 
 
-def bake_masks(objs, mats, keys, res, name):
+def bake_masks(objs, mats, keys, res, name, ao_far=4.0, edge_r=0.2):
     masks = new_image(name, res, True)
     bms = {}
     for k in keys:
@@ -1096,9 +1098,9 @@ def bake_masks(objs, mats, keys, res, name):
         aon = nb.n("ShaderNodeAmbientOcclusion", samples=16)
         aon.inputs["Distance"].default_value = 0.8
         aof = nb.n("ShaderNodeAmbientOcclusion", samples=16)
-        aof.inputs["Distance"].default_value = 4.0
+        aof.inputs["Distance"].default_value = ao_far
         bev = nb.n("ShaderNodeBevel", samples=8)
-        bev.inputs["Radius"].default_value = 0.2
+        bev.inputs["Radius"].default_value = edge_r
         edge = nb.m("MULTIPLY", nb.inv(nb.v("DOT_PRODUCT", bev.outputs["Normal"],
                                             geo.outputs["Normal"])), 14.0, clamp=True)
         col = nb.comb(aon.outputs["AO"], aof.outputs["AO"], edge)
@@ -1110,7 +1112,7 @@ def bake_masks(objs, mats, keys, res, name):
 
 
 def bake_worn_atlas(objs, mats, prefix, res, pad_centres, scorch=(), decals=(), labels=(),
-                    seed0=1, jpeg=True):
+                    seed0=1, jpeg=True, ao_far=4.0, edge_r=0.2):
     """Unwrap, bake masks + albedo / metal-rough / normal for every WORN_KINDS material in
     `mats` and return (albedo_path, mr_path, normal_path, atlas_mats).
     Materials not in WORN_KINDS (and not "solar") are flat: zero UVs, untouched."""
@@ -1129,7 +1131,7 @@ def bake_worn_atlas(objs, mats, prefix, res, pad_centres, scorch=(), decals=(), 
     dummy = new_image(f"{prefix}_dummy", 8, False)
     for k in flat + (["solar"] if "solar" in mats else []):
         add_dummy_target(mats[k], dummy)
-    masks = bake_masks(objs, mats, keys, res, f"{prefix}_masks")
+    masks = bake_masks(objs, mats, keys, res, f"{prefix}_masks", ao_far, edge_r)
     albedo = new_image(f"{prefix}_albedo", res, False)
     mr = new_image(f"{prefix}_mr", res, True)
     normal = new_image(f"{prefix}_normal", res, True)

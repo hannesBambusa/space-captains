@@ -36,8 +36,8 @@ extends RefCounted
 ## Phase C1 (research: done techs, funded projects with their reserve,
 ## researchers, applicants) added the "research" key only. A v3 save without
 ## it keeps what it could use before (Research.grant_legacy), so no bump.
-## Phase C2 (planet raids: the "planets" raid records, planet raid
-## contracts, landers, the planet goods in every ore array) added keys and
+## Phase C2 (planet raids, since replaced by planet outposts in
+## "cluster"."outposts"; the planet goods in every ore array) added keys and
 ## longer arrays only; older saves pad their ore arrays, so no bump.
 ## Phase C3 (planet claims: garrisons saved with the dens plus the "claims"
 ## key, claim group ships, guard links) added keys only; older saves load
@@ -120,7 +120,6 @@ static func capture_globals(tree: SceneTree) -> Dictionary:
 			"rng": {"salvage": SaveUtil.rng_state(SalvageContract.rng), "career": SaveUtil.rng_state(Career.rng)}}
 	d["research"] = Research.save_state()
 	d["ledger"] = Economy.ledger.save_state()
-	d["planets"] = PlanetRaidContract.save_records()
 	d["cluster"] = Sector.save_state()
 	d["corps"] = Corps.save_state()
 	var tut := Tutorial.of(tree)
@@ -270,7 +269,6 @@ static func apply_globals(d: Dictionary) -> void:
 	Economy.ledger.load_state(d.get("ledger", {}))
 	EventLog.load_state(d.get("events", []))
 	Research.load_state(d.get("research", {}))
-	PlanetRaidContract.load_records(d.get("planets", {}))
 	# Before the scene builds: home's gates get their targets.
 	Sector.load_state(d.get("cluster", {}))
 	# After the network (the rival's name and home come from its seed).

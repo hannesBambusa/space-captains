@@ -188,13 +188,13 @@ def cargo_pod(H, c, size, rot_z=0.0, body="hull3", band="accent", frame="dark"):
 
 # ---------------------------------------------------------------- texture + export
 def texture(objs, mats, pre, pad_centres, scorch=(), decals=(), labels=(), seed0=21,
-            paint_key=None, res=2048):
+            paint_key=None, res=2048, ao_far=4.0, edge_r=0.2):
     """Bake one worn atlas for `objs`. With paint_key, the faces using mats[paint_key] get
     their own material named "faction_paint" (same atlas images; the atlas there is light
     neutral paint and the base colour factor carries the default tint)."""
     p_alb, p_mr, p_nrm, atlas_mats = st.bake_worn_atlas(
         objs, mats, pre, res, pad_centres, scorch=scorch, decals=decals, labels=labels,
-        seed0=seed0)
+        seed0=seed0, ao_far=ao_far, edge_r=edge_r)
     alb, mr, nrm = (st.load_saved(p_alb, False), st.load_saved(p_mr, True),
                     st.load_saved(p_nrm, True))
     hull = st.pbr_material(f"{pre}_hull", alb, mr, nrm)

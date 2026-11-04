@@ -61,12 +61,20 @@ func get_count() -> int:
 	return clampi(int(1500.0 * pow(size / 1000.0, 1.6)), 1200, 9000)
 
 
-## Reserve in loads: bigger and richer clusters hold more (25 to 60).
+## Loads per cluster by ore, against the 25 to 60 a cluster's size and
+## richness give: iron is the plentiful one (x1.6), titanium as is, crystal
+## scarce (x0.5).
+const RESERVE_BY_ORE: PackedFloat32Array = [1.0, 1.6, 1.0, 0.5]
+
+
+## Reserve in loads: bigger and richer clusters hold more, iron clusters the
+## most, crystal clusters the fewest (12 to 96 by ore).
 func get_reserve() -> int:
 	if reserve_loads > 0:
 		return reserve_loads
 	var s := clampf((size - 1000.0) / 2000.0, 0.0, 1.0)
-	return clampi(roundi(25.0 + 20.0 * s + 15.0 * richness), 25, 60)
+	var base := clampf(25.0 + 20.0 * s + 15.0 * richness, 25.0, 60.0)
+	return maxi(roundi(base * RESERVE_BY_ORE[clampi(ore_type, 0, RESERVE_BY_ORE.size() - 1)]), 10)
 
 
 func radius() -> float:

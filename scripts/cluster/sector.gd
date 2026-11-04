@@ -47,6 +47,10 @@ var transits: Array = []
 ## captain (save id), delivered: bool (the survey reached home), paid: bool
 ## (P4 bounty paid)}.
 var discoveries: Array[Dictionary] = []
+## Planet outposts by "system|planet" (OutpostState), saved under "cluster"."outposts".
+var outposts: Dictionary = {}
+## The Outposts node's RNG state from the last load ({} = seed it fresh).
+var outposts_rng: Dictionary = {}
 
 var _rng := RandomNumberGenerator.new()
 
@@ -72,6 +76,8 @@ func start(net_seed: int, regions: int = -1) -> void:
 	states.clear()
 	transits.clear()
 	discoveries.clear()
+	outposts.clear()
+	outposts_rng = {}
 	for id in network.remote_ids():
 		states[id] = RemoteSystemState.new()
 
@@ -103,7 +109,7 @@ func save_state() -> Dictionary:
 		c["system"] = String(c["system"])
 		disc.append(c)
 	return {"seed": get_seed(), "generator_version": SystemGenerator.VERSION, "regions": network.rival_ids.size() if network else 1,
-			"systems": sys, "transits": tr, "discoveries": disc}
+			"systems": sys, "transits": tr, "discoveries": disc, "outposts": _outposts_out(), "outposts_rng": _outposts_rng_out()}
 
 
 ## [param d]: the "cluster" key of a save. Empty (an older save): keeps the
@@ -124,10 +130,42 @@ func load_state(d: Dictionary) -> void:
 		var c := t.duplicate(true)
 		c["to"] = StringName(c.get("to", ""))
 		transits.append(c)
+	outposts_rng = (d.get("outposts_rng", {}) as Dictionary).duplicate()
+	var outs := Outposts.of(get_tree())
+	if outs and not outposts_rng.is_empty():
+		SaveUtil.set_rng(outs._rng, outposts_rng)
+	for od: Dictionary in d.get("outposts", []):
+		var o := OutpostState.from_dict(od)
+		outposts[o.key()] = o
 	for x: Dictionary in d.get("discoveries", []):
 		var c := x.duplicate()
 		c["system"] = StringName(c.get("system", ""))
 		discoveries.append(c)
+
+
+## Every outpost's dict; the one on screen also carries the hostiles on its
+## ground ("ground"), so a save cannot erase a raid in progress.
+func _outposts_out() -> Array:
+	var out := []
+	var outs := Outposts.of(get_tree())
+	var sw := SurfaceWorld.current(get_tree())
+	for k: String in outposts:
+		var o := outposts[k] as OutpostState
+		var d := o.to_dict()
+		if outs and o == outs.live and sw and not sw.is_queued_for_deletion():
+			var left := sw.hostiles_left()
+			var ground: Dictionary = (d.get("ground", {}) as Dictionary).duplicate()
+			for kind: String in left:
+				ground[kind] = float(ground.get(kind, 0.0)) + float(left[kind])
+			if not ground.is_empty():
+				d["ground"] = ground
+		out.append(d)
+	return out
+
+
+func _outposts_rng_out() -> Dictionary:
+	var outs := Outposts.of(get_tree())
+	return outs.rng_state() if outs else outposts_rng
 
 
 # --- Exploration ------------------------------------------------------------------

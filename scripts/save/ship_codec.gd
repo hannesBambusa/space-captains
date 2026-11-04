@@ -319,7 +319,7 @@ static func _create_scavenger(ctx: Node, d: Dictionary, refs: SaveRefs) -> Ship:
 	var s: ScavengerShip
 	var cd: Dictionary = d.get("constructor", {})
 	if not cd.is_empty():
-		var body := PlanetRaidContract.find_planet(ctx, String(cd.get("planet", "")))
+		var body := PlanetInfo.find_planet(ctx, String(cd.get("planet", "")))
 		if body == null:
 			return null
 		var c := ClaimConstructor.new()
@@ -372,7 +372,7 @@ static func finish(s: Ship, d: Dictionary, refs: SaveRefs) -> void:
 			(s as ScavengerShip).ai.set_lead(refs.ship(lead_id) as ScavengerShip)
 		var gb := String(sd.get("guard_body", ""))
 		var gid := int(sd.get("guard", 0))
-		var gnode: Node3D = PlanetRaidContract.find_planet(s, gb) if not gb.is_empty() else (refs.node3d(gid) if gid != 0 else null)
+		var gnode: Node3D = PlanetInfo.find_planet(s, gb) if not gb.is_empty() else (refs.node3d(gid) if gid != 0 else null)
 		if gnode:
 			(s as ScavengerShip).ai.set_guard(gnode, float(sd.get("guard_radius", 3000.0)), float(sd.get("guard_inner", 0.0)))
 		var obj_id := int(sd.get("objective", 0))
@@ -488,9 +488,6 @@ static func _restore_worker_space(s: Ship, state: CaptainBrain.State, trip: Capt
 
 ## Takes back the rock (miners) or the work spot (salvagers) the trip had.
 static func _reclaim_job(s: Ship, trip: CaptainBrain.Trip) -> bool:
-	if s is LanderShip:
-		var rc := trip.contract as PlanetRaidContract
-		return rc != null and is_instance_valid(rc.planet) and trip.meta.has("n")
 	if s is SalvagerShip:
 		var sc := trip.contract as SalvageContract
 		if sc == null or not is_instance_valid(sc.field) or not trip.meta.has("hover"):

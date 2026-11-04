@@ -37,6 +37,7 @@ ROUNDTRIP=""
 COLONY=""
 RIVAL=""
 WAR=""
+SURFACE=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--minutes) MINUTES="$2"; shift 2 ;;
@@ -53,10 +54,12 @@ while [ $# -gt 0 ]; do
 		--eliminate) WAR="--eliminate"; shift ;;
 		--expand) WAR="--expand"; shift ;;
 		--lab) WAR="--lab"; shift ;;
+		--surface) SURFACE="--surface"; shift ;;
+		--miners=*) SURFACE="$SURFACE $1"; shift ;;
 		*) echo "unknown arg: $1" >&2; exit 2 ;;
 	esac
 done
-OUT="$("$GODOT" --headless --path . res://tools/smoke_test.tscn -- --minutes="$MINUTES" $MULTI $EXPLORE $LONG $FORWARD $ROUNDTRIP $COLONY $RIVAL $WAR 2>&1)"
+OUT="$("$GODOT" --headless --path . res://tools/smoke_test.tscn -- --minutes="$MINUTES" $MULTI $EXPLORE $LONG $FORWARD $ROUNDTRIP $COLONY $RIVAL $WAR $SURFACE 2>&1)"
 CODE=$?
 echo "$OUT" | grep '^SMOKE'
 if echo "$OUT" | grep -q 'SCRIPT ERROR\|Parse Error'; then

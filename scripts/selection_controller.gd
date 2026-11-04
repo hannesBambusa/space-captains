@@ -12,7 +12,7 @@ extends Node3D
 ## Clicking a building or a ship also makes the camera follow it; clicking a
 ## cluster's label selects the cluster, a double click follows it; clicking
 ## the clump itself selects it and leaves the camera alone. Planets and moons are selected (the planet
-## panel: loot, raids, the planet raid contract), so are jump gates (the gate
+## panel: its good, danger, claim and outpost), so are jump gates (the gate
 ## panel: the explore contract); the star is followed but not selected.
 ## Things the fog of war hides (FogOfWar) cannot be picked. A station
 ## (home's or a forward one) is picked by its hub ([method pick_station]):
@@ -263,6 +263,14 @@ func _unhandled_input(event: InputEvent) -> void:
 					if cam:
 						cam.focus_on(target, cam.get_distance())
 					get_viewport().set_input_as_handled()
+				else:
+					# A planet with a founded outpost: down to its surface.
+					var pb := cam.pick_focusable(mb.position) as PlanetBody if cam else null
+					var outs := Outposts.of(get_tree())
+					var o := outs.outpost_of(pb) if outs and pb else null
+					if o and o.is_founded():
+						SurfaceMode.enter(get_tree(), o)
+						get_viewport().set_input_as_handled()
 			return
 		var was_click := _press_pos != Vector2.INF and mb.position.distance_to(_press_pos) <= click_slop_px
 		_press_pos = Vector2.INF

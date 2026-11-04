@@ -48,6 +48,8 @@ var remote_sim: RemoteSim
 var forward: ForwardStations
 ## The rival corporation's strategy and diplomacy (idle while it is Off).
 var rival: RivalCorp
+## Planet outposts (their data sim and shared rules).
+var outposts: Outposts
 
 ## Remote hosts by id, and the real time each is dropped at (INF while viewed).
 var _hosts: Dictionary = {}
@@ -83,6 +85,9 @@ func _enter_tree() -> void:
 	rival = RivalCorp.new()
 	rival.name = "RivalCorp"
 	add_child(rival)
+	outposts = Outposts.new()
+	outposts.name = "Outposts"
+	add_child(outposts)
 
 
 func _ready() -> void:

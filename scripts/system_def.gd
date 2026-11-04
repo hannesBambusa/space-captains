@@ -15,6 +15,9 @@ extends Resource
 @export var star_temperature: float = 5600.0
 ## Optional override. Alpha 0 = derive from temperature.
 @export var star_color_override: Color = Color(0, 0, 0, 0)
+## The star's colour family for labels: "red", "yellow", "blue", "green", or
+## "" (from the temperature; home).
+@export var star_kind: String = ""
 ## Light energy of the star at the system's mid range.
 @export var light_energy: float = 1.15
 
@@ -69,6 +72,26 @@ extends Resource
 @export var sky_seed: float = 7.31
 ## Camera bounds radius. 0 = derive from the outermost body.
 @export var system_radius: float = 0.0
+
+
+## The star as drawn and avoided, metres: much bigger than any planet (the
+## biggest gas giants are about 1.8 km), from 2.5 km for a small red dwarf
+## to 4.7 km for a B star. [member star_radius] stays the generator's input,
+## so planet orbits do not move.
+func star_display_radius() -> float:
+	return star_radius * 3.0 + 1500.0
+
+
+## Colour of the star's light on the system: saturated stars are softened
+## more, so a green or blue sun tints the planets without drowning them.
+func get_light_color() -> Color:
+	var c := get_star_color()
+	return c.lerp(Color.WHITE, 0.55 if star_color_override.a > 0.0 else 0.35)
+
+
+## "Green star", "G-class star" and so on.
+func star_label() -> String:
+	return "%s star" % star_kind.capitalize() if not star_kind.is_empty() else "%s-class star" % star_class
 
 
 func get_star_color() -> Color:

@@ -290,7 +290,7 @@ func _make(label: String, anchored: bool) -> DefenseZone:
 ## frame-local unless [param world]) or the space root (world position).
 func _attach(z: DefenseZone, pos: Vector3, world: bool) -> void:
 	var mgr := BuildingManager.of(self)
-	var body := PlanetRaidContract.find_planet(self, z.anchor_body) if not z.anchored and not z.anchor_body.is_empty() else null
+	var body := PlanetInfo.find_planet(self, z.anchor_body) if not z.anchored and not z.anchor_body.is_empty() else null
 	if z.anchored and mgr and mgr.frame:
 		mgr.frame.add_child(z)
 		var local := mgr.frame.to_local(pos) if world else pos

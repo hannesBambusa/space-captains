@@ -15,7 +15,11 @@ extends RefCounted
 ## Bump when the same seed would make different systems (saves keep their
 ## seed and regenerate; the save notes the version it was made with).
 ## v3: the rival region (systems 4 and 5 jumps out, ClusterNetwork).
-const VERSION := 3
+## v4: star colours (red, yellow, blue, green) from a side rng; the layout
+## of every system is unchanged from v3.
+## v5: iron the most common cluster everywhere (ORE_WEIGHTS), loads per
+## cluster by ore (ClusterDef.RESERVE_BY_ORE).
+const VERSION := 5
 ## The version mixed into [method system_seed]. Kept at 2 on purpose: v3 only
 ## added systems, so the systems of v2 keep their content.
 const SEED_VERSION := 2
@@ -33,6 +37,16 @@ const PLANET_GAP := 500.0
 const PERIOD_AT_REF := 760.0
 const REF_RADIUS := 8600.0
 
+## Star colours by kind (the star's base colour; the shader runs it from a
+## dark surface to a white-hot core) and how often a star is green.
+const STAR_TINTS := {
+	"red": Color(1.0, 0.34, 0.16),
+	"yellow": Color(1.0, 0.76, 0.3),
+	"blue": Color(0.36, 0.62, 1.0),
+	"green": Color(0.38, 1.0, 0.42),
+}
+const GREEN_CHANCE := 0.15
+
 ## Spectral classes: weight, temperature (K), star radius (m), light energy.
 const STARS := [
 	{"cls": "M", "w": 0.22, "temp": Vector2(2900.0, 3600.0), "radius": Vector2(340.0, 440.0), "light": 0.85},
@@ -44,7 +58,7 @@ const STARS := [
 ]
 
 ## Primary ore weights (iron, titanium, crystal) by gate depth 1..5.
-const ORE_WEIGHTS := [[0.5, 0.35, 0.15], [0.3, 0.4, 0.3], [0.15, 0.4, 0.45], [0.1, 0.35, 0.55], [0.05, 0.3, 0.65]]
+const ORE_WEIGHTS := [[0.6, 0.3, 0.1], [0.52, 0.32, 0.16], [0.45, 0.33, 0.22], [0.4, 0.34, 0.26], [0.36, 0.34, 0.3]]
 ## Deepest depth the tables know.
 const MAX_DEPTH := 5
 ## Base faction weights (scavenger, corsair, syndicate) by danger 1..5.
@@ -109,6 +123,32 @@ func _star() -> void:
 	_def.star_temperature = roundf(_rand_v(s["temp"]) / 50.0) * 50.0
 	_def.star_radius = roundf(_rand_v(s["radius"]) / 10.0) * 10.0
 	_def.light_energy = snappedf(float(s["light"]) * _rng.randf_range(0.95, 1.05), 0.01)
+	_star_tint()
+
+
+## The star's colour: red (M, half the K), yellow (G, the other K), blue
+## (F, A, B), and now and
+## then an exotic green one. A side rng seeded from the system seed, so the
+## main draws (and with them every planet, cluster and gate) stay as before.
+func _star_tint() -> void:
+	var side := RandomNumberGenerator.new()
+	side.seed = hash("%d:star_tint" % _rng.seed)
+	var kind := "yellow"
+	match _def.star_class:
+		"M":
+			kind = "red"
+		"K":
+			# Orange dwarfs go either way, which evens out the mix (about a
+			# third red, a third yellow, a fifth blue, the rest green).
+			kind = "red" if side.randf() < 0.5 else "yellow"
+		"F", "A", "B":
+			kind = "blue"
+	if side.randf() < GREEN_CHANCE:
+		kind = "green"
+	var base: Color = STAR_TINTS[kind]
+	var c := Color.from_hsv(wrapf(base.h + side.randf_range(-0.025, 0.025), 0.0, 1.0), clampf(base.s * side.randf_range(0.9, 1.05), 0.0, 1.0), base.v)
+	_def.star_kind = kind
+	_def.star_color_override = c
 
 
 # --- Planets ------------------------------------------------------------------
@@ -293,7 +333,9 @@ func _clusters(gate_r: float) -> void:
 		c.danger = clampi(_def.danger - 1 + (1 if ore == ORE.CRYSTAL else 0), 1, 4)
 		if _rival_home and i == 0:
 			c.danger = 1
-		c.reserve_loads = clampi(roundi(float(c.get_reserve()) * (1.0 + 0.3 * (_depth - 1))), 25, 100)
+		# Deeper is richer; the ore's share (iron plenty, crystal scarce) stays.
+		var cap := 150 if ore == ORE.IRON else (90 if ore == ORE.TITANIUM else 45)
+		c.reserve_loads = clampi(roundi(float(c.get_reserve()) * (1.0 + 0.3 * (_depth - 1))), 10, cap)
 		c.seed = _rng.randi_range(1, 99999)
 		c.glow = snappedf(_rng.randf_range(1.2, 1.7), 0.1) if ore == ORE.CRYSTAL else 1.0
 		c.dust_color = _dust(ore)

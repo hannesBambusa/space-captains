@@ -86,6 +86,19 @@ var multi := false
 var explore := false
 var long_run := false
 var forward := false
+## --miners=N: N miners on the nearest iron cluster at fair pay, iron set to
+## 0 at the start, the station's iron printed every half minute (how long a
+## building's iron takes to mine).
+var miners := 0
+var _iron_t0 := -1.0
+var _iron_hits := {}
+## --surface: a planet outpost founded at minute 0 on the best home world,
+## a bay, a garrison, 2 harvesters, 2 soldiers, contracts on every deposit;
+## the surface is viewed live from minute 2 to 4, data the rest.
+var surface := false
+var _sf: OutpostState
+var _sf_reload_bad := false
+var _sf_gas: OutpostState
 var save_roundtrip := false
 var colony := false
 ## --rival: a rival corp (Normal) in the game (rival corporation plan).
@@ -166,6 +179,10 @@ func _ready() -> void:
 			long_run = true
 		elif a == "--forward":
 			forward = true
+		elif a.begins_with("--miners="):
+			miners = clampi(a.trim_prefix("--miners=").to_int(), 1, 4)
+		elif a == "--surface":
+			surface = true
 		elif a == "--save-roundtrip":
 			save_roundtrip = true
 		elif a == "--colony":
@@ -275,6 +292,15 @@ func _run() -> void:
 			_kill_step(minute)
 		if rival_expand and minute == 1:
 			_expand_setup()
+		if surface:
+			await _surface_step(minute)
+		if miners > 0:
+			for half in 2:
+				left -= SimStepper.run(tree, minf(30.0, left))
+				_iron_watch()
+			minute += 1
+			await tree.process_frame
+			continue
 		if rival_lab and minute == 1:
 			var lr := Corps.rivals[0]
 			var lw := Corps.hq_world(get_tree(), lr.id)
@@ -303,6 +329,10 @@ func _run() -> void:
 		_long_report()
 	if rival:
 		_rival_report()
+	if miners > 0:
+		for goal in [50, 60, 75, 100, 150]:
+			print("SMOKE iron reached %3d at %s" % [goal, Fmt.clock(float(_iron_hits[goal])) if _iron_hits.has(goal) else "never"])
+	var sf_why := _surface_report() if surface else ""
 	var why := "%d trip checks on another system's contract" % _fw_wrong if _fw_wrong > 0 else ""
 	if _fw_factory_bad:
 		why = "a forward Factory keeps its own reserve or held ore (see SMOKE forward factory)"
@@ -312,6 +342,8 @@ func _run() -> void:
 		why = "save round trip changed the game (see SMOKE rival reload)"
 	if rival and not Corps.has_rival():
 		why = "no rival corp"
+	if not sf_why.is_empty():
+		why = sf_why
 	_finish(Time.get_ticks_msec() - t0, why)
 
 
@@ -395,7 +427,7 @@ func _setup() -> void:
 			print("SMOKE setup: could not place %s" % id)
 			continue
 		b.captain_rng = rng
-		for i in (2 if id == &"mining_outpost" else 1):
+		for i in ((miners if miners > 0 else 2) if id == &"mining_outpost" else 1):
 			b.hire()
 	var sys := _sys
 	var station := sys.home_station.global_position if sys and sys.home_station else Vector3.ZERO
@@ -403,8 +435,28 @@ func _setup() -> void:
 	for c in sys.belts if sys else []:
 		if best == null or c.global_position.distance_to(station) < best.global_position.distance_to(station):
 			best = c
+	if miners > 0:
+		best = null
+		for c in sys.belts if sys else []:
+			if c.ore_type == AsteroidBelt.OreType.IRON and (best == null or c.global_position.distance_to(station) < best.global_position.distance_to(station)):
+				best = c
+		Economy.ore[Economy.Ore.IRON] = 0
+		_iron_t0 = SimClock.time
+		print("SMOKE iron test    %d miners on %s, %.1f km from the station, pay 60 a load" % [miners, best.def.name if best else "-", best.global_position.distance_to(station) / 1000.0 if best else 0.0])
+		if best:
+			ContractBoard.post_mining(best, 60)
+		return
 	if best:
 		ContractBoard.post_mining(best, 40)
+
+
+## --miners: the station's iron and when it first reached 60, 100 and 150.
+func _iron_watch() -> void:
+	var iron := Economy.ore[Economy.Ore.IRON]
+	for goal in [50, 60, 75, 100, 150]:
+		if iron >= goal and not _iron_hits.has(goal):
+			_iron_hits[goal] = SimClock.time - _iron_t0
+	print("SMOKE iron %5s    %d iron" % [Fmt.clock(SimClock.time - _iron_t0), iron])
 
 
 func _spawn_near_station(mgr: BuildingManager, def: BuildingDef) -> Building:
@@ -1593,3 +1645,224 @@ func _report(advanced: float, ms: int) -> void:
 	for line in _log.first:
 		print("SMOKE   %s" % line)
 	print("SMOKE ---------------------------------------------")
+
+
+# --- Planet outposts (--surface) ---------------------------------------------------------
+
+func _surface_step(minute: int) -> void:
+	var tree := get_tree()
+	var outs := Outposts.of(tree)
+	if minute == 0:
+		Research.done[OutpostState.TECH] = SimClock.time
+		Economy.add(20000, Economy.cost(1500, 400), Ledger.OTHER, "Smoke money")
+		var w := SystemWorld.home(tree)
+		var best: PlanetBody = null
+		var why := ""
+		for p in w.sys.planets:
+			var bodies: Array = [p]
+			for c in p.get_children():
+				if c is PlanetBody:
+					bodies.append(c)
+			for b: PlanetBody in bodies:
+				var pr := outs.found_problem(b)
+				if pr.is_empty() and (best == null or b.def.type == PlanetDef.Type.OCEAN or b.def.type == PlanetDef.Type.ICE):
+					best = b
+				elif why.is_empty():
+					why = "%s: %s" % [b.def.name, pr]
+		if best == null:
+			print("SMOKE surface      no world takes an outpost (%s)" % why)
+			return
+		_sf = outs.found(best)
+		print("SMOKE surface      founding on %s (%s, danger %d, lift %d s)" % [_sf.planet, Economy.ore_name(_sf.good), _sf.danger, roundi(_sf.lift_seconds)])
+		# A gas giant platform too, run as data only (fuel).
+		for p in w.sys.planets:
+			if p.def.type == PlanetDef.Type.GAS_GIANT and outs.found_problem(p).is_empty():
+				_sf_gas = outs.found(p)
+				print("SMOKE surface      platform on %s (%s, danger %d)" % [_sf_gas.planet, Economy.ore_name(_sf_gas.good), _sf_gas.danger])
+				break
+		return
+	if _sf == null:
+		return
+	if minute == 1 and _sf_gas and _sf_gas.is_founded():
+		outs.build(_sf_gas, OutpostState.BAY, 200.0, 0.0)
+		outs.build(_sf_gas, OutpostState.GARRISON, -200.0, 0.0)
+		for b in _sf_gas.buildings:
+			b["built"] = 1.0
+		for i in 2:
+			outs.hire(_sf_gas, OutpostState.HARVESTER)
+		outs.hire(_sf_gas, OutpostState.SOLDIER)
+		for i in _sf_gas.deposits.size():
+			outs.set_contract(_sf_gas, i, _sf_gas.fair_pay())
+	if minute == 1 and _sf.is_founded():
+		outs.build(_sf, OutpostState.BAY, 220.0, 0.0)
+		outs.build(_sf, OutpostState.GARRISON, -220.0, 0.0)
+		outs.build(_sf, OutpostState.TURRET, 0.0, 240.0)
+		for b in _sf.buildings:
+			b["built"] = 1.0
+		for i in 2:
+			outs.hire(_sf, OutpostState.HARVESTER)
+			outs.hire(_sf, OutpostState.SOLDIER)
+		for i in _sf.deposits.size():
+			outs.set_contract(_sf, i, _sf.fair_pay())
+		print("SMOKE surface      built %d, crew %d, contracts %d, %s" % [_sf.buildings.size(), _sf.crew.size(), _sf.contracts.size(), outs.hire_problem(_sf, OutpostState.HARVESTER)])
+	if minute == 2:
+		var sm := SurfaceMode.enter(tree, _sf)
+		for i in 3:
+			await tree.process_frame
+		print("SMOKE surface      live: %s, units %d, hud %s" % [sm != null and SurfaceWorld.current(tree) != null, SurfaceWorld.current(tree).units.size() if SurfaceWorld.current(tree) else 0, sm.hud != null if sm else false])
+	if minute == 3:
+		# A building going up live: one node per building, however often its dict changes.
+		var sw := SurfaceWorld.current(tree)
+		Economy.add(5000, Economy.cost(500, 200), Ledger.OTHER, "Smoke money")
+		var why := outs.spot_problem(_sf, OutpostState.DOME, 300.0, -320.0) + outs.build_problem(_sf, OutpostState.DOME)
+		outs.build(_sf, OutpostState.DOME, 300.0, -320.0)
+		if not why.is_empty():
+			print("SMOKE surface      dome refused: %s" % why)
+		for i in 30:
+			outs.sim_step(0.1)
+			sw.sim_step(0.1)
+		print("SMOKE surface      building nodes %d for %d buildings (dome built %.2f)" % [sw._bnodes.size(), _sf.buildings.size(), float(_sf.building(OutpostState.DOME).get("built", -1.0))])
+		if sw._bnodes.size() != _sf.buildings.size():
+			_sf_reload_bad = true
+	if minute == 4:
+		# Raiders on the ground (forced raid at 3:35) go into a save.
+		var sw := SurfaceWorld.current(tree)
+		var left := sw.hostiles_left() if sw else {}
+		var saved := false
+		for od: Dictionary in Sector.save_state().get("outposts", []):
+			if String(od.get("planet", "")) == _sf.planet and od.has("ground"):
+				saved = true
+		print("SMOKE surface      hostiles on the ground %s, in the save %s" % [left, saved])
+		if not left.is_empty() and not saved:
+			_sf_reload_bad = true
+		# Escape opens the pause menu (not the hidden orbit selection), again closes it.
+		var pm := tree.root.get_node_or_null(^"PauseMenu")
+		var opened := false
+		var closed := false
+		for n in 2:
+			var esc := InputEventKey.new()
+			esc.keycode = KEY_ESCAPE
+			esc.physical_keycode = KEY_ESCAPE
+			esc.pressed = true
+			get_viewport().push_input(esc)
+			await tree.process_frame
+			var esc_up := esc.duplicate() as InputEventKey
+			esc_up.pressed = false
+			get_viewport().push_input(esc_up)
+			await tree.process_frame
+			if n == 0:
+				opened = pm != null and bool(pm.call(&"is_open"))
+			else:
+				closed = pm != null and not bool(pm.call(&"is_open"))
+		print("SMOKE surface      escape: pause menu opened %s, closed %s, still on the surface %s" % [opened, closed, SurfaceMode.of(tree) != null])
+		if not (opened and closed and SurfaceMode.of(tree) != null):
+			_sf_reload_bad = true
+		# Keys: M must not reach the hidden HUD, H leaves the surface.
+		var hud := tree.get_first_node_in_group(HUD.GROUP) as HUD
+		var map_was := hud.cluster_map.visible if hud else false
+		for code in [KEY_M, KEY_H]:
+			var ev := InputEventKey.new()
+			ev.keycode = code
+			ev.physical_keycode = code
+			ev.pressed = true
+			get_viewport().push_input(ev)
+			await tree.process_frame
+			var up := ev.duplicate() as InputEventKey
+			up.pressed = false
+			get_viewport().push_input(up)
+		await tree.process_frame
+		var keys_ok := hud != null and hud.cluster_map.visible == map_was and SurfaceMode.of(tree) == null
+		print("SMOKE surface      keys: M kept off the HUD %s, H left %s" % [hud != null and hud.cluster_map.visible == map_was, SurfaceMode.of(tree) == null])
+		if not keys_ok:
+			_sf_reload_bad = true
+		var sm := SurfaceMode.of(tree)
+		if sm:
+			sm.leave()
+		await tree.process_frame
+		print("SMOKE surface      left: live %s, hud %s" % [SurfaceWorld.current(tree) != null and not SurfaceWorld.current(tree).is_queued_for_deletion(), (tree.get_first_node_in_group(HUD.GROUP) as CanvasLayer).visible])
+	if minute == 2 or minute == 4 or minute % 3 == 0:
+		print("SMOKE surface m%-2d  stock %d, lifts %d, delivered %d, loads %d, crew %d, owed %d, nests ag %s" % [minute, _sf.stock[_sf.good], _sf.lifts.size(), _sf.delivered[_sf.good], _sf.loads_total,
+				_sf.crew.size(), _sf.upkeep_owed, ", ".join(_sf.nests.map(func(n: Dictionary) -> String: return "%d" % roundi(float(n["agitation"]))))])
+	# A critter wave and a ground raid: live at minute 3, as data at minute 7.
+	if minute == 3 or minute == 7:
+		_sf.nests[0]["agitation"] = 45.0
+		_sf.next_raid = SimClock.time + 35.0
+		_sf.raid = {}
+	# A full save and reload at minute 9 (through SaveManager.load_snapshot).
+	if minute == 9:
+		var key := _sf.key()
+		var before := _sf_census(_sf)
+		var data: Dictionary = bytes_to_var(var_to_bytes(GameSnapshot.capture(tree)))
+		await SaveManager.load_snapshot(data)
+		for i in 5:
+			await tree.process_frame
+		_find_home()
+		_sf = Sector.outposts.get(key) as OutpostState
+		var after := _sf_census(_sf) if _sf else "missing"
+		print("SMOKE surface      save reload %s%s" % ["ok" if before == after else "DIFF", "" if before == after else ": %s -> %s" % [before, after]])
+		if before != after:
+			_sf_reload_bad = true
+		if _sf == null:
+			return
+	# Round trip through the save at minute 5.
+	if minute == 5:
+		var before := JSON.stringify(_sf.to_dict(), "", true)
+		var back := OutpostState.from_dict(JSON.parse_string(JSON.stringify(_sf.to_dict())))
+		var after := JSON.stringify(back.to_dict(), "", true)
+		print("SMOKE surface      dict round trip %s" % ("ok" if before == after else "DIFF"))
+		if before != after:
+			_sf.set_meta(&"rt_bad", true)
+			var da: Dictionary = _sf.to_dict()
+			var db: Dictionary = back.to_dict()
+			for k: String in db:
+				if not da.has(k):
+					print("SMOKE surface      rt extra key %s" % k)
+			for k: String in da:
+				if JSON.stringify(da[k], "", true) != JSON.stringify(db.get(k), "", true):
+					print("SMOKE surface      rt %s: %s -> %s" % [k, JSON.stringify(da[k]).left(160), JSON.stringify(db.get(k)).left(160)])
+
+
+func _sf_census(o: OutpostState) -> String:
+	var loads := 0
+	for d in o.deposits:
+		loads += int(d["loads"])
+	return "b%d c%d d%d/%d n%d st%d del%d k%d sh%d" % [o.buildings.size(), o.crew.size(), o.deposits.size(), loads, o.nests.size(), o.stock[o.good], o.delivered[o.good], o.contracts.size(), o.shuttles]
+
+
+func _surface_report() -> String:
+	if _sf == null:
+		return "--surface: no outpost founded"
+	var fights: PackedStringArray = []
+	for e: Dictionary in EventLog.entries:
+		var t := String(e["text"]).to_lower()
+		if t.contains("critters") or t.contains("raiders") or t.contains("ground raid") or t.contains("disabled") or t.contains("destroyed on"):
+			fights.append("%s %s" % [Fmt.clock(float(e["time"])), t.left(110)])
+	for f in fights:
+		print("SMOKE surface fight %s" % f)
+	if _sf_gas:
+		_sf_gas = Sector.outposts.get(_sf_gas.key(), _sf_gas) as OutpostState
+		print("SMOKE surface gas   %s: delivered %s, loads %d, crew %d, lost %s" % [_sf_gas.planet, Economy.cost_text(_sf_gas.delivered), _sf_gas.loads_total, _sf_gas.crew.size(), _sf_gas.lost])
+		if _sf_gas.delivered[Economy.Ore.FUEL] <= 0 and not _sf_gas.lost:
+			return "the gas giant platform delivered no fuel"
+	if _sf_reload_bad:
+		return "outpost changed over a save reload"
+	if fights.size() < 4:
+		return "fewer than 4 surface fight lines (live and data waves and raids)"
+	var hs := _sf.crew_of(OutpostState.HARVESTER).size()
+	print("SMOKE surface end  %s: delivered %s, loads %d, harvesters %d, soldiers %d, lost %s" % [_sf.planet, Economy.cost_text(_sf.delivered), _sf.loads_total, hs,
+			_sf.crew_of(OutpostState.SOLDIER).size(), _sf.lost])
+	var f := Factory.find(SystemWorld.home(get_tree()))
+	var price := f.market.willing_price(_sf.good) if f else 6.0
+	var mins := maxf((SimClock.time - _sf.founded_at) / 60.0, 0.1)
+	var worth := _sf.delivered[_sf.good] * price
+	var pay := 0
+	for c in _sf.crew_of(OutpostState.HARVESTER):
+		pay += int(c.get("wallet", 0))
+	var net := (worth - pay - OutpostState.UPKEEP * mins) / mins
+	print("SMOKE surface econ  %.1f min founded, %d units at %.1f cr = %d cr, harvester wallets %d cr (pay net of fees), upkeep %d: net %d cr/min, %.2f loads/min per harvester" % [mins,
+			_sf.delivered[_sf.good], price, roundi(worth), pay, roundi(OutpostState.UPKEEP * mins), roundi(net), _sf.loads_total / mins / maxf(hs, 1.0)])
+	if _sf.has_meta(&"rt_bad"):
+		return "outpost dict round trip changed the state"
+	if _sf.delivered[_sf.good] <= 0:
+		return "the outpost delivered nothing to the station"
+	return ""

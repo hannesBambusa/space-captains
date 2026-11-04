@@ -64,6 +64,9 @@ var _system: MenuButton
 var _system_ids: Array[StringName] = []
 var _speed_icon: TextureRect
 var _speed: Label
+## The clock's speed readout (click faster, right click slower): the
+## tutorial's time step pulses it.
+var speed_control: Control
 var _speed_pips: PipMeter
 var _credits_delta: Label
 var _income_delta: Label
@@ -274,6 +277,7 @@ func _ready() -> void:
 	speed_box.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	speed_box.tooltip_text = "Click: faster    Right click: slower\nSpace: pause    1 to 6: 1x to 24x    + / -: faster / slower"
 	speed_box.gui_input.connect(_on_speed_input)
+	speed_control = speed_box
 	clock_box.add_child(speed_box)
 	_speed_icon = HudStyle.icon_rect(&"speed", 14.0, HudStyle.ACCENT)
 	speed_box.add_child(_speed_icon)
@@ -349,7 +353,7 @@ func _process(delta: float) -> void:
 
 ## Planet goods (phase C2): one compact group after the asteroid ore, a
 ## small icon and count per good you hold or have on the way, hidden until
-## a Raider Dock stands or a good is in stock. The planet icon carries the
+## Surface operations is researched or a good is in stock. The planet icon carries the
 ## whole list in its tooltip.
 func _make_goods_box(res: HBoxContainer) -> void:
 	var gb := TipBox.new("Planet goods")
@@ -402,8 +406,7 @@ func _make_goods_box(res: HBoxContainer) -> void:
 func _update_goods() -> void:
 	var pending := CargoDepot.pending_all(self)
 	var mgr := BuildingManager.of(self)
-	var dock_def := mgr.def_by_id(&"raider_dock") if mgr else null
-	var dock := dock_def != null and mgr.count_of(dock_def) > 0
+	var dock := Research.is_done(OutpostState.TECH)
 	var any := false
 	var stations := not StationSupply.all(get_tree()).is_empty()
 	for k in _goods_cells.size():
@@ -479,7 +482,7 @@ func _on_delivery(_contract: Contract, ship: Node, credits: int, materials: int,
 		_flash_sum(_credits_delta, -credits)
 	# Ore left at an outpost depot shows when its shuttle lands (_on_cargo);
 	# planet goods show in their own group.
-	if materials != 0 and CargoDepot.of_ship(ship) == null and not (_contract is PlanetRaidContract):
+	if materials != 0 and CargoDepot.of_ship(ship) == null:
 		_flash_sum(_ore_deltas[Economy.ore_of_belt(ore)], materials)
 
 
@@ -630,7 +633,7 @@ func _fill_goods(t: RichTooltip) -> void:
 		t.stat(Economy.ORE_NAMES[i], v, (Economy.ORE_COLORS[i] as Color).lerp(Color.WHITE, 0.5))
 		t.text(USES[i], HudStyle.TEXT_DIM, 12)
 	t.section("How to get them")
-	t.text("Send landers on planet raids. Each world gives one good: gas giants fuel, ice and ocean water, lava rare metals, desert silicates, rocky heavy ore.", HudStyle.TEXT, 12)
+	t.text("Found planet outposts (research Surface operations): harvesters gather one good per world and shuttles lift it up. Ice and ocean worlds give water, lava rare metals, desert silicates, rocky heavy ore, and gas giants fuel (from a floating platform).", HudStyle.TEXT, 12)
 	t.hint("Stock, price per unit, use")
 
 

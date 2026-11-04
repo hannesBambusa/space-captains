@@ -30,9 +30,6 @@ extends Node
 ## miner's delivery). Every payment to a captain also collects the station's
 ## share of it back (Economy.collect_fees).
 ##
-## Phase C2: planet raids (PlanetRaidContract), paid per load like mining;
-## the loot is a planet good by planet type.
-##
 ## Stage 3: salvage. Salvagers work scrap fields on their own (free salvage,
 ## paid by their Salvage Yard, which reprocesses the scrap and sells the ore
 ## to the player); a posted salvage contract adds a per-load bonus from the
@@ -300,13 +297,6 @@ func post_salvage(field: ScrapField, credits_per_load: int, max_takers: int = 3)
 	var c := post(SalvageContract.new(field, maxi(credits_per_load, 0), max_takers)) as SalvageContract
 	_wire(c)
 	return c
-
-
-## Planet raid on a planet or moon, paid per delivered load (phase C2).
-func post_planet_raid(body: PlanetBody, credits_per_load: int, max_loads: int = 0) -> PlanetRaidContract:
-	if body == null or not is_instance_valid(body) or not post_problem(credits_per_load).is_empty():
-		return null
-	return post(PlanetRaidContract.new(body, maxi(credits_per_load, 0), max_loads)) as PlanetRaidContract
 
 
 ## Why an explore contract on gate [param gate] of system [param from]
@@ -780,26 +770,6 @@ func deliver_salvage_load(contract: SalvageContract, ship: Node, scrap: int) -> 
 	delivery_made.emit(contract, ship, bonus, mat, -1)
 	var escorted := _pay_escorts(s, contract) > 0 if s else false
 	return {"credits": bonus + yard_pay, "bonus": bonus, "yard": yard_pay, "owed": owed, "scrap": sorted, "materials": mat, "escorted": escorted, "rare": rare}
-
-
-## Pays for one delivered planet raid load of [param units] (already
-## scaled by what scavengers left aboard; [param fraction] of a full load).
-## Partial payment when credits run short, like a mining load. The loot
-## goes into the lander's dock stock (a cargo shuttle brings it to the
-## station), else straight into the player's stock. Returns {credits,
-## materials, partial, escorted}.
-func deliver_raid_load(contract: PlanetRaidContract, ship: Node, units: int, fraction: float = 1.0) -> Dictionary:
-	fraction = clampf(fraction, 0.0, 2.0)
-	var s := ship as Ship
-	var full_pay := roundi(float(contract.reward) * fraction)
-	var pay := _pay_for_load(contract, full_pay)
-	var mat := _paid_share(units, pay, full_pay)
-	_stock_materials(ship, contract.loot, mat)
-	contract.credits_paid += pay
-	contract.units_delivered += mat
-	PlanetRaidContract.note_raid(contract.planet, mat, pay)
-	var escorted := _finish_delivery(contract, ship, pay, mat, -1)
-	return {"credits": pay, "materials": mat, "partial": pay < full_pay, "escorted": escorted}
 
 
 ## Pays what the player can of [param full_pay] for a delivered load from

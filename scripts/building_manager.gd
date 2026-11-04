@@ -681,11 +681,40 @@ func def_by_id(id: StringName) -> BuildingDef:
 	return null
 
 
+## The Raider Dock of older saves: planet outposts replaced planet raids.
+const RETIRED_DOCK := &"raider_dock"
+
+
+## An old save's Raider Dock: removed, its build cost refunded, each lander
+## that still had a ship bought out at the ship's cost, the loot waiting in
+## its depot handed over, and its captains retired (they have no berth left,
+## so their Factory orders lapse). Planet outposts replaced planet raids.
+func _retire_dock(s: Dictionary, refs: SaveRefs) -> void:
+	var crew := refs.captains(s.get("captains", []))
+	var waiting := refs.captains(s.get("waiting", []))
+	var landers := maxi(crew.size() - waiting.size(), 0)
+	var credits := 900 + 550 * landers
+	var ore := Economy.padded(Economy.cost(180, 60))
+	var depot := Economy.padded(PackedInt32Array((s.get("depot", {}) as Dictionary).get("stock", [])))
+	for i in ore.size():
+		ore[i] += depot[i]
+	Corps.economy(self).add(credits, ore, Ledger.OTHER, "Raider Dock retired")
+	for c in crew + waiting:
+		if c and c.alive:
+			c.alive = false
+			c.add_history("Retired: planet raids ended and the Raider Dock closed")
+	EventLog.post("Planet raids are over: the Raider Dock was retired, %s cr and %s refunded%s. Found planet outposts instead (Surface operations)." % [
+			Fmt.amount(credits), Economy.cost_text(ore), " (with %d lander%s bought out)" % [landers, "" if landers == 1 else "s"] if landers > 0 else ""], EventLog.Kind.INFO)
+
+
 ## Rebuilds every saved building (the start Factory is reused when the save
 ## has it in the same bay, else removed). Registers each under its save id.
 func load_state(d: Dictionary, refs: SaveRefs) -> void:
 	var kept: Array[Building] = []
 	for s: Dictionary in d.get("buildings", []):
+		if StringName(s["def"]) == RETIRED_DOCK:
+			_retire_dock(s, refs)
+			continue
 		var def := def_by_id(StringName(s["def"]))
 		if def == null:
 			push_warning("BuildingManager: unknown building '%s' in the save" % s["def"])

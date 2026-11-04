@@ -429,7 +429,7 @@ def previews(out_dir):
 def lineup(out_dir):
     """Colony ship next to the other ships at true scale (3/4 view)."""
     common.reset_scene()
-    ships = (("colony_ship", 0.0), ("merc_fighter", 10.0), ("miner", 17.0),
+    ships = (("colony_ship", 0.0), ("merc_fighter_old", 10.0), ("miner", 17.0),
              ("explorer", 24.0), ("syndicate_gunship", 33.0), ("cargo_shuttle", 42.0))
     for name, x in ships:
         path = os.path.join(common.ROOT, "assets", "models", "ships", name + ".glb")

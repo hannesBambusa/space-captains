@@ -1,12 +1,14 @@
 class_name MainMenu
 extends Control
 ## The start screen (scenes/main_menu.tscn, the project's main scene):
-## Continue (the newest save), New game, Load game ([SaveList]), Settings
+## Continue (the newest save), New game, Tutorial (the guided tutorial game:
+## SaveManager.new_game(true), [Tutorial] academy mode), Load game ([SaveList]), Settings
 ## (fullscreen, the tutorial for new games, volumes, a Graphics page:
 ## [GraphicsOptions]) and Quit, over the slowly turning station ([MenuBackdrop]).
 ## Styled like the pause menu (ui/theme.tres).
 ## Run with "-- --screenshot=..." it starts a new game at once, so the
-## screenshot check keeps rendering the system.
+## screenshot check keeps rendering the system (with "-- --tutorial" too,
+## the tutorial game).
 
 const THEME_PATH := "res://ui/theme.tres"
 const TITLE_COLOR := HudStyle.ACCENT
@@ -39,7 +41,7 @@ func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--screenshot="):
-			SaveManager.new_game.call_deferred()
+			SaveManager.new_game.call_deferred("--tutorial" in OS.get_cmdline_user_args())
 			return
 	_build()
 	_show_main()
@@ -126,6 +128,9 @@ func _build() -> void:
 	_backup = _button("Load the backup", _on_backup)
 	_main.add_child(_backup)
 	_main.add_child(_button("New game", _show_new))
+	var tut := _button("Tutorial", func() -> void: SaveManager.new_game(true))
+	tut.tooltip_text = "A guided game in chapters: every part of the job, no rivals, raids only when the defence chapter asks for one"
+	_main.add_child(tut)
 	_main.add_child(_button("Load game", _show_loads))
 	_main.add_child(_button("Settings", _show_settings))
 	_main.add_child(_button("Quit", func() -> void: get_tree().quit()))

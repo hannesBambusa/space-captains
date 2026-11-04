@@ -20,7 +20,7 @@ signal count_changed(total: int, in_combat: int)
 enum Sort { ROLE, STATUS, HULL, WALLET, RANK }
 
 const SORT_NAMES: PackedStringArray = ["Role", "Status", "Hull", "Wallet", "Rank"]
-const ROLE_ORDER: PackedStringArray = ["Miner", "Mercenary", "Salvager", "Lander", "Explorer"]
+const ROLE_ORDER: PackedStringArray = ["Miner", "Mercenary", "Salvager", "Explorer"]
 const H := preload("res://scripts/ui/theme/hud_style.gd")
 ## Fleet accents, handed out in turn (each fleet keeps its own).
 const FLEET_COLORS: Array[Color] = [Color(1.0, 0.85, 0.42), Color(0.55, 0.9, 1.0), Color(0.95, 0.6, 1.0), Color(0.6, 1.0, 0.65)]

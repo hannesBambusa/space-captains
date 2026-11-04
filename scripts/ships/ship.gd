@@ -117,6 +117,8 @@ static var flat_combat: bool = false
 @export var bank_max_deg: float = 28.0
 @export var bob_height: float = 0.5
 @export var bob_period: float = 5.0
+## Hull rumble at the end of a warp spool, metres (eased in as the drive charges).
+const SPOOL_RUMBLE := 0.12
 @export var glow_pulse_speed: float = 2.2
 ## Engine flame length at idle / full thrust (multiplies the model's Z scale).
 @export var glow_idle: float = 0.35
@@ -1203,11 +1205,14 @@ func _apply_visuals(dt: float) -> void:
 	if mover.warp_state != ShipMover.Warp.IDLE:
 		want = 1.0
 		if mover.warp_state == ShipMover.Warp.SPOOL and _model:
-			# Spool shake, growing as the drive charges.
+			# Spool rumble, easing in as the drive charges. Real time, not sim
+			# time: at high sim speed a sim-time phase skips whole cycles per
+			# frame and the hull twitches at random instead of humming.
 			var k := 1.0 - clampf(mover.warp_timer / SpaceNav.WARP_SPOOL, 0.0, 1.0)
-			var amp := 0.35 * (0.3 + k)
-			_model.position.x = sin(t * 97.0 + _phase) * amp
-			_model.position.z = cos(t * 91.0) * amp
+			var amp := SPOOL_RUMBLE * k * k
+			var rt := Time.get_ticks_msec() / 1000.0
+			_model.position.x += (sin(rt * 23.0 + _phase) + 0.5 * sin(rt * 37.0 + _phase * 1.7)) * amp
+			_model.position.y += sin(rt * 29.0 + _phase * 0.6) * amp * 0.5
 	_glow_level = lerpf(_glow_level, clampf(want, 0.0, 1.0), 0.15)
 	_pulse_glow()
 	if _warp_vis:

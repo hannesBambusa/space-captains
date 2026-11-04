@@ -1,6 +1,6 @@
 class_name VolumeSliders
 extends GridContainer
-## Music / SFX / UI volume sliders ([AudioSettings]). Dragging sets the bus
+## Music / SFX / UI / Voice volume sliders ([AudioSettings]). Dragging sets the bus
 ## at once; letting go saves to user://settings.cfg. Used by the pause menu
 ## and the main menu's settings page.
 

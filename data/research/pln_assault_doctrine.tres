@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1_tech")
 id = &"pln_assault_doctrine"
-display_name = "Planetary assault doctrine"
+display_name = "Surface operations"
 field = 2
 tier = 2
 cost_credits = 900
@@ -13,7 +13,6 @@ cost_iron = 120
 cost_titanium = 60
 research_time = 220.0
 prerequisites = Array[StringName]([&"pln_orbital_survey"])
-unlock_buildings = Array[StringName]([&"raider_dock"])
-tags = PackedStringArray("building")
-benefit = "Raid planets and moons for fuel, water, metals and other goods."
-description = "Drop tactics for landing on hostile worlds. Unlocks the Raider Dock, where pilots fly dropships down to the planets for loot."
+tags = PackedStringArray("economy")
+benefit = "Found outposts on planets and moons that harvest water, metals and other goods."
+description = "Landing, building and holding ground on other worlds. Found an outpost from a planet's panel in any system with your station; its harvesters gather the world's good and shuttles lift it to the station."

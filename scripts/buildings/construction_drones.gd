@@ -26,7 +26,7 @@ const CROWD_DISTANCE := 7.0
 ## A sim-time jump bigger than this (fast-forward) snaps the drones.
 const SNAP_JUMP := 1.0
 
-## Model scale: the drone is ~1.6 m long.
+## Model scale: the drone model is ~1.4 m long and 1.5 m wide (x2 in game).
 @export var drone_scale: float = 2.0
 ## Hover distance off the surface while welding, metres.
 @export var standoff: float = 2.6
@@ -327,7 +327,7 @@ static func _placeholder() -> Node3D:
 	arm_box.material = hull
 	arm.mesh = arm_box
 	arm.name = "drone_arm"
-	arm.position = Vector3(0.0, -0.17, -0.28)
+	arm.position = Vector3(0.0, -0.23, -0.35)
 	root.add_child(arm)
 	var tip := Marker3D.new()
 	tip.name = "weld_tip"
@@ -345,7 +345,7 @@ static func _placeholder() -> Node3D:
 	sphere.material = glow
 	light.mesh = sphere
 	light.name = "drone_light"
-	light.position = Vector3(0.0, 0.3, 0.1)
+	light.position = Vector3(0.0, 0.245, 0.16)
 	root.add_child(light)
 	return root
 

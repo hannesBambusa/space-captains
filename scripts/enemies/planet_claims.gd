@@ -3,7 +3,7 @@ extends Node
 ## Faction planet claims (phase C3). Lives under CombatWorld.
 ##
 ## A claim is a ClaimGarrison in orbit of a planet or moon (one per body).
-## While it stands landers refuse planet raids there ([method claim_reason]),
+## While it stands no outpost can be founded there ([method claim_reason]),
 ## the planet panel shows the owner, the garrison and its patrols, and the
 ## planet's label is tinted in the faction colour.
 ##
@@ -136,7 +136,6 @@ func claim(body: PlanetBody, fdef: FactionDef, gang: String, effect: bool = true
 	_register(g)
 	if effect:
 		g.play_arrival()
-	_abort_landers(body)
 	changed.emit()
 	return g
 
@@ -148,14 +147,6 @@ func _register(g: ClaimGarrison) -> void:
 	if sys:
 		sys.add_garrison(g)
 		sys.tint_body_label(g.planet, g.faction_def.color.lerp(Color.WHITE, 0.25))
-
-
-## Landers on their way to a newly claimed world turn back.
-func _abort_landers(body: PlanetBody) -> void:
-	for n in SystemWorld.nodes_in(self, Ship.GROUP):
-		var lb := (n as Ship).brain as LanderBrain if n is Ship else null
-		if lb:
-			lb.check_claim(body)
 
 
 func _on_garrison_destroyed(den: ScavengerDen, killer: Node3D) -> void:
@@ -210,7 +201,7 @@ func sim_step(_dt: float) -> void:
 
 func _step_waiting(r: Dictionary, now: float) -> void:
 	var fdef := Factions.get_def(StringName(r["faction"]))
-	var body := PlanetRaidContract.find_planet(self, String(r["planet"]))
+	var body := PlanetInfo.find_planet(self, String(r["planet"]))
 	if body == null or garrison_of(body) != null:
 		reclaims.erase(r)
 		changed.emit()
@@ -329,6 +320,23 @@ func _on_deployed(c: ClaimConstructor, r: Dictionary) -> void:
 	for o in r.get("escorts", []):
 		if is_instance_valid(o) and not (o as ScavengerShip).dead:
 			live.append(o as ScavengerShip)
+	# Your outpost holds the ground: a ground raid instead of a garrison, and
+	# the faction tries again later (planet outposts plan, S4).
+	var outs := Outposts.of(get_tree())
+	if outs and outs.claim_blocked(c.planet, 2 + live.size(), c.gang):
+		c.leave_map()
+		for s in live:
+			if s.ai:
+				s.ai.withdraw = true
+		r.erase("constructor")
+		r.erase("escorts")
+		r["attempt"] = int(r["attempt"]) + 1
+		r["at"] = SimClock.time + _delay(c.faction_def, int(r["attempt"]))
+		r["warned"] = false
+		r["phase"] = Phase.WAITING
+		reclaims.append(r)
+		changed.emit()
+		return
 	var g := claim(c.planet, c.faction_def, c.gang, false, c.site_angle, live.is_empty())
 	WarpFx.flash(self, c.global_position, 60.0)
 	c.leave_map()
@@ -433,7 +441,7 @@ func load_state(d: Dictionary) -> void:
 	garrisons.clear()
 	reclaims.clear()
 	for gd: Dictionary in d.get("garrisons", []):
-		var body := PlanetRaidContract.find_planet(self, String(gd.get("planet", "")))
+		var body := PlanetInfo.find_planet(self, String(gd.get("planet", "")))
 		if body == null:
 			continue
 		var g := ClaimGarrison.new()

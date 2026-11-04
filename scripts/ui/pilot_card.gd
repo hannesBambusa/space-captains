@@ -197,7 +197,7 @@ static func status_text(c: Captain, ship: Ship) -> String:
 		return "Waiting for a ship" if c.stranded or not is_instance_valid(c.ship) else "Lost"
 	var br := ship.brain
 	var text := ship.get_status_text()
-	if br and br.state == CaptainBrain.State.MINING and br.trip and br.trip.contract and ship.warp_status_text().is_empty() and not (ship is LanderShip):
+	if br and br.state == CaptainBrain.State.MINING and br.trip and br.trip.contract and ship.warp_status_text().is_empty():
 		text = "Mining at %s" % br.trip.contract.get_target_name()
 	if br and not br.last_refusal.is_empty() and (br.state == CaptainBrain.State.DOCKED or br.state == CaptainBrain.State.EVALUATING):
 		text += ": " + br.last_refusal.to_lower()

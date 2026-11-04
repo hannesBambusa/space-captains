@@ -5,7 +5,7 @@ extends Resource
 ## Arrays are indexed by AsteroidBelt.OreType (ROCK, IRON, TITANIUM, CRYSTAL).
 
 ## Materials per full load, per ore.
-@export var materials_per_load: PackedInt32Array = [4, 10, 25, 60]
+@export var materials_per_load: PackedInt32Array = [4, 25, 15, 15]
 ## Fair reward per load for a danger-1 belt, per ore.
 @export var base_reward: PackedInt32Array = [20, 50, 90, 150]
 ## Added to the fair reward per danger level above 1.

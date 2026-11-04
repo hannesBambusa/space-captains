@@ -44,6 +44,8 @@ const SCOUT_TIMES: PackedFloat32Array = [180.0, 260.0, 180.0, 130.0]
 const STAY_BONUS := 0.25
 const STRIKE_WARNING := 75.0
 const OFFER_MS := 60000
+## Ticks at the last expiry check while on a surface, -1 when not.
+var _surface_ms := -1
 const CEASEFIRE := 1200.0
 const PACT_TIME := 1200.0
 ## Trade income per sim minute for each side while a pact holds.
@@ -642,9 +644,18 @@ func answer_offer(rid: StringName, choice: String) -> String:
 
 
 func _check_offer_expiry() -> void:
+	# Down on a surface the treaty card is hidden: offers wait (the surface
+	# HUD shows that one is waiting).
+	# The countdown is frozen (pushed on by the time spent down there).
+	var now := Time.get_ticks_msec()
+	var on_surface := SurfaceMode.of(get_tree()) != null
+	var held := now - _surface_ms if on_surface and _surface_ms >= 0 else 0
+	_surface_ms = now if on_surface else -1
 	for r in Corps.rivals:
 		var o := r.mind.tie(P).offer
-		if not o.is_empty() and Time.get_ticks_msec() > int(o.get("until", 0)):
+		if not o.is_empty() and on_surface:
+			o["until"] = int(o.get("until", 0)) + held
+		elif not o.is_empty() and now > int(o.get("until", 0)):
 			answer_offer(r.id, "reject")
 
 

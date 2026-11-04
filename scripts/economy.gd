@@ -26,7 +26,7 @@ signal income(amount: int, source: String)
 signal cargo_received(ore: PackedInt32Array, source: String)
 
 ## Asteroid ore first (iron, titanium, crystal), then the planet goods that
-## raiders bring back from planet raids (phase C2, see PlanetRaidRules):
+## planet outposts harvest and lift to the station (OutpostState.GOODS):
 ## fuel (gas giants), water (ice and ocean worlds), rare metals (lava),
 ## silicates (desert) and heavy ore (rocky). Saves keep this order; older
 ## saves with three entries are padded ([method padded]).

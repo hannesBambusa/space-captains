@@ -12,7 +12,6 @@ const HOLO := Color(0.4, 0.88, 1.0)
 const BOUNTY_COLOR := Color(1.0, 0.3, 0.24)
 const ESCORT_COLOR := Color(0.45, 0.95, 1.0)
 const SALVAGE_COLOR := Color(1.0, 0.72, 0.35)
-const RAID_COLOR := Color(0.8, 0.62, 1.0)
 ## Icon size on screen ~ texture px * this * px per radian.
 const ICON_PIXEL_SIZE := 0.0006
 
@@ -152,18 +151,15 @@ func _make_icon(tex: Texture2D, color: Color) -> Sprite3D:
 func _make_icon_marker(target: Node3D, first: Contract) -> Node3D:
 	var bounty := first is BountyContract
 	var salvage := first is SalvageContract
-	var raid := first is PlanetRaidContract
 	var explore := first is ExploreContract
-	var color := BOUNTY_COLOR if bounty else (SALVAGE_COLOR if salvage else (RAID_COLOR if raid else ESCORT_COLOR))
+	var color := BOUNTY_COLOR if bounty else (SALVAGE_COLOR if salvage else ESCORT_COLOR)
 	var m := Node3D.new()
 	m.name = "Contract_%s" % String(target.name)
 	m.set_meta(&"focus_radius", 40.0)
 	m.set_meta(&"focus_distance", 520.0 if target is ScavengerDen else 220.0)
 	add_child(m)
 	var tex: Texture2D = IconTextures.reticle() if bounty else (IconTextures.salvage() if salvage else IconTextures.shield())
-	if raid:
-		tex = HudStyle.icon(&"role_lander")
-	elif explore:
+	if explore:
 		tex = HudStyle.icon(&"role_explorer")
 		color = HudStyle.ROLE_COLORS["Explorer"]
 	var icon := _make_icon(tex, color)

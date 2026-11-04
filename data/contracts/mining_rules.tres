@@ -4,8 +4,8 @@
 
 [resource]
 script = ExtResource("1_rules")
-materials_per_load = PackedInt32Array(4, 10, 25, 60)
-base_reward = PackedInt32Array(20, 50, 90, 150)
+materials_per_load = PackedInt32Array(4, 25, 15, 15)
+base_reward = PackedInt32Array(20, 50, 70, 110)
 danger_premium = 15
 mine_time = PackedFloat32Array(10, 14, 18, 24)
 reward_min = 20

@@ -197,8 +197,6 @@ static func type_icon(c: Contract) -> StringName:
 		return &"st_escort"
 	if c is SalvageContract:
 		return &"scrap"
-	if c is PlanetRaidContract:
-		return &"planet"
 	if c is ExploreContract:
 		return &"role_explorer"
 	return &"tab_contracts"

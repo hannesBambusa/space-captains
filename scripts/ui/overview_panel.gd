@@ -931,6 +931,8 @@ func _make_star_row(sys: SolarSystem) -> Control:
 	row.set_lead_icon(&"star", col.lerp(Color(1.0, 0.85, 0.5), 0.4), float(_fs - 1))
 	var temp := int(sys.system_def.star_temperature) if sys.system_def else 0
 	row.set_value("%d K" % temp)
+	if sys.system_def and not sys.system_def.star_kind.is_empty():
+		row.set_subtitle(sys.system_def.star_label())
 	return row
 
 
@@ -951,12 +953,18 @@ func _make_body_row(body: PlanetBody, depth: int) -> Control:
 		if g:
 			tip.text("Held by %s." % _holder(g), HudStyle.BAD)
 		_tip_distance(tip, body)
-		tip.hint("Click: fly to it and select it.")
+		var outs := Outposts.of(get_tree())
+		var o := outs.outpost_of(body) if outs else null
+		if o:
+			tip.text("Your outpost: %d harvesters, %d soldiers, %d %s delivered." % [o.crew_of(OutpostState.HARVESTER).size(), o.crew_of(OutpostState.SOLDIER).size(), o.delivered[o.good], o.good_name()])
+		tip.hint("Click: fly to it and select it.%s" % (" Double-click it in space: down to the surface." if o and o.is_founded() else ""))
 	_updaters[row] = func() -> void:
 		if not is_instance_valid(body):
 			return
 		var g: Variant = _garrison(body)
-		row.set_subtitle("held by %s" % _holder(g) if g else kind)
+		var outs := Outposts.of(get_tree())
+		var o := outs.outpost_of(body) if outs else null
+		row.set_subtitle("held by %s" % _holder(g) if g else ("%s, outpost%s" % [kind, "" if o.is_founded() else " landing"] if o else kind))
 		if g:
 			row.subtitle_label.add_theme_color_override("font_color", HudStyle.BAD)
 		else:

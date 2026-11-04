@@ -75,10 +75,6 @@ static func save_contract(c: Contract, listed: bool) -> Dictionary:
 			# A mobile station that is data now (F6).
 			d["escort"]["data_ward"] = true
 			d["escort"]["ward_name"] = ec.ward_name
-	elif c is PlanetRaidContract:
-		var rc := c as PlanetRaidContract
-		d["planet"] = rc.planet.def.name if is_instance_valid(rc.planet) else ""
-		d["raid"] = SaveUtil.props(rc, ["loot", "max_loads", "loads_delivered", "loads_in_flight", "units_delivered"])
 	elif c is SalvageContract:
 		var sc := c as SalvageContract
 		d["salvage"] = SaveUtil.props(sc, ["loads_delivered", "loads_in_flight", "materials_delivered", "rare_chance", "free"])
@@ -174,12 +170,9 @@ static func _make(s: Dictionary, refs: SaveRefs, belts: Dictionary, ctx: Node) -
 			ec.trips_completed = int(ed.get("trips_completed", 0))
 			c = ec
 		Contract.Type.PLANET_RAID:
-			var body := PlanetRaidContract.find_planet(ctx, String(s.get("planet", ""))) if ctx else null
-			if body == null:
-				return null
-			var rc := PlanetRaidContract.new(body, int(s["reward"]))
-			SaveUtil.apply_props(rc, s.get("raid", {}))
-			c = rc
+			# Planet raids were replaced by planet outposts: an old save's raid
+			# contract is dropped (it reserved nothing, paid per load).
+			return null
 		Contract.Type.EXPLORE:
 			var xd: Dictionary = s.get("explore", {})
 			var ec := ExploreContract.new(StringName(xd.get("from", "home")), String(xd.get("gate_name", "")), int(s["reward"]), String(xd.get("exit_gate", "")))

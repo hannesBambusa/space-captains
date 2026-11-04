@@ -69,9 +69,6 @@ const RAID_LOOT_MAX := 75
 const ROAM_SPEED := 0.55
 ## Escort weight in prey scoring at aggression 0.5, metres per escort.
 const ESCORT_PENALTY := 2500.0
-## Landers (fast dropships on a raid, mostly out of the lanes) rank this much
-## lower as prey, metres of distance.
-const LANDER_PREY_PENALTY := 1500.0
 ## A wingman's slot beside its lead, metres.
 const WING_OFFSET := 90.0
 ## Raiders drop out of a warp this far short of the colony, metres.
@@ -441,8 +438,6 @@ func _pick_prey() -> Ship:
 			score -= 1800.0
 		elif m is EscapePod:
 			score -= 600.0
-		if m is LanderShip:
-			score += LANDER_PREY_PENALTY
 		var escorts := _guns_near(m.global_position, ESCORT_RADIUS) - (1 if armed else 0)
 		score += ESCORT_PENALTY * 2.0 * (1.0 - fac.aggression) * float(maxi(escorts, 0))
 		if m == target:

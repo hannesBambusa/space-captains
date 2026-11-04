@@ -243,17 +243,25 @@ func is_lost(slot: String) -> bool:
 	return (cfg.get_value("lost", "slots", PackedStringArray()) as PackedStringArray).has(slot)
 
 
-## Starts a fresh game in a new slot.
-func new_game() -> void:
+## Starts a fresh game in a new slot. [param tutorial]: the tutorial game
+## (Tutorial academy mode): no rival corporations whatever the New game page
+## says (the remembered setting stays as it is).
+func new_game(tutorial: bool = false) -> void:
 	if _busy:
 		return
 	_busy = true
 	var slot := next_slot()
-	var cover := await LoadingScreen.cover(get_tree(), "Starting %s" % slot_name(slot))
+	var cover := await LoadingScreen.cover(get_tree(), ("Starting the tutorial" if tutorial else "Starting %s" % slot_name(slot)))
 	await _leave_scene()
+	var keep_difficulty := Corps.next_difficulty
+	if tutorial:
+		Corps.next_difficulty = CorpRegistry.Difficulty.OFF
 	_reset_globals()
+	Corps.next_difficulty = keep_difficulty
 	current_slot = slot
+	Tutorial.academy_next = tutorial
 	_enter_game({})
+	Tutorial.academy_next = false
 	_busy = false
 	cover.reveal()
 
@@ -357,7 +365,6 @@ func _reset_globals() -> void:
 	CargoShuttle._pads.clear()
 	SalvageContract._free.clear()
 	SalvageContract._next_free_id = -1
-	PlanetRaidContract.records.clear()
 
 
 func _toast(text: String) -> void:

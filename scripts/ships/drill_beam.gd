@@ -5,16 +5,27 @@ extends Node3D
 ## (top_level), aimed every frame by the ship. Sparks freeze while paused.
 ## The contact also carries a camera-facing glow (shaders/fx_glow.gdshader)
 ## that keeps a few pixels on screen, so a working drill reads at belt zoom.
+## Combined beam: given emitter points, thin feeder beams run from each
+## emitter to the start of the main beam (the focus), with a flare there,
+## and the main beam is drawn thicker. Without emitters (salvager, older
+## models) it is the single beam as before.
 
 @export var beam_color: Color = Color(0.55, 0.9, 1.0)
 @export var spark_color: Color = Color(1.0, 0.62, 0.25)
 @export var beam_radius: float = 0.22
+## Feeder beam radius, emitter to focus.
+@export var feeder_radius: float = 0.07
+## Main beam thickness multiplier while it is fed by emitters.
+@export var combined_scale: float = 1.6
 
 var _beam: MeshInstance3D
 var _core: MeshInstance3D
 var _hot: MeshInstance3D
 var _sparks: GPUParticles3D
 var _on := false
+## Feeder beams (top_level, laid out in world space each aim).
+var _feeders: Array[MeshInstance3D] = []
+var _flare: MeshInstance3D
 
 
 func _ready() -> void:
@@ -36,10 +47,24 @@ func _ready() -> void:
 	_sparks = _make_sparks()
 	_hot.add_child(_sparks)
 	_hot.add_child(_make_glint())
+	var flare_mesh := SphereMesh.new()
+	flare_mesh.radius = 0.5
+	flare_mesh.height = 1.0
+	flare_mesh.radial_segments = 10
+	flare_mesh.rings = 5
+	_flare = MeshInstance3D.new()
+	_flare.name = "Focus"
+	_flare.mesh = flare_mesh
+	_flare.material_override = _additive(beam_color.lerp(Color.WHITE, 0.6), 2.6, 0.85)
+	_flare.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_flare.visible = false
+	add_child(_flare)
 
 
-## Shows the beam from [param from] to [param to] (world).
-func aim(from: Vector3, to: Vector3) -> void:
+## Shows the beam from [param from] to [param to] (world). With
+## [param emitters] (world points), feeder beams converge from each emitter
+## on [param from], which becomes the focus of a thicker combined beam.
+func aim(from: Vector3, to: Vector3, emitters: PackedVector3Array = PackedVector3Array()) -> void:
 	var d := to - from
 	var length := d.length()
 	if length < 0.5:
@@ -50,10 +75,12 @@ func aim(from: Vector3, to: Vector3) -> void:
 	var up := Vector3.UP if absf(d.normalized().y) < 0.95 else Vector3.RIGHT
 	look_at(to, up)
 	var flicker := 0.85 + 0.15 * sin(Time.get_ticks_msec() * 0.031)
+	var thick := flicker * (combined_scale if not emitters.is_empty() else 1.0)
 	for m in [_beam, _core]:
 		var mi := m as MeshInstance3D
-		mi.scale = Vector3(flicker, length, flicker)
+		mi.scale = Vector3(thick, length, thick)
 		mi.position = Vector3(0.0, 0.0, -length * 0.5)
+	_aim_feeders(from, emitters, flicker)
 	_hot.position = Vector3(0.0, 0.0, -length)
 	_hot.scale = Vector3.ONE * (0.8 + 0.4 * flicker)
 	_sparks.speed_scale = 0.0 if SimClock.paused else clampf(SimClock.speed, 0.0, 4.0)
@@ -66,6 +93,55 @@ func set_active(on: bool) -> void:
 	Sfx.loop(self, &"mining_laser", on)
 	visible = on
 	_sparks.emitting = on
+	if not on:
+		for f in _feeders:
+			f.visible = false
+
+
+## Lays a feeder beam from every emitter to [param focus]; hides the rest.
+func _aim_feeders(focus: Vector3, emitters: PackedVector3Array, flicker: float) -> void:
+	while _feeders.size() < emitters.size():
+		_feeders.append(_make_feeder())
+	for i in _feeders.size():
+		var f := _feeders[i]
+		if i >= emitters.size():
+			f.visible = false
+			continue
+		var span := focus - emitters[i]
+		var length := span.length()
+		if length < 0.05:
+			f.visible = false
+			continue
+		# Unit cylinder along local Y: Y column carries the span, X/Z the radius.
+		var y_axis := span / length
+		var x_axis := y_axis.cross(Vector3.UP if absf(y_axis.y) < 0.95 else Vector3.RIGHT).normalized()
+		var z_axis := x_axis.cross(y_axis)
+		var r := flicker * (0.9 + 0.1 * sin(Time.get_ticks_msec() * 0.047 + i * 1.7))
+		f.global_transform = Transform3D(Basis(x_axis * r, span, z_axis * r), emitters[i] + span * 0.5)
+		f.visible = true
+	_flare.visible = not emitters.is_empty()
+	if _flare.visible:
+		_flare.scale = Vector3.ONE * (0.8 + 0.35 * flicker)
+
+
+func _make_feeder() -> MeshInstance3D:
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = feeder_radius
+	cyl.bottom_radius = feeder_radius
+	cyl.height = 1.0
+	cyl.radial_segments = 6
+	cyl.rings = 1
+	cyl.cap_top = false
+	cyl.cap_bottom = false
+	var mi := MeshInstance3D.new()
+	mi.name = "Feeder%d" % _feeders.size()
+	mi.mesh = cyl
+	mi.material_override = _additive(beam_color.lerp(Color.WHITE, 0.4), 2.4, 0.8)
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.top_level = true
+	mi.visible = false
+	add_child(mi)
+	return mi
 
 
 func _make_cylinder(radius: float, mat: Material) -> MeshInstance3D:

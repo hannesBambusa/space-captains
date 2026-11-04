@@ -142,11 +142,11 @@ func _build() -> void:
 	star = Star.new()
 	star.name = "Star"
 	add_child(star)
-	star.build(def.star_radius, _star_color, def.light_energy, extent * 3.0)
+	star.build(def.star_display_radius(), _star_color, def.light_energy, extent * 3.0, def.get_light_color())
 
 	var sun := LocalSunLight.new()
 	sun.name = "LocalSunLight"
-	sun.light_color = _star_color.lerp(Color.WHITE, 0.35)
+	sun.light_color = def.get_light_color()
 	sun.light_energy = def.light_energy
 	sun.light_specular = 0.6
 	sun.light_angular_distance = 0.5

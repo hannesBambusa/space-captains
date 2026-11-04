@@ -1,36 +1,50 @@
-"""Generate the Mercenary Outpost (fighter hangar) .glb and previews.
+"""Generate the Mercenary Outpost ("Drumhead rack", MX-12 merc carrier hub) .glb and previews.
 
 Run:
   /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
       --python blender/gen_mercenary_outpost.py
   Options after `--`: --no-preview, --no-textures (flat materials, no Cycles bake),
-  --no-ships (previews without the four docked merc fighters).
+  --no-ships (previews without the four docked merc interceptors), --check (measures
+  merc_interceptor.glb, tests the docking corridors, the sideways path, the outer berth
+  spots and the footprint radius, prints BERTH CHECK lines).
 Textures: one 2048 worn-industrial atlas (worn_kit / station_textures.WORN_KINDS plus a
-"merc" red paint kind), saved as blender/textures/mercenary_outpost_*.jpg and embedded
-as JPEG.
+"merc" oxide-red paint kind and "scrap" patches), saved as
+blender/textures/mercenary_outpost_*.jpg and embedded as JPEG.
 
-Design: armoured fighter hangar for freelance pilots. Four launch cradles in a row under
-an open truss roof, each with a catapult sled on twin rails, clamp saddles, a repair
-gantry bridge with a hanging tool arm, a side service arm, a blast deflector behind the
-engine and its own launch lights on the mouth header and down the apron. Heavy sloped
-armour plating on the side walls, PD turrets on the front corners, a flight control
-tower on +X, an ordnance yard (missile racks, ammo crates, loader) on -X, power block
-with radiators and the shuttle link port at the back.
+Design: a free-floating merc carrier hub in the hard, industrial style of the Expanse.
+There is no floor, deck or hangar shell. Four interceptors hang in an open rack, held from
+above by dorsal clamp yokes and cradled from below by ventral saddles, between lattice
+finger piers that carry pressurised walkway tubes, umbilicals and pipe runs. Each lane is
+framed in free space by a red/green lamp pair on chunky guide arms that rake forward and
+up from the fingertips, and a white bar on the forward ventral saddle beam. The rack hangs
+from a cross-girder (service tunnel in a box truss) armoured on the threat side with
+bolted, patched plates, with an ops gondola, propellant tanks and sodium work floods on
+top. Two armoured torpedo magazines flank the rack (a dark steel threat face with
+chamfered gunmetal cheeks, bolt rows and six recessed tube bores, VLS lids on top with one
+hatch open, hull number "12"), with PDC turrets on their tops and bellies. Behind the
+girder a non-rotating axle runs through a standing spin drum habitat (bearing collars,
+hazard seams, contrasting spokes and a SPIN stencil imply the rotation), then two radiator
+fans (a short boom off the axle, a coolant hub per side, three long narrow blades each,
+swept in plan and twisted about their long axis), a comms mast, two rear PDCs and the
+shuttle link port at the axle tail.
 
-Layout (Blender Z up, exported +Y up; Blender -Y = Godot +Z). Centre at origin, plane z=0.
-Same family as the raider dock / explorer outpost: the hangar mouth faces Blender -Y.
-  hangar   x -23.5..23.5 (inner -20.5..20.5), mouth y = -14, back wall y = 10,
-           deck top z = -3.4, header underside z = 6.4, wall top z = 7.2
-  berths   x = -15, -5, 5, 15, y = -3.5 (berth_spacing 10, berth_depth 10.5),
-           ships rest at z = 0 nose out (merc_fighter 4.1 x 16.2 x 5.4 m)
-  apron    y -14.6..-25.5, launch light rows + booms out to y -32
-  +X       flight control tower (30, -10), tanks + radiators behind it
-  -X       ordnance yard x -34..-25.5, y -12..9
-  back     power block y 11.6..18, link port at y 18.6
+Layout (Blender Z up, exported +Y up; Blender -Y = Godot +Z). Centre at origin, docking
+plane z = 0, docking face toward Blender -Y.
+  rack      bays x = -15, -5, 5, 15, ships rest at y = -3.5 nose -Y (merc_interceptor
+            x +-4.05, nose y -10.56, bell y +3.25, z -1.23..2.05); corridors x bx +-4.3,
+            z +-3.2 stay clear except the clamps (bottom z >= 2.40, top z <= -1.58)
+  fingers   inner x = -10, 0, 10, outer x = +-20.6, y -12..4.9, guide arms to y -17,
+            z 6.2
+  girder    x -31..31, y 4.9..9.1, z +-5 (brow armour, gondola, tanks on top)
+  magazines x +-23..31, y -12.65..9, z +-4.6
+  drum      r 11.4, y 10..21 around the axle (y 9.1..32.3)
+  back      radiator hubs x +-8 y 28, blades to x +-24.8 y 19..31, mast y 24,
+            link port y 32.3..33.6
 Hierarchy: mercenary_outpost (empty root) -> mercenary_outpost_hull,
   mercenary_outpost_lights, dock_point, spawn_point, link_point (empties).
 dock_point / spawn_point are rotated 180 deg about up, so their Godot -Z (forward) points
-out of the mouth (Godot world +Z). link_point is unrotated: Godot -Z points out the back.
+out of the rack mouth (Godot world +Z). link_point is unrotated: Godot -Z points out the
+back.
 Godot berth fields (data/buildings/mercenary_outpost.tres): inner_berths 4,
 berth_spacing 10, berth_depth 10.5, outer_berth_side 30, outer_berth_step 11,
 footprint_radius 40.
@@ -41,8 +55,10 @@ import random
 import shutil
 import sys
 
+import bmesh
 import bpy
 from mathutils import Matrix, Vector
+from mathutils.bvhtree import BVHTree
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
@@ -54,7 +70,7 @@ V = Vector
 PRE = "mercenary_outpost"
 OUT = os.path.join(common.ROOT, "assets", "models", "buildings", "mercenary_outpost.glb")
 BLEND = os.path.join(common.ROOT, "blender", "mercenary_outpost.blend")
-FIGHTER_GLB = os.path.join(common.ROOT, "assets", "models", "ships", "merc_fighter.glb")
+FIGHTER_GLB = os.path.join(common.ROOT, "assets", "models", "ships", "merc_interceptor.glb")
 PREVIEW_COPY = os.path.join(wk.SCRATCH, "mercoutpost")
 
 # Godot berth fields (keep in sync with data/buildings/mercenary_outpost.tres)
@@ -65,31 +81,21 @@ OUTER_SIDE = 30.0
 OUTER_STEP = 11.0
 OUTER_HEIGHT = 2.0
 
-MOUTH_Y, BACK_Y = -14.0, 10.0
-DOCK_POS = (0.0, MOUTH_Y, 0.0)
+DOCK_POS = (0.0, -14.0, 0.0)
 SPAWN_POS = (0.0, -34.0, 0.0)
-LINK_POS = (0.0, 18.6, 0.5)
+LINK_POS = (0.0, 33.6, 0.0)
 BAYS = [(k - (INNER_BERTHS - 1) / 2) * BERTH_SPACING for k in range(INNER_BERTHS)]
-BERTH_Y = MOUTH_Y + BERTH_DEPTH          # -3.5
-DECK_Z = -3.4
-WALL_IN, WALL_OUT = 20.5, 23.5
-FOOT_X = WALL_OUT + 1.8                  # outer wall foot
-HEAD_Z = 6.4                             # mouth header underside
-ROOF_Z = 7.1                             # roof truss centre
-RAIL_Z = 5.8                             # gantry rail top
-WALL_TOP = 7.2
-DIVIDERS = (-10.0, 0.0, 10.0)
-APRON_Y = -24.5
-TOWER = V((30.0, -10.0, 0.0))
-YARD = (-34.0, -25.5, -12.0, 9.0)        # x0, x1, y0, y1
-# merc_fighter bounds (ship frame, nose +Y): x +-2.06, y -8.6..7.62, z -2.45..2.98
-SHIP_HW, SHIP_BOT, SHIP_TOP = 2.06, -2.45, 2.98
-NOSE_Y = BERTH_Y - 7.62                  # docked nose out (-Y)
-TAIL_Y = BERTH_Y + 8.6
-LABELS = ["BAY 1", "BAY 2", "BAY 3", "BAY 4", "#BAR", "#CHEV", "NO STEP", "MX-12",
-          "AMMO", "ORD", "FLT CTRL", "LAUNCH", "HOT", "MERC"]
+BERTH_Y = DOCK_POS[1] + BERTH_DEPTH          # -3.5
+GAPS_IN = [-10.0, 0.0, 10.0]
+OUTER_FINGER_X = 20.6
+STATIONS = (-5.0, 0.5)                       # clamp yoke / saddle stations along y
+# merc_interceptor at rest (rotated pi at (bx, -3.5, 0)); --check re-measures the glb
+SHIP_HW, SHIP_ZMIN, SHIP_ZMAX = 4.05, -1.23, 2.05
+NOSE_Y, TAIL_Y = -10.56, 3.25
+LANE_HW, LANE_HH = 4.3, 3.2                  # docking corridor half sizes (x, z)
+LABELS = ["BAY 1", "BAY 2", "BAY 3", "BAY 4", "12", "MX-12", "MERC", "SPIN", "ORD", "PDC",
+          "OPS", "#CHEV", "#BAR"]
 NO_PADS = [(0.0, 900.0), (0.0, 901.0)]   # no landing pads: keep the deck ring paint off-model
-XZ = Matrix(((1, 0, 0, 0), (0, 0, 1, 0), (0, 1, 0, 0), (0, 0, 0, 1)))
 
 # merc paint: worn oxide red, same wear model as the station accent paint
 MERC = dict(st.WORN_KINDS["accent"])
@@ -103,10 +109,12 @@ DECALS = []
 SCORCH = []
 H = L = None
 RNG = random.Random(23)
+UP = V((0, 0, 1))
+GIRDER_BAYS = 10
 
 
 def build_materials():
-    wk.build_materials(PRE, MATS)
+    wk.build_materials(PRE, MATS, extra=("scrap",))
     MATS["merc"] = common.make_material(f"{PRE}_merc_paint", (0.3, 0.045, 0.035),
                                         roughness=0.6)
 
@@ -119,516 +127,574 @@ def lamp(pos, s=0.4, mat="light"):
     wk.lamp(L, pos, s, mat)
 
 
-# ---------------------------------------------------------------- hangar shell
-def build_shell():
-    y0, y1 = MOUTH_Y, BACK_Y
-    cy, ln = (y0 + y1) / 2, y1 - y0
-    # base slab + deck
-    H.box(V((0, cy - 0.6, -5.6)), (2 * FOOT_X + 0.6, ln + 2.4, 1.6), "dark", bevel=0.04)
-    H.box(V((0, cy, DECK_Z - 0.4)), (2 * WALL_IN, ln, 0.8), "pad", bevel=0.0)
+def rx(deg):
+    return Matrix.Rotation(math.radians(deg), 4, "X")
+
+
+def rz(rad):
+    return Matrix.Rotation(rad, 4, "Z")
+
+
+# ---------------------------------------------------------------- rack: fingers
+def inner_finger(gx):
+    y0, y1 = -11.5, 5.0
     for sx in (-1, 1):
-        # side wall: thick slab, vertical foot, sloped armour face, walkway top
-        sec = [(WALL_IN, -5.0), (FOOT_X, -5.0), (FOOT_X, -1.5), (WALL_OUT, WALL_TOP),
-               (WALL_IN, WALL_TOP)]
-        sec = [(sx * x, z) for x, z in sec]
-        if sx < 0:
-            sec.reverse()
-        H.slab(sec, y0, y1 + 1.6, "hull2", matrix=XZ)
-        H.box(V((sx * (WALL_IN + WALL_OUT) / 2, cy + 0.8, WALL_TOP + 0.25)),
-              (WALL_OUT - WALL_IN + 0.3, ln + 1.6, 0.5), "dark", bevel=0.0)
-        armour(sx)
-        # inner face: pilaster ribs, service gallery window band, red edge stripe
-        for k in range(7):
-            yy = y0 + 1.2 + k * (ln - 2.4) / 6
-            H.box(V((sx * (WALL_IN - 0.2), yy, (DECK_Z + WALL_TOP) / 2)),
-                  (0.4, 0.7, WALL_TOP - DECK_Z), "dark", bevel=0.0)
-        H.box(V((sx * (WALL_IN - 0.05), cy, 3.4)), (0.12, ln - 1.0, 1.4), "dark", bevel=0.0)
-        wk.win_row(L, RNG, (sx * (WALL_IN - 0.12), y0 + 2.0, 3.4),
-                   (sx * (WALL_IN - 0.12), y1 - 2.0, 3.4), (-sx, 0, 0), 12, 0.8, 0.5, "work")
-        H.box(V((sx * (WALL_IN - 0.05), cy, -2.6)), (0.1, ln, 0.5), "hazard", bevel=0.0)
-    # back wall: maintenance gallery, deflectors are per bay
-    H.box(V((0, y1 + 0.8, (WALL_TOP - 5.0) / 2)), (2 * WALL_IN + 0.2, 1.6, WALL_TOP + 5.0),
-          "hull2", bevel=0.04)
-    H.box(V((0, y1 - 0.08, 3.6)), (2 * WALL_IN - 1.0, 0.2, 1.4), "dark", bevel=0.0)
-    wk.win_row(L, RNG, (-WALL_IN + 1.0, y1 - 0.2, 3.6), (WALL_IN - 1.0, y1 - 0.2, 3.6),
-               (0, -1, 0), 18, 1.0, 0.7, "hab")
-    H.box(V((0, y1 - 0.3, 4.7)), (2 * WALL_IN, 0.6, 0.25), "dark", bevel=0.0)   # walkway
-    label("MX-12", (-14.0, y1 - 0.02, 5.6), (0, -1, 0), (0, 0, 1), 0.9, wk.INK_DARK)
-    label("MERC", (14.0, y1 - 0.02, 5.6), (0, -1, 0), (0, 0, 1), 0.9, wk.INK_DARK)
-    build_mouth()
-    build_roof()
+        for sz in (-1, 1):
+            H.beam(V((gx + sx * 0.25, y0, sz * 3.75)), V((gx + sx * 0.25, y1, sz * 3.75)),
+                   0.3, 0.3, "dark")
+    posts = (-11.5, -7.5, -3.5, 0.5, 4.5)
+    for y in posts:
+        H.box(V((gx, y, 0)), (0.7, 0.3, 7.8), "hull2", bevel=0.04)
+    for k in range(len(posts) - 1):
+        ya, yb = (posts[k], posts[k + 1]) if k % 2 == 0 else (posts[k + 1], posts[k])
+        parts.strut(H, V((gx, ya, -3.6)), V((gx, yb, 3.6)), 0.2, 0.2, "dark")
+    H.tube(V((gx, -11.0, 2.4)), V((gx, 4.9, 2.4)), 0.16, 0.16, "accent", segs=8)
+    H.tube(V((gx, -11.0, -2.4)), V((gx, 4.9, -2.4)), 0.16, 0.16, "metal", segs=8)
+    for sx in (-1, 1):   # umbilical heads facing the ships
+        H.box(V((gx + sx * 0.475, -1.5, 0.6)), (0.15, 0.9, 0.7), "hazard", bevel=0.0)
+    # pressurised walkway tube on top (gives the finger top-down presence)
+    H.cyl(V((gx, -3.0, 4.75)), 0.6, 0.6, 15.8, "hull", segs=10, axis_rot=parts.ALONG_Y)
+    for y in (-8.0, -1.0):
+        H.cyl(V((gx, y, 4.75)), 0.68, 0.68, 0.3, "dark", segs=10, axis_rot=parts.ALONG_Y)
+    top = 4.75 + 0.6 * math.cos(math.pi / 10)
+    for y in (-9.0, -6.0, -3.0, 0.0):
+        parts.window(L, V((gx, y, top)), V((0, 0, 1)), V((0, 1, 0)), 0.3, 0.3,
+                     parts.pick_lit(RNG, "work"))
+    # fingertip block, chevron plate, overhead work flood
+    H.box(V((gx, -11.7, 0)), (0.8, 0.6, 7.8), "merc", bevel=0.05)
+    H.box(V((gx, -12.03, 2.3)), (0.7, 0.06, 2.0), "hull", bevel=0.0)
+    label("#CHEV", V((gx, -12.06, 2.3)), V((0, -1, 0)), V((-1, 0, 0)), 0.5, wk.INK_DARK)
+    H.box(V((gx, -11.5, 4.1)), (1.4, 0.9, 0.3), "dark", bevel=0.0)
+    L.box(V((gx, -11.7, 3.93)), (1.2, 0.4, 0.06), "cyan", bevel=0.0)
 
 
-def armour(sx):
-    """Bolted armour plates on the sloped outer face, two courses, staggered, with a red
-    band course between; buttresses on the vertical foot."""
-    p0 = V((sx * FOOT_X, 0, -1.5))
-    p1 = V((sx * WALL_OUT, 0, WALL_TOP))
-    d = (p1 - p0)
-    slope = d.length
-    du = d.normalized()
-    n = V((sx * abs(du.z), 0, abs(du.x)))
-    th = math.atan2(n.z, n.x)            # rotation of local X onto the face normal
-    r = Matrix.Rotation(-th, 4, "Y")
-    y0, y1 = MOUTH_Y + 0.3, BACK_Y + 1.3
-    for course, (t0, t1) in enumerate(((0.04, 0.47), (0.53, 0.97))):
-        nplates = 6 if course == 0 else 7
-        pl = (y1 - y0) / nplates
-        for k in range(nplates):
-            yc = y0 + pl * (k + 0.5)
-            c = p0 + d * ((t0 + t1) / 2) + n * 0.22
-            c.y = yc
-            H.box(c, (0.44, pl - 0.25, slope * (t1 - t0)), "hull" if (k + course) % 3 else
-                  "hull3", r=r, bevel=0.06)
-            # bolt heads along the plate top edge
-            for b in (-0.35, 0.0, 0.35):
-                q = p0 + d * (t1 - 0.04) + n * 0.47
-                q.y = yc + b * (pl - 0.6)
-                H.box(q, (0.1, 0.22, 0.22), "dark", r=r, bevel=0.0)
-    band = p0 + d * 0.5 + n * 0.12
-    band.y = (y0 + y1) / 2
-    H.box(band, (0.24, y1 - y0, slope * 0.06), "merc", r=r, bevel=0.0)
+def outer_finger(sx):
+    x0 = sx * OUTER_FINGER_X
+    parts.box_truss(H, -11.5, 5.0, 0.7, 4.0, 4, "dark", "hull2", chord=0.4, brace=0.2, x0=x0)
+    cyc = ("hull2", "hull2", "hull3", "merc")
+    for course, zc in ((0, 2.1), (1, -2.1)):
+        for k, y in enumerate((-9.6, -5.8, -2.0, 1.8)):
+            mat = cyc[(k + course) % 4]
+            if sx > 0 and course == 0 and k == 2:
+                mat = "scrap"
+            H.box(V((sx * 21.45, y, zc)), (0.3, 3.6, 3.4), mat, bevel=0.04)
+            zb = zc + (1.45 if zc > 0 else -1.45)
+            for o in (-1.2, 0.0, 1.2):
+                H.box(V((sx * 21.62, y + o, zb)), (0.1, 0.22, 0.22), "dark", bevel=0.0)
+    H.box(V((x0, -11.7, 0)), (1.6, 0.6, 8.2), "merc", bevel=0.05)
+    H.box(V((x0, -12.03, 2.3)), (1.0, 0.06, 2.0), "hull", bevel=0.0)
+    label("#CHEV", V((x0, -12.06, 2.3)), V((0, -1, 0)), V((-1, 0, 0)), 0.5, wk.INK_DARK)
+
+
+# ---------------------------------------------------------------- rack: clamps per bay
+def bay(i, bx):
+    for ys in STATIONS:
+        # dorsal clamp yoke; the outer bays reach into the outer finger chords
+        xa = bx - 4.7 if bx > -15 else -OUTER_FINGER_X + 0.4
+        xb = bx + 4.7 if bx < 15 else OUTER_FINGER_X - 0.4
+        H.beam(V((xa, ys, 3.85)), V((xb, ys, 3.85)), 0.5, 0.6, "dark")
+        H.box(V((bx, ys, 3.0)), (2.2, 1.1, 1.2), "merc", bevel=0.08)
+        H.box(V((bx, ys, 2.40)), (1.4, 0.8, 0.08), "dark", bevel=0.0)    # pad, bottom 2.36
+        for s in (-1, 1):
+            parts.strut(H, V((bx + s * 1.6, ys, 3.6)), V((bx + s * 0.8, ys, 3.25)), 0.18, 0.18,
+                        "metal")
+        lamp(V((bx, ys - 0.58, 3.2)), 0.3, "light")
+        if ys > 0:
+            H.tube(V((bx + 1.8, ys, 3.6)), V((bx + 1.2, ys + 1.3, 2.75)), 0.16, 0.16, "accent",
+                   segs=8)
+            H.box(V((bx + 1.2, ys + 1.4, 2.7)), (0.4, 0.4, 0.25), "hazard", bevel=0.0)
+        # ventral saddle
+        H.beam(V((xa, ys, -3.85)), V((xb, ys, -3.85)), 0.5, 0.6, "dark")
+        H.box(V((bx, ys, -3.15)), (1.2, 0.6, 0.9), "dark", bevel=0.0)
+        H.box(V((bx, ys, -2.2)), (2.6, 1.0, 1.1), "hull2", bevel=0.06)
+        H.box(V((bx, ys, -1.62)), (2.0, 0.8, 0.08), "dark", bevel=0.0)
+        H.box(V((bx, ys - 0.52, -2.2)), (2.6, 0.05, 0.25), "hazard", bevel=0.0)
+        lamp(V((bx + 2.2, ys - 0.3, -3.5)), 0.25, "amber")
+    # white lane bar on the forward ventral beam (the dorsal frame lamps are on the arms)
+    L.box(V((bx, -5.3, -3.85)), (2.4, 0.08, 0.2), "cyan", bevel=0.0)
+    # exhaust baffle behind the bell (set back past the 1.3 m plume)
+    H.box(V((bx, 4.8, 0)), (7.6, 0.4, 6.0), "metal", bevel=0.0)
+    for dx in (-3.0, -1.5, 1.5, 3.0):
+        H.box(V((bx + dx, 4.4, 0)), (0.25, 0.5, 6.0), "dark", bevel=0.0)
+    H.box(V((bx, 4.57, -2.8)), (7.4, 0.06, 0.3), "hazard", bevel=0.0)
+    SCORCH.append((bx, 4.6, 0.3, 2.4))
+    label("#BAR", V((bx, 4.58, 2.4)), V((0, -1, 0)), V((0, 0, 1)), 0.4, wk.INK_DARK)
+    # tail flood on the baffle top
+    H.box(V((bx, 4.75, 3.25)), (2.2, 0.5, 0.5), "dark", bevel=0.0)
+    L.box(V((bx, 4.49, 3.25)), (2.0, 0.04, 0.3), "cyan", bevel=0.0)
+
+
+def guide_arm(p0, p1, head, mat="hull2"):
+    """Chunky boxed arm from p0 to p1 with a lamp head housing at p1 (returns its front)."""
+    H.beam(p0, p1, 0.7, 0.6, mat, up=V((1, 0, 0)))
+    H.beam(p0 + V((0, 0.2, 0)), p1 + V((0, 0.2, 0)), 0.3, 0.9, "dark", up=V((1, 0, 0)))
+    H.box(p1, head, "dark", bevel=0.06)
+    return p1 - V((0, head[1] / 2 + 0.02, 0))
+
+
+def guide_arms():
+    """Docking guide arms: from every fingertip one chunky arm rakes forward and up into
+    free space and ends in a single lamp head carrying the lane's red (left) and green
+    (right) lamp. The white bar under each lane sits on the forward ventral saddle beam, so
+    every lane is framed once above and once below. The outer heads also carry a white
+    strobe on the rack edges. No repeated lamp rows."""
+    gxs = [-OUTER_FINGER_X] + GAPS_IN + [OUTER_FINGER_X]
+    for gx in gxs:
+        outer = abs(gx) > 15
+        sx = (1 if gx > 0 else -1) if outer else 0
+        top = V((gx + sx * 1.2, -16.4, 6.2))
+        f = guide_arm(V((gx, -11.9, 3.9)), top, (1.6 if not outer else 1.2, 0.8, 0.7))
+        H.box(f + V((0, 0.0, -0.36)), (0.8, 0.06, 0.08), "hazard", bevel=0.0)
+        if gx > -15:                                    # green: right edge of the lane on -X
+            lamp(f + V((-0.45, 0, 0.05)), 0.4, "green")
+        if gx < 15:                                     # red: left edge of the lane on +X
+            lamp(f + V((0.45, 0, 0.05)), 0.4, "red")
+        if outer:
+            wk.beacon(H, L, top + V((0, 0, 0.95)), 0.45, "cyan")
+
+
+def build_rack():
+    for gx in GAPS_IN:
+        inner_finger(gx)
+    for sx in (-1, 1):
+        outer_finger(sx)
+    for i, bx in enumerate(BAYS):
+        bay(i, bx)
+    guide_arms()
+
+
+# ---------------------------------------------------------------- girder (keelson)
+def build_girder():
+    H.cyl(V((0, 7, 0)), 2.0, 2.0, 62, "hull2", segs=16, axis_rot=parts.ALONG_X)
     for k in range(7):
-        yy = y0 + 0.4 + k * (y1 - y0 - 0.8) / 6
-        H.box(V((sx * (FOOT_X + 0.5), yy, -3.3)), (1.0, 1.0, 3.6), "dark", bevel=0.04)
-    H.box(V((sx * (FOOT_X + 0.06), (y0 + y1) / 2, -2.2)), (0.12, y1 - y0, 0.45), "hazard",
-          bevel=0.0)
-    label("MERC" if sx < 0 else "MX-12", (sx * (FOOT_X + 0.02), MOUTH_Y + 6.0, -3.6),
-          (sx, 0, 0), (0, 0, 1), 1.1, wk.INK_DARK)
-    lamp((sx * (FOOT_X + 0.1), MOUTH_Y + 0.6, -1.0), 0.4, "red")
-    lamp((sx * (FOOT_X + 0.1), BACK_Y + 1.0, -1.0), 0.4, "red")
-
-
-def build_mouth():
-    fy = MOUTH_Y - 0.6
+        x = -27 + 9 * k
+        H.cyl(V((x, 7, 0)), 2.25, 2.25, 0.5, "dark", segs=16, axis_rot=parts.ALONG_X)
+    for y in (5.2, 8.8):
+        for z in (-5.0, 5.0):
+            H.beam(V((-31, y, z)), V((31, y, z)), 0.45, 0.45, "dark")
+    xs = [-31 + 62 * k / GIRDER_BAYS for k in range(GIRDER_BAYS + 1)]
+    for k, x in enumerate(xs):
+        for y in (5.2, 8.8):
+            H.beam(V((x, y, -5)), V((x, y, 5)), 0.3, 0.3, "dark", up=V((0, 1, 0)))
+        for z in (-5.0, 5.0):
+            H.beam(V((x, 5.2, z)), V((x, 8.8, z)), 0.3, 0.3, "dark")
+        if k < GIRDER_BAYS:
+            xa, xb = (x, xs[k + 1]) if k % 2 == 0 else (xs[k + 1], x)
+            for y in (5.2, 8.8):
+                parts.strut(H, V((xa, y, -5)), V((xb, y, 5)), 0.25, 0.25, "dark",
+                            up=V((0, 1, 0)))
+    # armour brow on the threat side, dorsal and ventral
+    mats = {-20: "hull3", -15: "hull2", -10: "merc", -5: "hull2", 0: "scrap", 5: "hull2",
+            10: "merc", 15: "hull2", 20: "hull3"}
+    for sz in (1, -1):
+        R = rx(-20 * sz)
+        r3 = R.to_3x3()
+        n = r3 @ V((0, -1, 0))
+        u = r3 @ V((0, 0, 1))
+        out_edge = r3 @ V((0, 0, sz))
+        for k in range(9):
+            x = -20 + 5 * k
+            mat = mats[x]
+            if sz < 0 and mat == "scrap":
+                mat = "hull3"
+            c = V((x, 4.8, sz * 5.6))
+            H.box(c, (4.8, 0.5, 2.4), mat, r=R, bevel=0.06)
+            for o in (-1.8, 0.0, 1.8):
+                H.box(c + out_edge * 0.95 + n * 0.28 + V((o, 0, 0)), (0.22, 0.1, 0.22), "dark",
+                      r=R, bevel=0.0)
+            if sz > 0 and x in BAYS:
+                label(f"BAY {BAYS.index(x) + 1}", c + n * 0.25, n, u, 0.7, wk.INK_DARK)
+        H.box(V((0, 4.5, sz * 4.45)), (45, 0.1, 0.35), "merc", bevel=0.0)
+    # sodium work floods on the brow corners, aimed into the berths
     for sx in (-1, 1):
-        # heavy frame posts with hazard faces and edge lamps
-        H.box(V((sx * (WALL_IN + 1.6), fy, (HEAD_Z - 2.0) / 2)), (3.6, 1.6, HEAD_Z + 8.0),
-              "hull2", bevel=0.05)
-        H.box(V((sx * (WALL_IN + 0.15), fy - 0.81, (DECK_Z + HEAD_Z) / 2)),
-              (0.6, 0.06, HEAD_Z - DECK_Z), "hazard",
-              bevel=0.0)
-        for z in (-2.4, 0.4, 3.2, 5.8):
-            lamp((sx * (WALL_IN - 0.25), fy - 0.75, z), 0.42, "light")
-    # header: deep box girder spanning the whole mouth
-    H.box(V((0, fy, HEAD_Z + 1.1)), (2 * WALL_OUT + 1.6, 1.8, 2.2), "hull2", bevel=0.05)
-    H.box(V((0, fy - 0.92, HEAD_Z + 0.25)), (2 * WALL_IN, 0.06, 0.4), "hazard", bevel=0.0)
-    H.box(V((0, fy, HEAD_Z + 2.5)), (2 * WALL_OUT + 1.2, 1.4, 0.6), "dark", bevel=0.0)
-    for i, bx in enumerate(BAYS):
-        # bay number + launch signal (red / amber / green stack) per bay
-        label(f"BAY {i + 1}", (bx - 1.6, fy - 0.91, HEAD_Z + 1.4), (0, -1, 0), (0, 0, 1),
-              0.8, wk.INK_DARK)
-        H.box(V((bx + 2.6, fy - 1.0, HEAD_Z + 1.1)), (1.0, 0.3, 1.9), "dark", bevel=0.0)
-        for k, m in enumerate(("red", "light", "green")):
-            on = m if (i + k) % 3 != 1 or m == "green" else "light"
-            lamp((bx + 2.6, fy - 1.18, HEAD_Z + 1.7 - k * 0.6), 0.42, on)
-        # floodlight strip on the header underside
-        L.box(V((bx, fy, HEAD_Z - 0.04)), (6.0, 0.5, 0.06), "cyan", bevel=0.0)
+        H.beam(V((sx * 18.5, 5.4, 6.6)), V((sx * 18.5, 4.7, 7.9)), 0.25, 0.25, "dark")
+        H.box(V((sx * 18.5, 4.55, 8.0)), (0.8, 0.45, 0.5), "dark", bevel=0.0)
+        L.box(V((sx * 18.5, 4.31, 7.95)), (0.6, 0.05, 0.35), "window", bevel=0.0)
+
+
+def build_gondola():
+    """Ops gondola: horizontal pressure capsule lying on the girder."""
+    c = V((0, 6.6, 8.3))
+    rot = parts.ALONG_X @ Matrix.Rotation(math.radians(15), 4, "Z")   # facet faces -Y
+    H.cyl(c, 1.8, 1.8, 10, "hull", segs=12, axis_rot=rot)
     for sx in (-1, 1):
-        label("#CHEV", (sx * (WALL_IN + 1.0), fy - 0.91, HEAD_Z + 1.1), (0, -1, 0),
-              (0, 0, 1), 0.6, wk.INK_DARK)
+        H.sphere(c + V((sx * 5, 0, 0)), 1.8, "hull", segs=12, rings=7, scale=(0.5, 1, 1))
+        H.cyl(c + V((sx * 3.2, 0, 0)), 1.88, 1.88, 0.3, "dark", segs=12, axis_rot=rot)
+        parts.strut(H, V((sx * 3, 6.6, 6.6)), V((sx * 3, 6.6, 5.0)), 0.35, 0.35, "dark")
+        parts.strut(H, V((sx * 3, 8.0, 6.8)), V((sx * 3, 8.8, 5.0)), 0.35, 0.35, "dark")
+    flat = 1.8 * math.cos(math.radians(15))
+    wk.win_row(L, RNG, (-4, c.y - flat, c.z), (4, c.y - flat, c.z), (0, -1, 0), 8, 0.7, 0.45,
+               "work")
+    # upper front facet: OPS plate, cool strips either side
+    n = V((0, -math.cos(math.radians(30)), math.sin(math.radians(30))))
+    u = V((0, math.sin(math.radians(30)), math.cos(math.radians(30))))
+    fc = c + n * flat
+    H.box(fc + n * 0.04, (2.4, 0.08, 0.6), "hull2", r=rx(-30), bevel=0.0)
+    label("OPS", fc + n * 0.08, n, u, 0.5, wk.INK_DARK)
+    for sx in (-1, 1):
+        L.box(fc + n * 0.02 + V((sx * 2.9, 0, 0)) - u * 0.15, (2.6, 0.06, 0.12), "window_cool",
+              r=rx(-30), bevel=0.0)
+    H.cyl(V((3.2, 7.2, 10.05)), 0.25, 0.25, 0.3, "dark", segs=8)
+    parts.dish(H, V((3.2, 7.2, 10.2)), 1.3, V((-0.3, -0.6, 0.75)), "hull", "dark")
+    H.cyl(V((-3.4, 7.4, 11.6)), 0.06, 0.06, 3.0, "dark", segs=6)
+    lamp(V((-3.4, 7.4, 13.2)), 0.4, "red")
 
 
-def build_roof():
-    y0, y1 = MOUTH_Y, BACK_Y
-    # longitudinal gantry rails on the dividers and along the walls
-    for x in DIVIDERS + (-WALL_IN + 0.5, WALL_IN - 0.5):
-        H.box(V((x, (y0 + y1) / 2, RAIL_Z - 0.4)), (0.9, y1 - y0, 0.8), "dark", bevel=0.0)
-        H.box(V((x, (y0 + y1) / 2, RAIL_Z + 0.05)), (0.4, y1 - y0, 0.1), "metal", bevel=0.0)
-    # open roof over the bays: floodlight bars hung from the rails over each bay nose
-    for bx in BAYS:
-        yy = NOSE_Y + 3.0
-        H.box(V((bx, yy, RAIL_Z - 0.2)), (BERTH_SPACING - 1.0, 0.4, 0.3), "dark", bevel=0.0)
-        L.box(V((bx, yy, RAIL_Z - 0.37)), (3.0, 0.3, 0.05), "cyan", bevel=0.0)
-    # armoured roof over the rear (engine bays + deflectors)
-    ry0, ry1 = 5.6, BACK_Y + 1.6
-    H.box(V((0, (ry0 + ry1) / 2, ROOF_Z)), (2 * WALL_OUT, ry1 - ry0, 1.2), "hull2",
-          bevel=0.03)
+def build_tanks():
+    for sx in (-1, 1):
+        wk.tank_v(H, V((sx * 13.5, 7.0, 5.2)), 1.6, 4.4, "hull3", "merc", segs=12)
+        wk.tank_v(H, V((sx * 13.5, 7.0, -9.6)), 1.6, 4.4, "hull3", "merc", segs=12)
+    for z in (5.45, -5.45):
+        H.tube(V((-15, 7.0, z)), V((15, 7.0, z)), 0.22, 0.22, "metal", segs=8)
+
+
+# ---------------------------------------------------------------- magazines + PDCs
+def pdc(c, up, d, tab=False):
+    """Multi-barrel point defence turret in an armoured ball mount. c = base on the hull,
+    up = mount normal (+-Z), d = barrel direction."""
+    c, up, d = V(c), V(up), V(d).normalized()
+    dh = V((d.x, d.y, 0)).normalized()
+    psi = math.atan2(dh.x, -dh.y)          # local -Y -> dh, local X -> side
+    ry = rz(psi)
+    side = ry.to_3x3() @ V((1, 0, 0))
+    H.cyl(c + up * 0.3, 1.6, 1.4, 0.6, "dark", segs=12,
+          axis_rot=None if up.z > 0 else Matrix.Rotation(math.pi, 4, "X"))
+    ball = c + up * 1.5
+    H.sphere(ball, 1.3, "hull2", segs=12, rings=8, scale=(1, 1, 0.85))
+    for s in (-1, 1):
+        H.box(ball + side * s * 1.15, (0.35, 1.8, 1.4), "merc", r=ry, bevel=0.06)
+    e1 = side
+    e2 = d.cross(e1).normalized()
     for k in range(6):
-        x = -WALL_OUT + 2.6 + k * (2 * WALL_OUT - 5.2) / 5
-        H.box(V((x, (ry0 + ry1) / 2 + 0.2, ROOF_Z + 0.75)), (6.4, ry1 - ry0 - 1.2, 0.3),
-              "hull" if k % 2 else "hull3", bevel=0.05)
-    H.box(V((0, ry0 + 0.25, ROOF_Z + 0.65)), (2 * WALL_OUT, 0.5, 0.2), "hazard", bevel=0.0)
-    # radiator fins on the rear roof (edge-on, along X)
-    for k in range(6):
-        y = ry0 + 1.2 + k * 0.7
-        H.box(V((-8.0, y, ROOF_Z + 2.2)), (9.0, 0.1, 2.6), "radiator", bevel=0.0)
-        H.box(V((8.0, y, ROOF_Z + 2.2)), (9.0, 0.1, 2.6), "radiator", bevel=0.0)
-    for sx in (-1, 1):
-        H.box(V((sx * 8.0, ry0 + 3.0, ROOF_Z + 0.95)), (9.4, 4.6, 0.3), "dark", bevel=0.0)
-        H.tube(V((sx * 3.0, ry0 + 1.4, ROOF_Z + 1.1)), V((sx * 3.0, ry1 - 1.0, ROOF_Z + 1.1)),
-               0.25, 0.25, "accent", segs=8)
-    # roof edge lamps
-    for x in (-WALL_OUT + 0.4, WALL_OUT - 0.4):
-        for y in (MOUTH_Y + 0.4, BACK_Y + 1.2):
-            lamp((x, y, WALL_TOP + 0.7), 0.4, "red")
-    # PD turrets on the front wall tops
-    for sx in (-1, 1):
-        pd_turret(V((sx * (WALL_IN + 1.5), MOUTH_Y + 4.5, WALL_TOP + 0.5)), sx)
+        t = k * math.pi / 3
+        off = (e1 * math.cos(t) + e2 * math.sin(t)) * 0.22
+        H.tube(ball + d * 1.0 + off, ball + d * 3.6 + off, 0.07, 0.07, "dark", segs=5)
+    q = d.to_track_quat("Z", "Y").to_matrix().to_4x4()
+    H.cyl(ball + d * 2.6, 0.32, 0.32, 0.15, "metal", segs=8, axis_rot=q)
+    H.cyl(ball + d * 1.3, 0.4, 0.4, 0.8, "dark", segs=8, axis_rot=q)
+    H.box(ball - dh * 1.4, (1.0, 0.9, 0.7), "hazard", r=ry, bevel=0.05)
+    lamp(c + up * 2.75, 0.35, "red")
+    if tab:
+        tc = c + up * 0.35 + dh * 1.58
+        H.box(tc, (1.2, 0.1, 0.4), "hull2", r=ry, bevel=0.0)
+        label("PDC", tc + dh * 0.05, dh, V((0, 0, 1)), 0.3, wk.INK_DARK)
 
 
-def pd_turret(c, sx):
-    H.cyl(c + V((0, 0, 0.35)), 2.0, 1.9, 0.7, "dark", segs=12)
-    H.cyl(c + V((0, 0, 1.0)), 1.5, 1.5, 0.7, "hull2", segs=12)
-    yaw = math.radians(-90 + sx * 20)
-    r = Matrix.Rotation(yaw + math.pi / 2, 4, "Z")
-    H.box(c + V((0, 0, 2.0)), (2.8, 3.2, 1.5), "hull", r=r, bevel=0.15)
-    H.box(c + V((0, 0, 2.78)), (2.2, 2.6, 0.08), "merc", r=r, bevel=0.0)
-    d = V((math.cos(yaw), math.sin(yaw), 0))
-    s = V((-d.y, d.x, 0))
-    for o in (-0.55, 0.55):
-        H.tube(c + V((0, 0, 2.0)) + s * o + d * 1.4, c + V((0, 0, 2.0)) + s * o + d * 5.0,
-               0.18, 0.14, "dark", segs=6)
-        H.cyl(c + V((0, 0, 2.0)) + s * o + d * 2.0, 0.28, 0.28, 0.9, "hull2", segs=6,
-              axis_rot=Matrix.Rotation(yaw - math.pi / 2, 4, "Z") @ parts.ALONG_Y)
-    H.box(c + V((0, 0, 2.0)) - s * 1.6, (0.4, 1.4, 1.0), "dark", r=r, bevel=0.0)
-    lamp(c + V((0, 0, 2.9)) - d * 0.9, 0.35, "red")
+def magazine(sx):
+    x0 = sx * 27.0
+    parts.prism(H, -12.0, 9.0, (8.0, 9.2, 1.6), (8.0, 9.2, 1.6), "hull2", x0=x0)
+    # hardened threat face: dark steel core plate, chamfered gunmetal cheeks top, bottom and
+    # sides, so the front reads as a bunker face and not a crate lid
+    H.box(V((x0, -12.25, 0)), (5.0, 0.5, 7.4), "dark", bevel=0.0)
+    for s in (-1, 1):                                     # side cheeks, swept back 35 deg
+        a = math.radians(35) * s
+        H.box(V((x0 + s * 3.32, -11.68, 0)), (2.0, 0.5, 8.6), "hull2", r=rz(a), bevel=0.04)
+    for s in (-1, 1):                                     # top / bottom chamfers, 45 deg
+        H.box(V((x0, -11.95, s * 4.05)), (5.2, 0.45, 1.7), "hull2", r=rx(-45 * s), bevel=0.04)
+    for z in (-3.5, 3.5):                                 # bolt rows on the core plate edges
+        for k in range(8):
+            H.box(V((x0 - 2.1 + 0.6 * k, -12.53, z)), (0.18, 0.08, 0.18), "metal", bevel=0.0)
+    # 2 x 3 torpedo tube hatches: raised collar, thin oxide lip, near-black bore
+    for dx in (-1.3, 1.3):
+        for z in (-2.4, 0.0, 2.4):
+            m = Matrix.Translation((x0 + dx, 0, z)) @ parts.ALONG_Y
+            H.lathe([(0.6, -12.5), (0.6, -12.76), (0.76, -12.76), (0.76, -12.5)], 12,
+                    lambda i, j: ("dark", "merc", "hull2")[j], matrix=m)
+            L.cyl(V((x0 + dx, -12.52, z)), 0.6, 0.6, 0.03, "glass", segs=12,
+                  axis_rot=parts.ALONG_Y)
+    n = V((0, -1, 1)).normalized()
+    label("ORD", V((x0, -11.95, 4.05)) + n * 0.24, n, V((0, 1, 1)).normalized(), 0.6,
+          wk.INK_LIGHT)
+    SCORCH.append((x0, -12.6, 0.0, 1.8))
+    # outboard armour: 2 courses x 6, bolted; the MX-12 plates stay hull2
+    cyc = ("hull2", "hull2", "hull3", "merc")
+    xo = sx * 31.25
+    for course, zc in ((0, 1.55), (1, -1.55)):
+        for k in range(6):
+            y = -10.4 + 3.5 * k
+            mat = cyc[(k + 2 * course) % 4]
+            if course == 0 and k in (2, 3):
+                mat = "hull2"
+            if (sx < 0 and course == 1 and k == 4) or (sx > 0 and course == 1 and k == 1):
+                mat = "scrap"
+            H.box(V((xo, y, zc)), (0.5, 3.3, 2.9), mat, bevel=0.04)
+            zb = zc + (1.2 if zc > 0 else -1.2)
+            for o in (-1.2, 0.0, 1.2):
+                H.box(V((sx * 31.55, y + o, zb)), (0.12, 0.22, 0.22), "dark", bevel=0.0)
+    H.box(V((sx * 31.52, -1.5, 0)), (0.06, 21, 0.8), "merc", bevel=0.0)
+    label("MX-12", V((sx * 31.52, -1.65, 1.7)), V((sx, 0, 0)), V((0, 0, 1)), 1.2, wk.INK_DARK)
+    # hull number on top, text up +Y so it reads from the RTS camera
+    label("12", V((x0, -3.0, 4.62)), V((0, 0, 1)), V((0, 1, 0)), 2.6, wk.INK_DARK, 0.8)
+    # VLS lids, one open with a torpedo nose showing
+    for i, dx in enumerate((-0.8, 0.8)):
+        for j, y in enumerate((3.5, 5.0, 6.5)):
+            x = x0 + dx
+            H.box(V((x, y, 4.62)), (1.3, 1.4, 0.06), "hazard", bevel=0.0)
+            if sx < 0 and abs(x - (-27.8)) < 1e-6 and y == 6.5:
+                H.box(V((x, y, 4.64)), (1.0, 1.1, 0.06), "dark", bevel=0.0)
+                hinge = V((x, y + 0.6, 4.66))
+                H.box(hinge + rx(-100).to_3x3() @ V((0, -0.6, 0)), (1.1, 1.2, 0.12), "merc",
+                      r=rx(-100), bevel=0.0)
+                H.cyl(V((x, y, 5.1)), 0.42, 0.05, 1.0, "merc", segs=10)
+                continue
+            mat = "hull3" if (i + j) % 2 == 0 else "merc"
+            H.box(V((x, y, 4.66)), (1.1, 1.2, 0.12), mat, bevel=0.0)
+    lamp(V((x0, 7.8, 4.72)), 0.4, "light")
+    for dx in (-2.1, 2.1):          # armour rails along the top edges
+        H.box(V((x0 + dx, -1.5, 4.7)), (0.3, 20.0, 0.2), "dark", bevel=0.0)
+    H.box(V((sx * 22.2, 2.0, -3.6)), (1.8, 1.4, 1.0), "dark", bevel=0.04)
+    lamp(V((sx * 30.6, -10.9, 4.75)), 0.45, "red")       # one strobe per magazine
+    # PDCs on top and belly, aimed forward and outboard
+    yaw, pit = math.radians(25), math.radians(8)
+    for zs in (1, -1):
+        d = V((sx * math.sin(yaw) * math.cos(pit), -math.cos(yaw) * math.cos(pit),
+               zs * math.sin(pit)))
+        pdc(V((x0, -8.5, zs * 4.6)), V((0, 0, zs)), d, tab=zs > 0)
 
 
-# ---------------------------------------------------------------- bays
-def build_bays():
-    for i, bx in enumerate(BAYS):
-        cradle(i, bx)
-        gantry(bx)
-        deflector(bx)
-    for x in DIVIDERS:
-        divider(x)
-    side_arm(-WALL_IN + 0.3, BAYS[0], wall=True)
-    side_arm(WALL_IN - 0.3, BAYS[-1], wall=True)
+# ---------------------------------------------------------------- axle, drum, back
+DRUM_PROFILE = [(4.6, 10.0), (10.4, 10.0), (11.0, 10.4), (11.4, 10.4), (11.4, 11.4),
+                (11.0, 11.4), (11.0, 15.1), (11.2, 15.1), (11.2, 15.9), (11.0, 15.9),
+                (11.0, 19.6), (11.4, 19.6), (11.4, 20.6), (11.0, 20.6), (10.4, 21.0),
+                (4.6, 21.0), (4.6, 10.0)]
 
 
-def cradle(i, x):
-    """Launch cradle: catapult sled on twin rails, two clamp saddles, deck markings."""
-    yc = BERTH_Y
-    dz = DECK_Z
-    # deck markings: hazard border around the bay box, bay number on the deck
-    for sx in (-1, 1):
-        H.box(V((x + sx * 4.3, (MOUTH_Y + TAIL_Y + 2) / 2, dz + 0.02)),
-              (0.35, TAIL_Y + 2 - MOUTH_Y - 0.4, 0.05), "hazard", bevel=0.0)
-    H.box(V((x, TAIL_Y + 1.8, dz + 0.02)), (8.95, 0.35, 0.05), "hazard", bevel=0.0)
-    label(f"BAY {i + 1}", (x + 2.9, MOUTH_Y + 1.2, dz + 0.03), (0, 0, 1), (0, 1, 0), 0.6,
-          wk.INK_LIGHT, 0.6)
-    # catapult rails: from the deflector out across the mouth onto the apron
-    for sx in (-1, 1):
-        H.box(V((x + sx * 1.3, (TAIL_Y + 2.0 + APRON_Y + 1.0) / 2, dz + 0.1)),
-              (0.36, TAIL_Y + 2.0 - APRON_Y - 1.0, 0.2), "metal", bevel=0.0)
-    H.box(V((x, (TAIL_Y + 2.0 + APRON_Y + 1.0) / 2, dz + 0.04)),
-          (1.6, TAIL_Y + 2.0 - APRON_Y - 1.0, 0.08), "dark", bevel=0.0)
-    # sled + saddles under the hull (hull bottom z SHIP_BOT)
-    H.box(V((x, yc, dz + 0.35)), (3.4, 12.0, 0.5), "hull2", bevel=0.1)
-    H.box(V((x, yc - 6.2, dz + 0.4)), (3.0, 0.5, 0.6), "hazard", bevel=0.0)
-    for dy in (-4.2, 3.6):
-        # yoke + rubber pad, 5 cm under the hull bottom
-        H.box(V((x, yc + dy, dz + 0.6)), (3.6, 1.4, 0.5), "dark", bevel=0.0)
-        H.box(V((x, yc + dy, SHIP_BOT - 0.1)), (1.6, 1.0, 0.1), "metal", bevel=0.0)
-        for sx in (-1, 1):
-            # clamp arm: post beside the hull, jaw angled in under it
-            px = x + sx * (SHIP_HW + 0.6)
-            H.box(V((px, yc + dy, -2.4)), (0.45, 0.9, 2.0), "merc", bevel=0.1)
-            H.box(V((px - sx * 0.45, yc + dy, -2.75)), (0.6, 0.8, 0.3), "dark", bevel=0.0)
-            lamp((px + sx * 0.25, yc + dy - 0.46, -1.6), 0.25, "amber")
-    # deck service pit + umbilical to the ship flank (stops short of the hull)
-    for sx in (-1, 1):
-        if (sx > 0) == (i % 2 == 0):
-            continue
-        px = x + sx * 3.4
-        H.box(V((px, yc + 1.5, dz + 0.4)), (1.2, 2.0, 0.8), "dark", bevel=0.05)
-        H.box(V((px, yc + 1.5, dz + 0.82)), (1.0, 1.8, 0.05), "hazard", bevel=0.0)
-        H.tube(V((px, yc + 1.5, dz + 0.8)), V((px, yc + 1.5, -0.8)), 0.22, 0.22, "accent",
+def drum_mat(i, j):
+    if j in (0, 14):
+        return "hull2"
+    if j in (1, 13, 2, 3, 4, 10, 11, 12, 15):
+        return "dark"
+    if j in (6, 7, 8):
+        return "merc"
+    if i % 11 == 3:
+        return "scrap"
+    if i % 5 == 0:
+        return "hull3"
+    return "hull"
+
+
+def build_axle():
+    parts.prism(H, 9.1, 32.3, (5.4, 5.4, 1.2), (5.4, 5.4, 1.2), "hull2")
+    for y in (24.0, 29.0):
+        parts.prism(H, y, y + 0.6, (5.6, 5.6, 1.25), (5.6, 5.6, 1.25), "merc")
+    for k, (px, pz) in enumerate(((-2.9, 2.0), (2.9, 2.0), (-2.9, -2.0), (2.9, -2.0))):
+        H.tube(V((px, 9.1, pz)), V((px, 32.3, pz)), 0.2, 0.2, "metal" if k % 2 else "accent",
                segs=8)
-        H.tube(V((px, yc + 1.5, -0.8)), V((x + sx * (SHIP_HW + 0.3), yc + 1.5, -0.6)), 0.2,
-               0.2, "accent", segs=8)
-        lamp((px, yc + 0.48, dz + 0.75), 0.25, "green")
-    SCORCH.append((x, TAIL_Y + 1.0, dz, 3.2))
-    SCORCH.append((x, MOUTH_Y - 2.0, dz, 2.6))
 
 
-def gantry(x):
-    """Repair gantry: bridge on the divider rails over the mid hull, trolley, telescopic
-    mast, two-link tool arm hovering above the dorsal hull."""
-    gy = BERTH_Y + 3.4
-    span = BERTH_SPACING - 0.9
-    zb = RAIL_Z + 0.7
-    H.box(V((x, gy, zb)), (span, 1.3, 0.9), "merc", bevel=0.08)
-    H.box(V((x, gy, zb + 0.5)), (span - 0.4, 0.5, 0.12), "hazard", bevel=0.0)
-    for sx in (-1, 1):   # end trucks riding the rails
-        H.box(V((x + sx * (span / 2 - 0.2), gy, zb - 0.1)), (1.1, 2.6, 1.0), "hull2",
-              bevel=0.08)
-        lamp((x + sx * (span / 2 - 0.2), gy - 1.32, zb), 0.28, "light")
-    tx = x + 1.2
-    H.box(V((tx, gy, zb - 0.85)), (1.6, 1.8, 0.8), "hull", bevel=0.1)
-    mz = SHIP_TOP + 1.6
-    H.box(V((tx, gy, (zb - 1.2 + mz) / 2)), (0.55, 0.55, zb - 1.2 - mz), "metal",
-          bevel=0.0)
-    H.box(V((tx, gy, (zb - 1.2 + mz + 2.0) / 2)), (0.75, 0.75, 1.6), "hull2", bevel=0.0)
-    j0 = V((tx, gy, mz))
-    j1 = V((x - 0.6, gy - 3.0, SHIP_TOP + 1.5))
-    j2 = V((x - 1.0, gy - 5.4, SHIP_TOP + 0.75))
-    H.box(j0, (0.8, 0.8, 0.8), "dark", bevel=0.1)
-    parts.strut(H, j0, j1, 0.4, 0.4, "hull")
-    H.box(j1, (0.6, 0.6, 0.6), "dark", bevel=0.1)
-    parts.strut(H, j1, j2, 0.3, 0.3, "hull")
-    H.box(j2, (0.45, 0.6, 0.35), "hazard", bevel=0.0)
-    lamp(j2 + V((0, 0, -0.25)), 0.22, "cyan")
-    # second, parked tool arm aft, folded up
-    k0 = V((x - 2.4, gy + 0.2, zb - 0.5))
-    k1 = V((x - 2.9, gy + 2.6, SHIP_TOP + 2.4))
-    parts.strut(H, k0, k1, 0.3, 0.3, "hull2")
-    H.box(k1, (0.5, 0.5, 0.5), "hazard", bevel=0.0)
-
-
-def deflector(x):
-    """Blast deflector behind the engine bell: ribbed plate leaning back toward the wall."""
-    y = TAIL_Y + 3.2
-    r = Matrix.Rotation(math.radians(-28), 4, "X")
-    H.box(V((x, y, DECK_Z + 2.0)), (8.0, 0.4, 4.4), "metal", r=r, bevel=0.0)
-    for k in range(5):
-        H.box(V((x - 3.2 + k * 1.6, y + 0.35, DECK_Z + 2.0)), (0.25, 0.4, 4.4), "dark", r=r,
-              bevel=0.0)
-    H.box(V((x, y + 1.5, DECK_Z + 1.0)), (8.0, 1.4, 2.0), "dark", bevel=0.05)
-    H.box(V((x, y - 0.95, DECK_Z + 0.08)), (7.6, 0.3, 0.16), "hazard", bevel=0.0)
-
-
-def divider(x):
-    """Bay divider: low blast barrier, two pillars carrying the gantry rail, side arms."""
-    y0, y1 = BERTH_Y - 1.0, BACK_Y
-    H.box(V((x, (y0 + y1) / 2, DECK_Z + 0.8)), (0.6, y1 - y0, 1.6), "hull2", bevel=0.1)
-    H.box(V((x, (y0 + y1) / 2, DECK_Z + 1.62)), (0.7, y1 - y0, 0.1), "hazard", bevel=0.0)
-    H.box(V((x, y0 - 0.4, DECK_Z + 0.5)), (0.8, 0.8, 1.0), "hazard", bevel=0.0)
-    for yy in (BERTH_Y - 1.0, BACK_Y - 0.6):
-        H.box(V((x, yy, (DECK_Z + RAIL_Z) / 2)), (1.0, 1.0, RAIL_Z - DECK_Z), "hull2",
-              bevel=0.06)
-        H.box(V((x, yy, DECK_Z + 0.4)), (1.4, 1.4, 0.8), "hazard", bevel=0.0)
-        lamp((x, yy - 0.52, 5.0), 0.32, "red")
-    for d in (-1, 1):
-        side_arm(x, x + d * BERTH_SPACING / 2)
-
-
-def side_arm(px, bx, wall=False):
-    """Service arm from a divider pillar (or the wall) to the ship flank, short of it."""
-    s = 1 if bx > px else -1
-    yy = BERTH_Y - 1.0
-    base = V((px + s * 0.5, yy, 1.6))
-    H.box(base, (0.5, 0.9, 0.9), "dark", bevel=0.05)
-    elbow = V((bx - s * (SHIP_HW + 2.0), yy - 2.0, 2.0))
-    tip = V((bx - s * (SHIP_HW + 1.2), yy - 3.4, 1.2))
-    parts.strut(H, base, elbow, 0.32, 0.32, "hull")
-    H.box(elbow, (0.5, 0.5, 0.5), "dark", bevel=0.1)
-    parts.strut(H, elbow, tip, 0.26, 0.26, "hull")
-    H.box(tip, (0.3, 0.5, 0.4), "hazard", bevel=0.0)
-    lamp(tip + V((0, 0, 0.3)), 0.2, "green")
-    if wall:
-        H.box(V((px + s * 0.25, yy, 0.0)), (0.6, 1.4, 4.0), "hull2", bevel=0.05)
-
-
-# ---------------------------------------------------------------- apron
-def build_apron():
-    ay0, ay1 = MOUTH_Y - 1.4, APRON_Y
-    acy = (ay0 + ay1) / 2
-    H.box(V((0, acy, DECK_Z - 0.6)), (2 * WALL_OUT + 1.0, ay0 - ay1, 1.2), "pad", bevel=0.0)
-    H.box(V((0, acy, DECK_Z - 1.8)), (2 * WALL_IN, ay0 - ay1 - 1.0, 1.2), "dark", bevel=0.0)
-    for sx in (-1, 1):
-        H.box(V((sx * (WALL_OUT + 0.1), acy, DECK_Z + 0.02)), (0.8, ay0 - ay1, 0.06),
-              "hazard", bevel=0.0)
-        for k in range(4):
-            lamp((sx * (WALL_OUT + 0.35), ay0 - 1.5 - k * 3.0, DECK_Z + 0.2), 0.4, "red")
-    H.box(V((0, ay1 + 0.4, DECK_Z + 0.02)), (2 * WALL_OUT + 0.6, 0.8, 0.06), "hazard",
-          bevel=0.0)
-    for x in (-10.0, 10.0):
-        label("NO STEP", (x, ay1 + 2.6, DECK_Z + 0.03), (0, 0, 1), (0, 1, 0), 1.0,
-              wk.INK_LIGHT, 0.6)
-    label("HOT", (0.0, ay1 + 2.6, DECK_Z + 0.03), (0, 0, 1), (0, 1, 0), 1.2, wk.INK_LIGHT,
-          0.6)
-    for bx in BAYS:
-        SCORCH.append((bx, acy, DECK_Z, 4.0))
-        # launch lights: lamp pairs either side of the catapult rails, then a light boom
-        for k in range(5):
-            yy = ay0 - 1.0 - k * 2.2
-            m = "green" if k == 0 else "light"
-            lamp((bx - 2.3, yy, DECK_Z + 0.2), 0.42, m)
-            lamp((bx + 2.3, yy, DECK_Z + 0.2), 0.42, m)
-        parts.strut(H, V((bx, ay1 + 0.2, DECK_Z - 1.0)), V((bx, ay1 - 6.6, DECK_Z - 1.0)),
-                    0.4, 0.4, "dark")
-        for k in range(3):
-            yy = ay1 - 1.4 - k * 2.4
-            H.box(V((bx, yy, DECK_Z - 0.8)), (2.4, 0.25, 0.25), "dark", bevel=0.0)
-            for dx in (-0.9, 0.0, 0.9):
-                lamp((bx + dx, yy, DECK_Z - 0.6), 0.3, "cyan" if k % 2 == 0 else "light")
-        lamp((bx, ay1 - 6.7, DECK_Z - 0.8), 0.45, "red")
-
-
-# ---------------------------------------------------------------- +X: control tower
-def build_tower():
-    t = TOWER
-    # deck under the services
-    H.box(V((30.0, -1.0, -5.5)), (9.6, 26.0, 1.2), "dark", bevel=0.0)
-    H.box(V((30.0, -1.0, -4.8)), (9.0, 25.4, 0.3), "pad", bevel=0.0)
-    # shaft
-    cz = 15.4
-    sz0, sz1 = -4.8, cz - 1.8
-    H.box(t + V((0, 0, (sz0 + sz1) / 2)), (4.6, 4.6, sz1 - sz0), "hull", bevel=0.04)
-    for sx in (-1, 1):
-        H.box(t + V((sx * 2.35, 0, (sz0 + sz1) / 2)), (0.12, 1.2, sz1 - sz0), "merc",
-              bevel=0.0)
-    for z in (2.6, 5.0, 7.4, 9.8):
-        wk.win_row(L, RNG, t + V((-1.5, -2.32, z)), t + V((1.5, -2.32, z)), (0, -1, 0), 3,
-                   0.55, 0.6, "hab")
-    for z in (4.0, 9.0):   # ring platforms around the shaft
-        H.box(t + V((0, 0, z)), (5.6, 5.6, 0.3), "dark", bevel=0.0)
-    label("FLT CTRL", t + V((0, -2.32, -0.6)), (0, -1, 0), (0, 0, 1), 0.7, wk.INK_DARK)
-    # flight control cab: wider than the shaft, slanted window band all round
-    H.box(t + V((0, 0, cz - 1.4)), (6.4, 6.4, 1.0), "hull2", bevel=0.05)
-    prof = [(0.0, cz - 0.9), (3.9, cz - 0.9), (4.6, cz + 0.6), (4.3, cz + 1.8),
-            (0.0, cz + 1.8)]
-    H.lathe(prof, 8, lambda i, j: {0: "hull2", 1: "glass", 2: "hull", 3: "hull"}[j],
-            matrix=Matrix.Translation(t), start=math.pi / 8)
-    for k in range(8):
-        a = math.pi / 8 + (k + 0.5) * 2 * math.pi / 8
-        n = V((math.cos(a), math.sin(a), -0.45)).normalized()
-        c = t + V((4.3 * math.cos(a) * 0.97, 4.3 * math.sin(a) * 0.97, cz - 0.15))
-        if k % 4 != 1:
-            parts.quad(L, c + n * 0.05, n, (0, 0, 1), 2.6, 0.9,
-                       "window" if k % 3 else "window_cool")
-    H.box(t + V((0, 0, cz + 2.0)), (5.0, 5.0, 0.5), "dark", bevel=0.0)
-    parts.dish(H, t + V((-1.2, 0.8, cz + 2.6)), 1.5, (-0.5, -0.6, 0.7), "hull", "dark")
-    H.cyl(t + V((1.6, -1.2, cz + 4.2)), 0.1, 0.06, 3.6, "dark", segs=5)
-    lamp(t + V((1.6, -1.2, cz + 6.1)), 0.45, "red")
-    H.box(t + V((1.4, 1.4, cz + 2.7)), (1.6, 0.25, 0.6), "hull2", rot_z=0.5, bevel=0.0)
-    # skybridge to the hangar wall top
-    H.box(V(((WALL_OUT + t.x - 2.3) / 2, t.y, WALL_TOP + 0.4)),
-          (t.x - 2.3 - WALL_OUT + 0.6, 2.2, 2.2),
-          "hull2", bevel=0.05)
-    L.box(V(((WALL_OUT + t.x - 2.3) / 2, t.y - 1.12, WALL_TOP + 0.5)),
-          (t.x - 3.3 - WALL_OUT, 0.06, 0.5),
-          "window", bevel=0.0)
-    # tanks + manifold behind the tower
-    for i, (x, y) in enumerate(((28.0, 2.0), (31.6, 2.0), (28.0, 6.2), (31.6, 6.2))):
-        wk.tank_v(H, (x, y, -4.65), 1.6, 6.4, "hull" if i % 2 else "hull3", "merc", segs=12)
-    H.tube(V((26.0, 4.1, -3.6)), V((33.4, 4.1, -3.6)), 0.25, 0.25, "metal", segs=6)
-    H.tube(V((26.0, 4.1, -3.6)), V((FOOT_X, 4.1, -3.6)), 0.25, 0.25, "metal", segs=6)
-    # radiator rack at the back corner (vertical fins)
+def build_drum():
+    H.lathe(DRUM_PROFILE, 32, drum_mat, matrix=parts.ALONG_Y)
     for k in range(6):
-        y = 9.0 + k * 0.9
-        H.box(V((30.0, y, -1.8)), (4.0, 0.12, 5.2), "radiator", bevel=0.0)
-    H.box(V((30.0, 11.25, -4.4)), (4.4, 5.6, 0.6), "dark", bevel=0.0)
-    wk.beacon(H, L, (34.2, -13.4, -3.9), 0.4, "red")
-    wk.beacon(H, L, (34.2, 11.6, -3.9), 0.4, "red")
+        a = math.radians(30 + 60 * k)
+        H.box(V((7.6 * math.cos(a), 9.85, 7.6 * math.sin(a))), (5.6, 0.3, 0.9),
+              "merc" if k % 2 == 0 else "dark", bevel=0.04, r=Matrix.Rotation(-a, 4, "Y"))
+    for k in range(6):
+        for da in (-14, 14):
+            a = math.radians(60 * k + da)
+            parts.window(L, V((9 * math.cos(a), 10.0, 9 * math.sin(a))), V((0, -1, 0)),
+                         V((0, 0, 1)), 0.6, 0.5, parts.pick_lit(RNG, "hab"))
+    rf = 11.0 * math.cos(math.pi / 32)
+    for y in (12.6, 18.4):
+        for k in range(32):
+            if k % 4 == 3:                              # 24 per row, a blank every 4th
+                continue
+            a = (k + 0.5) * 2 * math.pi / 32
+            d = V((math.cos(a), 0, -math.sin(a)))      # lathe facet direction (ALONG_Y)
+            if d.z < -math.cos(math.radians(15)):
+                continue
+            parts.window(L, d * rf + V((0, y, 0)), d, V((0, 1, 0)), 0.55, 0.45,
+                         parts.pick_lit(RNG, "hab"))
+    for deg in (45, 135, 225, 315):
+        a = math.radians(deg)
+        lamp(V((11.5 * math.cos(a), 10.9, 11.5 * math.sin(a))), 0.45, "red")
+    for deg, text in ((60, "MERC"), (120, "SPIN")):
+        a = math.radians(deg)
+        c = V((6.2 * math.cos(a), 9.95, 6.2 * math.sin(a)))
+        H.box(c, (2.8, 0.08, 1.0), "hull2", bevel=0.0)
+        label(text, c - V((0, 0.05, 0)), V((0, -1, 0)), V((0, 0, 1)), 0.7, wk.INK_DARK)
+    # bearing collars and hazard seams: fixed axle vs spinning drum
+    for y0, y1 in ((8.9, 10.0), (21.0, 22.2)):
+        H.lathe([(2.8, y0), (5.4, y0), (5.4, y1), (2.8, y1), (2.8, y0)], 24,
+                lambda i, j: "dark", matrix=parts.ALONG_Y)
+        H.cyl(V((0, (y0 + y1) / 2, 0)), 5.47, 5.47, 0.25, "hazard", segs=24,
+              axis_rot=parts.ALONG_Y)
 
 
-# ---------------------------------------------------------------- -X: ordnance yard
-def build_yard():
-    x0, x1, y0, y1 = YARD
-    H.box(V(((x0 + x1) / 2, (y0 + y1) / 2, -5.5)), (x1 - x0 + 0.8, y1 - y0 + 0.8, 1.2),
-          "dark", bevel=0.0)
-    H.box(V(((x0 + x1) / 2, (y0 + y1) / 2, -4.8)), (x1 - x0, y1 - y0, 0.3), "pad", bevel=0.0)
-    H.box(V((x0 + 0.1, (y0 + y1) / 2, -4.62)), (0.3, y1 - y0, 0.06), "hazard", bevel=0.0)
-    H.box(V(((x0 + x1) / 2, y0 + 0.1, -4.62)), (x1 - x0, 0.3, 0.06), "hazard", bevel=0.0)
-    # missile racks: frame, three tiers of missiles (along Y), red warheads
-    for rx in (x0 + 2.2, x0 + 5.8):
-        ry0, ry1 = y1 - 11.5, y1 - 1.0
-        for xx in (rx - 1.4, rx + 1.4):
-            for yy in (ry0, (ry0 + ry1) / 2, ry1):
-                H.box(V((xx, yy, -1.4)), (0.3, 0.3, 6.6), "dark", bevel=0.0)
-            for z in (-3.6, -1.6, 0.4, 1.9):
-                parts.strut(H, V((xx, ry0, z)), V((xx, ry1, z)), 0.22, 0.22, "dark")
-        for z in (-3.6, -1.6, 0.4):
-            for k in range(4):
-                mx = rx - 1.0 + k * 0.66
-                mz = z + 0.55
-                H.cyl(V((mx, ry0 + 4.6, mz)), 0.27, 0.27, 8.4, "hull", segs=8,
-                      axis_rot=parts.ALONG_Y)
-                H.cyl(V((mx, ry0 + 0.0, mz)), 0.05, 0.27, 0.9, "merc", segs=8,
-                      axis_rot=parts.ALONG_Y)
-                H.box(V((mx, ry0 + 8.4, mz)), (0.12, 0.6, 0.7), "dark", bevel=0.0)
-        H.box(V((rx, ry0 - 0.2, 2.15)), (3.2, 0.3, 0.5), "hazard", bevel=0.0)
-    H.box(V((x0 + 4.0, y1 - 11.72, 3.0)), (6.6, 0.06, 1.0), "hull", bevel=0.0)
-    label("AMMO", (x0 + 4.0, y1 - 11.76, 3.0), (0, -1, 0), (0, 0, 1), 0.8, wk.INK_DARK)
-    # ammo crates in the front of the yard
-    tones = ("hull2", "hull3", "hull2", "hull", "hull3", "hull2")
-    bands = ("merc", "hazard", "merc", "hazard", "merc", "merc")
-    i = 0
-    for cx, cy, n in ((x0 + 2.0, y0 + 2.2, 2), (x0 + 5.0, y0 + 2.2, 3), (x0 + 2.0, y0 + 5.6, 1),
-                      (x0 + 5.0, y0 + 5.6, 2)):
-        for lv in range(n):
-            wk.cargo_pod(H, (cx + RNG.uniform(-0.1, 0.1), cy, -3.85 + lv * 1.6),
-                         (2.6, 3.0, 1.5), rot_z=RNG.uniform(-0.04, 0.04), body=tones[i % 6],
-                         band=bands[(i + lv) % 6])
-            i += 1
-    label("ORD", (x0 + 3.5, y0 - 0.02, -3.9), (0, -1, 0), (0, 0, 1), 0.7, wk.INK_DARK)
-    H.box(V((x0 + 3.5, y0 - 0.01, -3.9)), (3.4, 0.05, 0.9), "hull", bevel=0.0)
-    # overhead loader: A-frame legs, beam into the hangar wall, hoist with a missile
-    lx = (x0 + x1) / 2 - 0.8
-    for yy in (y0 + 0.6, y1 - 0.6):
-        parts.strut(H, V((x0 + 0.4, yy, -4.6)), V((lx, yy, 5.4)), 0.4, 0.4, "merc")
-        parts.strut(H, V((x1 - 0.4, yy, -4.6)), V((lx, yy, 5.4)), 0.4, 0.4, "merc")
-    H.box(V((lx, (y0 + y1) / 2, 5.8)), (1.0, y1 - y0 + 1.0, 0.8), "dark", bevel=0.0)
-    hy = y0 + 8.0
-    H.box(V((lx, hy, 5.0)), (1.6, 1.4, 0.8), "hazard", bevel=0.0)
-    parts.strut(H, V((lx, hy, 4.6)), V((lx, hy, 2.0)), 0.06, 0.06, "dark")
-    H.cyl(V((lx, hy, 1.6)), 0.3, 0.3, 4.8, "hull", segs=8, axis_rot=parts.ALONG_Y)
-    H.box(V((lx, hy, 1.95)), (0.5, 1.2, 0.3), "dark", bevel=0.0)
-    # feed conveyor from the yard into the hangar side wall
-    H.box(V(((x1 + (-FOOT_X)) / 2, -2.0, -1.4)), (abs(-FOOT_X - x1) + 1.2, 1.6, 1.2),
-          "hull2", bevel=0.05)
-    H.box(V((x1 - 0.6, -2.0, -3.2)), (1.2, 1.4, 2.4), "dark", bevel=0.0)
-    lamp((x1 - 0.2, -2.9, -0.4), 0.3, "amber")
-    # yard floodlight poles
-    for xx, yy in ((x0 + 0.4, y0 + 0.4), (x0 + 0.4, y1 - 0.4)):
-        H.cyl(V((xx, yy, -0.6)), 0.12, 0.1, 8.0, "dark", segs=6)
-        H.box(V((xx + 0.3, yy, 3.4)), (0.8, 0.5, 0.3), "dark", bevel=0.0)
-        L.box(V((xx + 0.3, yy, 3.22)), (0.6, 0.35, 0.05), "cyan", bevel=0.0)
+RAD_HUB_X = 8.0                              # fin hub, both sides of the axle
+RAD_FANS = (8.0, -12.0, -32.0)               # blade sweep in plan, deg from +-X toward +Y
+RAD_R0, RAD_R1 = 3.0, 16.5                   # blade span from the hub
+RAD_W = 1.9                                  # blade chord
+RAD_TILT = 40.0                              # blade twist about its long axis, deg
+
+
+def build_radiators():
+    """Radiator fans: a short boom off the axle carries a coolant hub each side, and each
+    hub fans three long, narrow blades out in plan (swept 8, -12 and -32 deg) so they show
+    as separate feathers from the top camera. The blades are twisted 40 deg about their
+    long axis (alternating), plain dark grey with fine lengthwise ribs, a coolant spar and
+    a faint warm core strip in _lights."""
+    for y in (27.6, 28.4):
+        for z in (-0.5, 0.5):
+            H.beam(V((-RAD_HUB_X, y, z)), V((RAD_HUB_X, y, z)), 0.32, 0.32, "dark")
     for k in range(4):
-        lamp((x0 + 0.6 + k * 2.6, y0 - 0.3, -4.6), 0.4, "light")
+        x = -RAD_HUB_X + 4 * k
+        parts.strut(H, V((x, 27.6, -0.5)), V((x + 4, 28.4, 0.5)), 0.18, 0.18, "dark")
+    length = RAD_R1 - RAD_R0
+    for sx in (-1, 1):
+        hub = V((sx * RAD_HUB_X, 28.0, 0))
+        H.cyl(hub, 1.3, 1.3, 1.8, "dark", segs=12)
+        H.cyl(hub, 1.38, 1.38, 0.35, "merc", segs=12)
+        for k, phi in enumerate(RAD_FANS):
+            p = math.radians(phi)
+            d = V((sx * math.cos(p), math.sin(p), 0))
+            yaw = p if sx > 0 else math.pi - p
+            R = rz(yaw) @ rx(RAD_TILT * (1 if k % 2 == 0 else -1))
+            ch = R.to_3x3() @ V((0, 1, 0))
+            nrm = R.to_3x3() @ V((0, 0, 1))
+            c = hub + d * ((RAD_R0 + RAD_R1) / 2)
+            H.tube(hub + d * 1.0, hub + d * (RAD_R0 + 0.3), 0.24, 0.24, "metal", segs=8)
+            H.box(c, (length, RAD_W, 0.1), "dark", r=R, bevel=0.0)
+            for t in (-0.6, 0.6):               # fine lengthwise ribs, both faces
+                for s in (-1, 1):
+                    H.box(c + ch * t + nrm * s * 0.06, (length - 0.4, 0.05, 0.03), "hull2",
+                          r=R, bevel=0.0)
+            H.tube(hub + d * RAD_R0, hub + d * (RAD_R1 - 0.2), 0.13, 0.1, "metal", segs=6)
+            for s in (-1, 1):                   # faint warm core strip
+                L.box(c + d * 0.4 + nrm * s * 0.07 + ch * 0.25, (length - 1.6, 0.14, 0.02),
+                      "window_dim", r=R, bevel=0.0)
+        tip = hub + V((sx * math.cos(math.radians(8)), math.sin(math.radians(8)), 0)) * RAD_R1
+        lamp(tip + V((0, 0, 0.12)), 0.45, "red")
 
 
-# ---------------------------------------------------------------- back
 def build_back():
-    pb = V((0, BACK_Y + 4.8, 0))
-    H.box(pb + V((0, 0, -0.8)), (24.0, 6.4, 8.4), "hull2", bevel=0.05)
-    H.box(pb + V((0, 0, 3.6)), (22.0, 5.4, 0.5), "dark", bevel=0.0)
-    # reactor caps + vents
+    wk.lattice_mast(H, V((0, 24.0, 2.7)), 13.0, 0.8, 0.45, 4, "dark", chord=0.24, brace=0.12)
+    parts.dish(H, V((0.6, 24.4, 10.8)), 1.0, V((0.2, -0.5, 0.85)), "hull", "dark")
+    lamp(V((0, 24.0, 13.3)), 0.45, "red")
+    pdc(V((0, 30.2, 2.7)), V((0, 0, 1)), V((0.8, 0.45, 0.4)))
+    pdc(V((0, 30.2, -2.7)), V((0, 0, -1)), V((-0.8, 0.45, -0.4)))
+    # link port at the axle tail
+    H.cyl(V((0, 32.9, 0)), 2.3, 2.3, 1.2, "dark", segs=12, axis_rot=parts.ALONG_Y)
+    H.cyl(V((0, 33.5, 0)), 1.7, 1.7, 0.15, "hull", segs=12, axis_rot=parts.ALONG_Y)
+    H.box(V((0, 33.55, 1.95)), (1.6, 0.1, 0.4), "dark", bevel=0.0)
+    label("#BAR", V((0, 33.6, 1.95)), V((0, 1, 0)), V((0, 0, 1)), 0.3, wk.INK_DARK)
     for sx in (-1, 1):
-        H.cyl(pb + V((sx * 6.5, 0.2, 4.6)), 1.8, 1.8, 1.6, "hull", segs=12)
-        H.cyl(pb + V((sx * 6.5, 0.2, 5.6)), 1.8, 1.2, 0.4, "hull", segs=12)
-        L.cyl(pb + V((sx * 6.5, 0.2, 5.85)), 0.5, 0.5, 0.2, "light", segs=6)
-        wk.win_row(L, RNG, pb + V((sx * 12.02, -2.2, 1.0)), pb + V((sx * 12.02, 2.2, 1.0)),
-                   (sx, 0, 0), 4, 0.5, 0.5, "store")
-    H.box(pb + V((0, 3.22, 1.4)), (20.0, 0.06, 0.6), "merc", bevel=0.0)
-    H.box(pb + V((0, 3.22, -3.6)), (20.0, 0.06, 0.5), "hazard", bevel=0.0)
-    label("#BAR", (-7.5, pb.y + 3.24, -1.6), (0, 1, 0), (0, 0, 1), 0.7, wk.INK_DARK)
-    label("#CHEV", (7.5, pb.y + 3.24, -1.6), (0, 1, 0), (0, 0, 1), 0.7, wk.INK_DARK)
-    # link port on the back face (cargo shuttle side)
-    H.cyl(V((LINK_POS[0], LINK_POS[1] - 0.9, LINK_POS[2])), 2.2, 2.2, 1.2, "dark", segs=12,
-          axis_rot=parts.ALONG_Y)
-    H.cyl(V((LINK_POS[0], LINK_POS[1] - 0.25, LINK_POS[2])), 1.6, 1.6, 0.2, "hull", segs=12,
-          axis_rot=parts.ALONG_Y)
-    for sx in (-1, 1):
-        lamp((sx * 2.6, LINK_POS[1] - 0.5, LINK_POS[2] + 1.6), 0.35, "red")
-    # comms mast at the back left
-    m = V((-9.0, BACK_Y + 5.6, 3.85))
-    wk.lattice_mast(H, m, 18.0, 0.9, 0.5, 4, "dark", chord=0.28, brace=0.13)
-    H.box(m + V((0, 0, 14.6)), (5.0, 0.6, 0.4), "merc", rot_z=0.4, bevel=0.0)
-    lamp(m + V((0, 0, 15.2)), 0.45, "red")
-    wk.beacon(H, L, (11.0, BACK_Y + 7.4, 4.3), 0.4, "red")
+        lamp(V((sx * 2.3, 33.0, 0.0)), 0.35, "red")      # on the collar sides
 
 
-# ---------------------------------------------------------------- assemble
-def build_outpost():
+# ---------------------------------------------------------------- checks
+def _box_bm(lo, hi):
+    bm = bmesh.new()
+    lo, hi = V(lo), V(hi)
+    m = Matrix.Translation((lo + hi) / 2) @ Matrix.Diagonal((*(hi - lo), 1.0))
+    bmesh.ops.create_cube(bm, size=1.0, matrix=m)
+    return bm
+
+
+def measure_fighter():
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=FIGHTER_GLB)
+    new = [o for o in bpy.data.objects if o not in before]
+    bpy.context.view_layer.update()
+    lo, hi = [1e9] * 3, [-1e9] * 3
+    for o in new:
+        if o.type != "MESH" or o.name.startswith("engine_glow"):
+            continue
+        for v in o.data.vertices:
+            w = o.matrix_world @ v.co
+            for i in range(3):
+                lo[i], hi[i] = min(lo[i], w[i]), max(hi[i], w[i])
+    for o in new:
+        bpy.data.objects.remove(o)
+    hw = max(-lo[0], hi[0])
+    got = dict(SHIP_HW=hw, SHIP_ZMIN=lo[2], SHIP_ZMAX=hi[2], NOSE_Y=BERTH_Y - hi[1],
+               TAIL_Y=BERTH_Y - lo[1])
+    want = dict(SHIP_HW=SHIP_HW, SHIP_ZMIN=SHIP_ZMIN, SHIP_ZMAX=SHIP_ZMAX, NOSE_Y=NOSE_Y,
+                TAIL_Y=TAIL_Y)
+    ok = all(abs(got[k] - want[k]) <= 0.05 for k in got)
+    print("FIGHTER bounds", {k: round(v, 3) for k, v in got.items()}, "OK" if ok else "FAIL")
+    return ok
+
+
+def check_build():
+    """Forbidden boxes (docking corridors, sideways path, outer berth spots) and the footprint
+    radius, on H.bm / L.bm in world coordinates. Returns True when everything is clear."""
+    ok = measure_fighter()
+    boxes = []
+    for i, bx in enumerate(BAYS):
+        boxes.append((f"bay{i + 1}_A", (bx - LANE_HW, -40.0, -LANE_HH),
+                      (bx + LANE_HW, NOSE_Y, LANE_HH)))
+        boxes.append((f"bay{i + 1}_B", (bx - LANE_HW, NOSE_Y, SHIP_ZMIN - 0.3),
+                      (bx + LANE_HW, 3.5, SHIP_ZMAX + 0.3)))
+    boxes.append(("path_C", (-46.0, -42.0, -4.0), (46.0, -21.0, 6.0)))
+    _, outer = berths()
+    for k, p in enumerate(outer):
+        boxes.append((f"outer{k}_D", tuple(p - V((5, 5, 5))), tuple(p + V((5, 5, 5)))))
+    trees = []
+    for part in (H, L):
+        part.bm.faces.ensure_lookup_table()
+        part.bm.normal_update()
+        trees.append((part, BVHTree.FromBMesh(part.bm)))
+    eps = 1e-4
+    for name, lo, hi in boxes:
+        lo, hi = V(lo), V(hi)
+        n_in, hits = 0, []
+        bbm = _box_bm(lo, hi)
+        btree = BVHTree.FromBMesh(bbm)
+        for part, tree in trees:
+            for v in part.bm.verts:
+                c = v.co
+                if all(lo[i] + eps < c[i] < hi[i] - eps for i in range(3)):
+                    n_in += 1
+                    if len(hits) < 3:
+                        f = v.link_faces[0] if v.link_faces else None
+                        hits.append((part.name, part.slots[f.material_index].name if f else "?",
+                                     tuple(round(x, 2) for x in c)))
+            for fa, _fb in tree.overlap(btree):
+                n_in += 1
+                if len(hits) < 3:
+                    f = part.bm.faces[fa]
+                    hits.append((part.name, part.slots[f.material_index].name,
+                                 tuple(round(x, 2) for x in f.calc_center_median())))
+        bbm.free()
+        print(f"BERTH CHECK {name} {'OK' if n_in == 0 else 'FAIL'} {n_in}"
+              + (f" first {hits}" if hits else ""))
+        ok = ok and n_in == 0
+    far = max((v.co for part in (H, L) for v in part.bm.verts), key=lambda c: c.xy.length)
+    r = far.xy.length
+    print(f"BERTH CHECK footprint max XY radius {r:.2f} at {tuple(round(x, 2) for x in far)} "
+          f"{'OK' if r <= 40.0 else 'FAIL'}")
+    ok = ok and r <= 40.0
+    print("BERTH CHECK", "ALL OK" if ok else "FAILED")
+    return ok
+
+
+# ---------------------------------------------------------------- assembly
+def build_outpost(check=False):
     global H, L
     build_materials()
     DECALS.clear()
     SCORCH.clear()
     H = parts.PanelPart(f"{PRE}_hull", MATS)
     L = parts.PanelPart(f"{PRE}_lights", MATS)
-    for b in (build_shell, build_bays, build_apron, build_tower, build_yard, build_back):
-        b()
+    build_rack()
+    build_girder()
+    build_gondola()
+    build_tanks()
+    for sx in (-1, 1):
+        magazine(sx)
+    build_axle()
+    build_drum()
+    build_radiators()
+    build_back()
+    if check:
+        check_build()
     root = parts.make_root(PRE, size=10)
     hull = H.finish(root)
     lights = L.finish(root)
     lights.data.uv_layers.remove(lights.data.uv_layers["panel"])
-    for name, pos, rz in (("dock_point", DOCK_POS, math.pi), ("spawn_point", SPAWN_POS, math.pi),
-                          ("link_point", LINK_POS, 0.0)):
-        parts.add_empty(name, root, pos, rot_z=rz, size=4)
+    for name, pos, rzz in (("dock_point", DOCK_POS, math.pi), ("spawn_point", SPAWN_POS, math.pi),
+                           ("link_point", LINK_POS, 0.0)):
+        parts.add_empty(name, root, pos, rot_z=rzz, size=4)
     return root, hull, lights
 
 
@@ -652,7 +718,7 @@ def berths():
 
 
 def add_ships():
-    """Preview only: one merc_fighter per inner berth, nose out (not exported)."""
+    """Preview only: one merc_interceptor per inner berth, nose out (not exported)."""
     inner, outer = berths()
     for p in inner:
         before = set(bpy.data.objects)
@@ -672,17 +738,17 @@ def add_ships():
 def previews(ships):
     sfx = "_ships" if ships else ""
     os.makedirs(PREVIEW_COPY, exist_ok=True)
-    target = (0.0, -6.0, 1.0)
+    target = (0.0, 6.0, 0.0)
     common.setup_preview(cam_loc=(target[0] - 45, target[1] - 75, target[2] + 80),
-                         cam_target=target, ortho_scale=92, res=(1600, 1200),
+                         cam_target=target, ortho_scale=100, res=(1600, 1200),
                          key_dir=(-0.6, -0.35, 0.7), key_energy=3.5)
     a = os.path.join(common.PREVIEW_DIR, f"{PRE}_preview{sfx}.png")
     common.render(a)
     scene = bpy.context.scene
     cam = scene.camera
-    cam.location = (0.0, -6.0, 200)
+    cam.location = (0.0, 7.0, 200)
     cam.rotation_euler = (0, 0, 0)
-    cam.data.ortho_scale = 80
+    cam.data.ortho_scale = 92
     scene.render.resolution_x, scene.render.resolution_y = 1200, 1200
     b = os.path.join(common.PREVIEW_DIR, f"{PRE}_top{sfx}.png")
     common.render(b)
@@ -693,7 +759,7 @@ def previews(ships):
 def main():
     argv = parts.script_args(sys.argv)
     common.reset_scene()
-    root, hull, lights = build_outpost()
+    root, hull, lights = build_outpost(check="--check" in argv)
     if "--no-textures" not in argv:
         wk.texture([hull], MATS, PRE, NO_PADS, scorch=SCORCH, decals=DECALS, labels=LABELS,
                    seed0=53)

@@ -155,7 +155,7 @@ static func plan(def: SystemDef, start: Vector3, radius: float) -> PackedVector3
 			rings.append(_clear_ring(r, def))
 	rings.sort()
 	rings.reverse()
-	var min_r := maxf(def.star_radius * 3.0, 3000.0)
+	var min_r := maxf(def.star_display_radius() * 1.6, 3000.0)
 	var a := atan2(start.z, start.x)
 	for r in rings:
 		r = maxf(r, min_r)

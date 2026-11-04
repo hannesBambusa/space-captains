@@ -55,7 +55,7 @@ var selection: SelectionController
 var view_manager: ViewManager
 ## Built in code (bottom right, like the other panels).
 var zone_panel: ZonePanel
-## Built in code: the selected planet or moon (planet raids).
+## Built in code: the selected planet or moon (its outpost).
 var planet_panel: PlanetPanel
 ## Built in code: the selected jump gate (explore contracts).
 var gate_panel: GatePanel

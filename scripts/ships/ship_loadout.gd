@@ -34,26 +34,17 @@ const DEFAULT_PATHS := {
 	"Mercenary": "res://data/loadouts/mercenary_default.tres",
 	"Scavenger": "res://data/loadouts/scavenger_default.tres",
 	"Salvager": "res://data/loadouts/salvager_default.tres",
-	"Lander": "res://data/loadouts/lander_default.tres",
 	"Explorer": "res://data/loadouts/explorer_default.tres",
 }
-## Dropship research (Research autoload) for landers: more cargo per raid,
-## tougher hulls.
 ## Stats each role's work uses ([method ShipModule.stat_keys] keys). An
 ## explorer's loot hold is fixed (DerelictLoot.HOLD), so no cargo; it has
-## no drill and no guns. Landers do not use sensors or yield.
+## no drill and no guns.
 const ROLE_USES := {
 	"Miner": ["drill", "hull", "shields", "eject", "speed", "cargo", "sensor", "yield"],
 	"Salvager": ["drill", "hull", "shields", "eject", "speed", "cargo", "sensor", "yield"],
-	"Lander": ["drill", "hull", "shields", "eject", "speed", "cargo"],
 	"Mercenary": ["guns", "hull", "shields", "eject", "speed", "sensor", "fire_rate", "accuracy"],
 	"Explorer": ["hull", "shields", "eject", "speed", "sensor"],
 }
-const HEAVY_DROPSHIPS := &"pln_heavy_dropships"
-const ARMOURED_DROPSHIPS := &"eng_armoured_dropships"
-const HEAVY_CARGO_BONUS := 0.4
-const ARMOURED_HULL_MULT := 1.4
-const ARMOURED_SHIELD_BONUS := 60.0
 
 
 ## The module in [param slot], or null when the slot is empty.
@@ -213,12 +204,6 @@ func derive(captain: Captain = null, res: CorpResearch = null) -> ShipStats:
 		s.accuracy_bonus += res.merc_accuracy()
 	elif role_name == "Miner":
 		s.cargo += res.miner_hold()
-	if role_name == "Lander":
-		if res.is_done(HEAVY_DROPSHIPS):
-			s.cargo += HEAVY_CARGO_BONUS
-		if res.is_done(ARMOURED_DROPSHIPS):
-			s.max_hull *= ARMOURED_HULL_MULT
-			s.max_shields += ARMOURED_SHIELD_BONUS
 	if captain:
 		var p := captain.piloting_scale()
 		s.max_speed *= p

@@ -17,7 +17,7 @@ const FADE_TIME := 0.5
 ## Sim seconds a leaving drone flies toward the station before it fades out.
 const LEAVE_TIME := 3.5
 ## Weld tip rest offset from the arm's shoulder, used when the model has no weld_tip.
-const TIP_FALLBACK := Vector3(0.0, -0.5, -0.34)
+const TIP_FALLBACK := Vector3(0.0, -0.387, -0.351)
 
 var mode: Mode = Mode.ARRIVE
 ## The point being welded (building space), valid while welding.

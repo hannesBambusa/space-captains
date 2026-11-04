@@ -185,7 +185,7 @@ func get_aim_velocity() -> Vector3:
 
 func info_text() -> String:
 	var where := planet.def.name if is_instance_valid(planet) else "a planet"
-	return "Orbital garrison of %s (%s), holding %s. Four flak turrets cover it and it keeps up to %d patrol ships around the planet. Landers will not raid %s while it stands. Destroy it to break the claim." % [
+	return "Orbital garrison of %s (%s), holding %s. Four flak turrets cover it and it keeps up to %d patrol ships around the planet. No outpost can be founded on %s while it stands. Destroy it to break the claim." % [
 			gang, faction_def.display_name, where, def.spawn_cap, where]
 
 

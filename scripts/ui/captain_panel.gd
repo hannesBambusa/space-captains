@@ -365,7 +365,7 @@ func show_ship(s: Ship) -> void:
 		_attr_names[4].text = cap.get_specialty_name()
 	_modules_box.visible = not (s is EscapePod)
 	_refresh_modules()
-	_loads_title.text = ("Salvage loads" if s is SalvagerShip else ("Raid loads" if s is LanderShip else "Loads delivered")) if s is MinerShip else ("Surveys / finds" if s is ExplorerShip else "Kills / escorts")
+	_loads_title.text = ("Salvage loads" if s is SalvagerShip else "Loads delivered") if s is MinerShip else ("Surveys / finds" if s is ExplorerShip else "Kills / escorts")
 	_escort_box.visible = s is MinerShip
 	_log_view.show_captain(cap)
 	_rebuild_escorts()

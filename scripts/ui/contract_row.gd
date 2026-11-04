@@ -82,7 +82,7 @@ func _on_pressed() -> void:
 
 ## The contract's beacon when there is one, else its target.
 static func _focus_target(c: Contract, owner_hud: HUD) -> Node3D:
-	if c is PlanetRaidContract or c is ExploreContract:
+	if c is ExploreContract:
 		return c.target
 	if owner_hud and owner_hud.is_inside_tree():
 		var w := SystemWorld.of(owner_hud)

@@ -30,7 +30,7 @@ import common  # noqa: E402
 import parts  # noqa: E402
 from parts import ALONG_Y, V  # noqa: E402
 
-OUT = os.path.join(common.ROOT, "assets", "models", "ships", "merc_fighter.glb")
+OUT = os.path.join(common.ROOT, "assets", "models", "ships", "merc_fighter_old.glb")
 NOZZLE_Y = -7.4
 BELL_R = 1.45
 BELL_LEN = 1.9

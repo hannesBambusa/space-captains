@@ -260,7 +260,7 @@ def out_dir_previews(out_dir):
 def lineup(out_dir):
     """Explorer next to the existing ships (true scale), 3/4 and top-down."""
     common.reset_scene()
-    ships = (("merc_fighter", -16.0), ("miner", -8.0), ("salvager", 0.0), ("explorer", 8.0),
+    ships = (("merc_fighter_old", -16.0), ("miner", -8.0), ("salvager", 0.0), ("explorer", 8.0),
              ("scavenger", 15.0))
     for name, x in ships:
         path = os.path.join(common.ROOT, "assets", "models", "ships", name + ".glb")

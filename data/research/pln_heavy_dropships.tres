@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1_tech")
 id = &"pln_heavy_dropships"
-display_name = "Heavy dropships"
+display_name = "Heavy shuttles"
 field = 2
 tier = 3
 cost_credits = 1400
@@ -14,5 +14,5 @@ cost_crystal = 60
 research_time = 300.0
 prerequisites = Array[StringName]([&"pln_assault_doctrine"])
 tags = PackedStringArray("economy")
-benefit = "Every planet raid brings home more loot."
-description = "Bigger cargo pods for dropships: every lander carries 40% more loot per raid."
+benefit = "Every outpost shuttle lifts more goods to the station."
+description = "Bigger cargo pods for outpost shuttles: every lift from a surface carries 40% more."

@@ -129,7 +129,7 @@ func _pick_ore() -> int:
 	for b in system.belts:
 		if not b.is_depleted and have.has(b.def.ore_type):
 			have[b.def.ore_type] += 1
-	var weights := {AsteroidBelt.OreType.IRON: 0.45, AsteroidBelt.OreType.TITANIUM: 0.33, AsteroidBelt.OreType.CRYSTAL: 0.22}
+	var weights := {AsteroidBelt.OreType.IRON: 0.55, AsteroidBelt.OreType.TITANIUM: 0.3, AsteroidBelt.OreType.CRYSTAL: 0.15}
 	var total := 0.0
 	for o: int in weights:
 		weights[o] = float(weights[o]) / float(1 + int(have[o]) * 2)
@@ -234,7 +234,7 @@ func _pick_spot(bdef: ClusterDef, ore: int) -> Vector2:
 func free_bands(big_r: float) -> Array[Vector2]:
 	var sdef := system.system_def
 	var blocked: Array[Vector2] = []
-	blocked.append(Vector2(0.0, sdef.star_radius * 1.25 + big_r + BAND_MARGIN))
+	blocked.append(Vector2(0.0, sdef.star_display_radius() * 1.25 + big_r + BAND_MARGIN))
 	for p in sdef.planets:
 		var reach := SpaceNav.body_reach(p)
 		for m: PlanetDef in p.moons:

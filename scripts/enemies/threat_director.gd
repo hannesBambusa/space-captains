@@ -109,14 +109,17 @@ func wants_claim(d: DenDef) -> bool:
 func _claim_first(sys: SolarSystem, d: DenDef) -> void:
 	claimed_for[d.name] = SimClock.time
 	var world := CombatWorld.of(self)
-	var body := PlanetRaidContract.find_planet(self, d.claim_planet)
+	var body := PlanetInfo.find_planet(self, d.claim_planet)
 	if world == null or world.claims == null or body == null:
 		return
 	var f := d.get_faction()
+	var outs := Outposts.of(get_tree())
+	if outs and outs.claim_blocked(body, 3, d.gang):
+		return
 	var g := world.claims.claim(body, f, d.gang, true)
 	if g == null:
 		return
-	EventLog.post("%s %s claimed %s: a garrison is in orbit, landers will not raid there" % [d.gang, f.display_name, body.def.name], EventLog.Kind.THREAT, g, Vector3.INF, "", f.id)
+	EventLog.post("%s %s claimed %s: a garrison is in orbit, no outpost can be founded there" % [d.gang, f.display_name, body.def.name], EventLog.Kind.THREAT, g, Vector3.INF, "", f.id)
 	if not introduced.has(f.id):
 		introduced.append(f.id)
 		if not f.intro.is_empty():

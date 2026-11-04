@@ -3,7 +3,7 @@ extends VBoxContainer
 ## The "post a per-load contract" form of the cluster and planet panels
 ## (BeltPanel, PlanetPanel): a header, the pay per load stepper (Shift: 5
 ## steps) with the fair pay line under it, the load limit stepper, the post
-## button and its hint. [member rules] is a MiningRules or PlanetRaidRules
+## button and its hint. [member rules] is a MiningRules
 ## (reward_min, reward_max, reward_step, load_limit_options, clamp_reward).
 ## The owner fills [member fair] and adds to [member hint] after
 ## [method refresh], then calls [method set_problem]; rows of its own go in
