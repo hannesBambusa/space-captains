@@ -29,6 +29,7 @@ raid_style = 1
 raid_weight = 0.3
 raid_size = Vector2i(3, 5)
 raid_after = 2400.0
+wreck_loot = 100
 raid_loot_mult = 2.0
 den_hull = 10000.0
 den_shields = 2000.0

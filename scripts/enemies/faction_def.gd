@@ -80,6 +80,9 @@ const SCAVENGER_DEN_MODEL := "res://assets/models/buildings/scavenger_den.glb"
 @export var raid_size: Vector2i = Vector2i.ZERO
 ## Sim seconds before this faction raids the colony at all.
 @export var raid_after: float = 0.0
+## Credits a wreck of one of its ships yields to the player captains who
+## hit it (new money, not the player's: DefenseZones.pay_loot).
+@export var wreck_loot: int = 40
 ## Credits looted per tick and per raider (RaidStyle.STRUCTURES besieges harder).
 @export var raid_loot_mult: float = 1.0
 

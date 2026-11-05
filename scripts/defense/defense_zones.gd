@@ -10,6 +10,11 @@ extends Node
 ## planet's or moon's visible reach rides that body (phase C3: guard a
 ## planet against a re-claim); anywhere else it stays fixed in space.
 ##
+## Wreck loot: every raider killed by player captains yields its
+## FactionDef.wreck_loot to them (new money, not the player's; the station
+## fee comes back as usual), wherever it dies ([method pay_loot]). It pays
+## mercenaries for defending home without costing the player.
+##
 ## Kill bounty: credits per raider killed inside, paid from the zone's
 ## budget. The budget is reserved from the player's credits like a bounty
 ## (ContractBoard.reserve, counted in ContractBoard.escrow_total); what is
@@ -41,13 +46,6 @@ const PLANET_ANCHOR_REACH := 4000.0
 const ENGAGE_REACH := 2500.0
 const NAMES: PackedStringArray = ["Picket Alpha", "Picket Bravo", "Picket Charlie", "Picket Delta"]
 const SCAN_INTERVAL := 0.5
-## Raiders killed this close to the station earn the defence pay, m.
-const DEFENCE_PAY_REACH := 6000.0
-
-## Credits per raider killed near the station outside a paying zone, split
-## between the captains who hit it (0 = off).
-@export var defence_pay: int = 100
-
 var zones: Array[DefenseZone] = []
 var _next_uid: int = 1
 var _scan_at: float = 0.0
@@ -314,11 +312,10 @@ func _on_combatant_destroyed(node: Node3D, killer: Node3D) -> void:
 	var raider := node as ScavengerShip
 	if raider == null or not is_instance_valid(raider):
 		return
+	pay_loot(raider, killer)
 	var z := zone_at(raider.global_position, true)
-	if z == null:
-		pay_defence(raider, killer)
-		return
-	pay_kill(z, raider, killer)
+	if z:
+		pay_kill(z, raider, killer)
 
 
 ## Player ships with a captain that hit [param raider] in the last
@@ -339,34 +336,34 @@ static func earners_of(raider: Ship, killer: Node3D) -> Array[Ship]:
 	return earners
 
 
-## Pays [member defence_pay] for [param raider] from the player's credits
-## when it died near the station (see the class notes). Returns the credits paid.
-func pay_defence(raider: Ship, killer: Node3D) -> int:
-	var sys := SolarSystem.of(self)
-	if defence_pay <= 0 or sys == null or not is_instance_valid(sys.home_station):
-		return 0
-	if raider.global_position.distance_to(sys.home_station.global_position) > DEFENCE_PAY_REACH:
+## Splits [param raider]'s wreck loot (FactionDef.wreck_loot) between the
+## player captains who hit it ([method earners_of]). New money: nothing
+## leaves the player's credits, and the station fee on it comes back.
+## Returns the loot paid out.
+func pay_loot(raider: ScavengerShip, killer: Node3D) -> int:
+	var loot := raider.faction_def.wreck_loot if raider.faction_def else 0
+	if loot <= 0:
 		return 0
 	var earners := earners_of(raider, killer)
-	if earners.is_empty() or not Corps.economy(self).spend(defence_pay, PackedInt32Array(), Ledger.ZONES, "Defence pay"):
+	if earners.is_empty():
 		return 0
-	var parts := Economy.split_evenly(defence_pay, earners.size())
+	var parts := Economy.split_evenly(loot, earners.size())
 	var names: PackedStringArray = []
 	for i in earners.size():
 		var s := earners[i]
 		if parts[i] <= 0:
 			continue
 		s.captain.credits_earned += parts[i]
-		Corps.economy(self).collect_fees(s.captain, parts[i])
+		Corps.economy(s).collect_fees(s.captain, parts[i])
 		names.append(s.captain.captain_name)
-		s.show_toast("+%d cr defence pay" % parts[i], Ship.TOAST_REWARD)
+		s.show_toast("+%d cr wreck loot" % parts[i], Ship.TOAST_REWARD)
 		if s.brain:
-			s.brain.note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Earned %s cr defence pay" % Fmt.amount(parts[i]),
-					"%s destroyed near the station, which pays %d cr per raider; split between the %d who hit it in the last %d s" % [raider.get_display_name(),
-					defence_pay, earners.size(), roundi(BountyContract.CREDIT_WINDOW)])
-	EventLog.post("%s destroyed near the station: +%s cr defence pay (%s)" % [raider.get_display_name(), Fmt.amount(defence_pay), ", ".join(names)],
+			s.brain.note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Salvaged %s cr from the wreck of %s" % [Fmt.amount(parts[i]), raider.get_display_name()],
+					"A %s wreck yields %d cr; split between the %d who hit it in the last %d s" % [raider.faction_def.unit_name,
+					loot, earners.size(), roundi(BountyContract.CREDIT_WINDOW)])
+	EventLog.post("%s destroyed: +%s cr wreck loot (%s)" % [raider.get_display_name(), Fmt.amount(loot), ", ".join(names)],
 			EventLog.Kind.REWARD, null, raider.global_position)
-	return defence_pay
+	return loot
 
 
 ## Pays [param z]'s kill bounty for [param raider] (see the class notes).

@@ -88,14 +88,15 @@ func upgrades_fitted() -> int:
 
 ## True when [param m] may go in now on a ship of [param role] (the ship's
 ## actual role, Ship.get_role_name): a module that role needs (see [method
-## needs]), an upgrade over what its slot holds, and a free unlocked slot
-## unless it replaces a bought module.
+## needs]), an upgrade over what its slot holds (or the same tier over a
+## worn part, ModuleWear.is_worn), and a free unlocked slot unless it
+## replaces a bought module.
 func can_fit(m: ShipModule, role: String) -> bool:
 	if not needs(m, role):
 		return false
 	var cur := get_module(m.slot)
 	var cur_tier := cur.tier if cur else 0
-	if m.tier <= cur_tier:
+	if m.tier < cur_tier or (m.tier == cur_tier and not ModuleWear.is_worn(cur)):
 		return false
 	return cur_tier >= 1 or upgrades_fitted() < unlocked_slots
 
@@ -181,24 +182,27 @@ func derive(captain: Captain = null, res: CorpResearch = null) -> ShipStats:
 	s.sensor_range = base_sensor_range
 	var fire_mult := 1.0
 	for m in modules():
-		s.max_hull += m.hull_bonus
-		s.max_shields += m.shield_bonus
-		s.shield_regen += m.shield_regen
-		s.max_speed *= m.speed_mult
-		s.acceleration *= m.accel_mult
-		s.turn_rate_deg *= m.turn_mult
-		s.cargo += m.cargo_bonus
-		s.sensor_range = maxf(s.sensor_range, m.sensor_range)
-		s.eject_bonus += m.eject_bonus
-		s.yield_mult *= m.yield_mult
-		s.accuracy_bonus += m.accuracy_bonus
-		fire_mult *= m.fire_rate_mult
+		# Worn parts work less well (ModuleWear): bonuses scale by e, a
+		# multiplier moves that share of the way from 1.
+		var e := ModuleWear.effect_of(m)
+		s.max_hull += m.hull_bonus * e
+		s.max_shields += m.shield_bonus * e
+		s.shield_regen += m.shield_regen * e
+		s.max_speed *= lerpf(1.0, m.speed_mult, e)
+		s.acceleration *= lerpf(1.0, m.accel_mult, e)
+		s.turn_rate_deg *= lerpf(1.0, m.turn_mult, e)
+		s.cargo += m.cargo_bonus * e
+		s.sensor_range = maxf(s.sensor_range, m.sensor_range * e)
+		s.eject_bonus += m.eject_bonus * e
+		s.yield_mult *= lerpf(1.0, m.yield_mult, e)
+		s.accuracy_bonus += m.accuracy_bonus * e
+		fire_mult *= lerpf(1.0, m.fire_rate_mult, e)
 		if m.slot == ShipModule.Slot.TOOL:
 			s.weapon_kind = m.weapon_kind
-			s.weapon_damage = m.weapon_damage
+			s.weapon_damage = m.weapon_damage * e
 			s.weapon_range = m.weapon_range
 			s.fire_rate = m.fire_rate
-			s.drill_mult = m.drill_mult
+			s.drill_mult = lerpf(1.0, m.drill_mult, e)
 	s.fire_rate *= fire_mult
 	if role_name == "Mercenary":
 		s.accuracy_bonus += res.merc_accuracy()

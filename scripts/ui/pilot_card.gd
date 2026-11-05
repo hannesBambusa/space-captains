@@ -249,7 +249,7 @@ func _tooltip(ship: Ship) -> String:
 			var mods: PackedStringArray = []
 			for m in ship.loadout.modules():
 				if m.tier >= 1:
-					mods.append("%s %s" % [m.get_tier_name(), m.display_name])
+					mods.append("%s %s %s" % [m.get_tier_name(), m.display_name, ModuleWear.condition_text(m)])
 			lines.append("Modules: %s (%d of %d slots)" % [", ".join(mods) if not mods.is_empty() else "stock fittings", ship.loadout.upgrades_fitted(), ship.loadout.unlocked_slots])
 		if is_instance_valid(ship.home):
 			lines.append("Home: %s" % ship.home.display_name)

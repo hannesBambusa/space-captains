@@ -11,8 +11,9 @@ extends DefenseStructure
 ## Aim: leads the target (tracer flight time), turns turret_yaw and
 ## turret_pitch toward the lead point at [member yaw_speed_deg] /
 ## [member pitch_speed_deg]; pitch may not drop below
-## [member pitch_min_port_deg] over the -Z side (the barrels would clip the
-## port block), [member pitch_min_deg] elsewhere. Fires alternately from
+## [member pitch_min_port_deg] over the -Z side, [member pitch_min_deg]
+## elsewhere (the same since the PDM-2 model: nothing tall on its service
+## side, gen_defense_turret.py --check clears -25 all round). Fires alternately from
 ## muzzle_l / muzzle_r once lined up, through the ProjectilePool (friendly
 ## tracers pass out through the station shield). About two thirds of a stock
 ## mercenary's damage per second (24 vs about 35), with more range.
@@ -38,7 +39,7 @@ const FIRE_HOLD := 0.6
 @export var yaw_speed_deg: float = 95.0
 @export var pitch_speed_deg: float = 60.0
 @export var pitch_min_deg: float = -25.0
-@export var pitch_min_port_deg: float = -8.0
+@export var pitch_min_port_deg: float = -25.0
 @export var pitch_max_deg: float = 70.0
 ## Lined up within this angle (degrees) to fire.
 @export var fire_tolerance_deg: float = 3.0
@@ -198,7 +199,7 @@ func _angles_to(world_pos: Vector3) -> Vector2:
 	var rel := parent.to_local(world_pos) - pivot
 	var flat := SpaceNav.flat_length(rel)
 	var pitch := atan2(rel.y, maxf(flat, 0.1))
-	# Over the -Z side (yaw near 0) the barrels would clip the port block.
+	# Over the -Z side (yaw near 0) a model with a port block may need a higher floor.
 	var port := 1.0 - smoothstep(deg_to_rad(40.0), deg_to_rad(80.0), absf(yaw))
 	var low := deg_to_rad(lerpf(pitch_min_deg, pitch_min_port_deg, port))
 	return Vector2(yaw, clampf(pitch, low, deg_to_rad(pitch_max_deg)))

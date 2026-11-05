@@ -33,10 +33,15 @@ static var forward_after := 25.0
 ## "Keep at least" on its Factory: iron, titanium, crystal for building.
 const KEEP: PackedInt32Array = [300, 80, 20]
 ## Builds that wait while it saves up for a key one (see [method _saving_for]).
+## Builds that wait for research money in peacetime (see [method research_cost]).
+const DEFENCE_EXTRAS: Array[StringName] = [&"defense_turret", &"shield_generator", &"outfitter"]
 const EXTRAS: Array[StringName] = [&"defense_turret", &"shield_generator", &"outfitter", &"mining_outpost", &"mercenary_outpost"]
 ## Iron per unit of titanium / crystal in the corp office swap (by Ore index).
 const SWAP_RATES := {1: 2, 2: 4}
 const SWAP_MAX := 100
+## Holding more than this many times [constant KEEP] of an ore, it mines
+## other ore first.
+const OVERSTOCK := 4
 
 var _clock := 0.0
 var _rng := RandomNumberGenerator.new()
@@ -56,7 +61,7 @@ func _process(delta: float) -> void:
 		sim_step(delta * SimClock.speed)
 
 
-func interval() -> float:
+static func interval() -> float:
 	return INTERVALS[clampi(Corps.difficulty, 0, INTERVALS.size() - 1)]
 
 
@@ -85,7 +90,16 @@ func _cid() -> StringName:
 
 ## At war with any corp.
 func _at_war() -> bool:
-	var r := corp()
+	return at_war(corp())
+
+
+## Harassing or at war with any corp.
+func _hostile() -> bool:
+	return hostile(corp())
+
+
+## [param r] is at war with any corp.
+static func at_war(r: Corp) -> bool:
 	if r == null:
 		return false
 	for k: StringName in r.mind.ties:
@@ -94,9 +108,8 @@ func _at_war() -> bool:
 	return false
 
 
-## Harassing or at war with any corp.
-func _hostile() -> bool:
-	var r := corp()
+## [param r] harasses or is at war with any corp.
+static func hostile(r: Corp) -> bool:
 	if r == null:
 		return false
 	for k: StringName in r.mind.ties:
@@ -133,7 +146,9 @@ func _tick() -> void:
 		return
 	if world().is_hq:
 		_keep_ore()
-		_swap_for_iron()
+		var note := func(text: String) -> void: _note("swap", text)
+		swap_for_iron(eco(), note)
+		swap_for_goal(eco(), _goal_or_forward(), note)
 		_dispatch()
 	var done := 0
 	for step: Callable in _plan():
@@ -149,9 +164,10 @@ func _tick() -> void:
 func _plan() -> Array[Callable]:
 	var war := _at_war()
 	var first: Array[Callable] = [_building.bind(&"mining_outpost", 0.0, 1), _hire.bind(&"mining_outpost", 2), _mining_contracts, _escorts]
-	var guard: Array[Callable] = [_building.bind(&"mercenary_outpost", 2.0, _merc_outposts()), _hire.bind(&"mercenary_outpost", _merc_target())]
+	var guard: Array[Callable] = [_building.bind(&"mercenary_outpost", 2.0, merc_outposts_want(_minutes(), war)),
+			_hire.bind(&"mercenary_outpost", merc_target_for(_minutes(), _hostile()))]
 	# Scouting first once researched: it is how the rival finds anyone.
-	var grow: Array[Callable] = [_building.bind(&"explorer_outpost", 0.0, 1), _hire.bind(&"explorer_outpost", 1), _science, _mining_outposts, _hire.bind(&"mining_outpost", _miner_target()), _turrets, _zone,
+	var grow: Array[Callable] = [_building.bind(&"explorer_outpost", 0.0, 1), _hire.bind(&"explorer_outpost", 1), _science, _mining_outposts, _hire.bind(&"mining_outpost", miner_target(_minutes())), _turrets, _zone,
 			_addon.bind(&"outfitter", 12.0),
 			_building.bind(&"shield_generator", 20.0, 1), _den_bounty]
 	if not world().is_hq:
@@ -178,8 +194,9 @@ func _keep_ore() -> void:
 ## Short of iron with surplus crystal or titanium: the corp office swaps
 ## some (at most [constant SWAP_MAX] iron a tick, [constant SWAP_RATES] iron
 ## per unit). An AI-only crutch: it has no planet raids or refinery.
-func _swap_for_iron() -> void:
-	var o := eco().ore
+## [param note] (String) gets the intel line. Also used as data (RivalPlan).
+static func swap_for_iron(e: CorpEconomy, note: Callable) -> void:
+	var o := e.ore
 	var iron := Economy.Ore.IRON
 	if o[iron] >= KEEP[iron]:
 		return
@@ -191,9 +208,50 @@ func _swap_for_iron() -> void:
 		var units := mini(spare_units, ceili(float(SWAP_MAX) / rate))
 		var take := Economy.zero_ore()
 		take[t] = units
-		if eco().spend(0, take):
-			eco().add_ore_of(iron, units * rate)
-			_note("swap", "The corp office swapped %d %s for %d iron" % [units, Economy.ore_name(t), units * rate])
+		if e.spend(0, take):
+			e.add_ore_of(iron, units * rate)
+			note.call("The corp office swapped %d %s for %d iron" % [units, Economy.ore_name(t), units * rate])
+		return
+
+
+## The saving goal, or the Forward Station when one is due (for the swap).
+func _goal_or_forward() -> BuildingDef:
+	var b := mgr()
+	var goal := _saving_for()
+	if goal == null:
+		var fs := b.def_by_id(ForwardStations.BUILD_ID)
+		if fs and _minutes() >= forward_after and b.count_of(fs) == 0 and b.limit_reason(fs).is_empty():
+			goal = fs
+	return goal
+
+
+## The key build it saves for ([param goal], or a forward station that is
+## due) lacks only titanium or crystal while it holds the iron for that
+## build and the swap: the corp office swaps iron for the missing units
+## ([constant SWAP_RATES] iron each). Without it the rival keeps iron under
+## its floor (building eats it) and its miners never leave iron, so the
+## Explorer Outpost (30 titanium) never got built and the rival charted
+## nothing. Also used as data (RivalPlan).
+static func swap_for_goal(e: CorpEconomy, goal: BuildingDef, note: Callable) -> void:
+	if goal == null:
+		return
+	var need := goal.cost_ore()
+	var o := e.ore
+	var iron := Economy.Ore.IRON
+	for t: int in [Economy.Ore.TITANIUM, Economy.Ore.CRYSTAL]:
+		if t >= need.size():
+			continue
+		var missing := need[t] - o[t]
+		if missing <= 0:
+			continue
+		var rate: int = SWAP_RATES[t]
+		if o[iron] < need[iron] + missing * rate:
+			continue
+		var take := Economy.zero_ore()
+		take[iron] = missing * rate
+		if e.spend(0, take):
+			e.add_ore_of(t, missing)
+			note.call("The corp office swapped %d iron for %d %s (for the %s)" % [missing * rate, missing, Economy.ore_name(t), goal.display_name])
 		return
 
 
@@ -201,27 +259,38 @@ func _minutes() -> float:
 	return SimClock.time / 60.0
 
 
-func _miner_target() -> int:
-	return 2 if _minutes() < 20.0 else 3
+# --- Targets by time and mood (shared with the data plan, RivalPlan) ---------
+
+static func miner_target(minutes: float) -> int:
+	return 2 if minutes < 20.0 else 3
 
 
-func _merc_outposts() -> int:
-	var war := _at_war()
-	return 2 if war or _minutes() > 30.0 else 1
+static func merc_outposts_want(minutes: float, war: bool) -> int:
+	return 2 if war or minutes > 30.0 else 1
 
 
-func _merc_target() -> int:
-	var war := _hostile()
-	if war:
+static func merc_target_for(minutes: float, is_hostile: bool) -> int:
+	if is_hostile:
 		return 4
-	return 2 if _minutes() < 25.0 else 3
+	return 2 if minutes < 25.0 else 3
+
+
+static func mining_outposts_want(minutes: float) -> int:
+	return 1 + (1 if minutes > 4.0 else 0) + (1 if minutes > 16.0 else 0)
+
+
+static func turret_want(minutes: float, is_hostile: bool) -> int:
+	if is_hostile:
+		return 6
+	if minutes > 25.0:
+		return 4
+	return 2 if minutes > 9.0 else 0
 
 
 # --- Steps --------------------------------------------------------------------
 
 func _mining_outposts() -> bool:
-	var want := 1 + (1 if _minutes() > 4.0 else 0) + (1 if _minutes() > 16.0 else 0)
-	return _building(&"mining_outpost", 0.0, want)
+	return _building(&"mining_outpost", 0.0, mining_outposts_want(_minutes()))
 
 
 ## Builds one more [param id] (structure or addon) when it is past
@@ -242,6 +311,13 @@ func _building(id: StringName, after_min: float, want: int) -> bool:
 			var need := goal.cost_ore()
 			if spare() < def.cost_credits + goal.cost_credits or eco().ore[Economy.Ore.IRON] < def.cost_iron + (need[0] if need.size() > 0 else 0):
 				return false
+	# Defence extras past the first two turrets wait while the next research
+	# step (a hire, a funding) is short of credits: research before more guns
+	# in peacetime, or a rival that buys every turret never researches.
+	if DEFENCE_EXTRAS.has(id) and not _at_war() and not (id == &"defense_turret" and b.count_of(def) < 2):
+		var rc := research_cost(research(), _minutes())
+		if rc > 0 and spare() < def.cost_credits + rc:
+			return false
 	if def.station_addon:
 		return _install(def)
 	var spot := _find_spot(def)
@@ -285,14 +361,19 @@ func _install(def: BuildingDef) -> bool:
 
 ## A free spot for [param def]: rings round the station, nearest first.
 func _find_spot(def: BuildingDef) -> Vector3:
-	var b := mgr()
-	var start := _rng.randf_range(0.0, TAU)
+	return find_spot(mgr(), def, _rng.randf_range(0.0, TAU))
+
+
+## A free spot for [param def] at [param b]'s station, rings from
+## [param start] (radians), nearest first; Vector3.INF when none. Without
+## [param check_cost] the corp need not afford it (paid already: RivalData).
+static func find_spot(b: BuildingManager, def: BuildingDef, start: float, check_cost: bool = true) -> Vector3:
 	var r := 280.0
 	while r <= 1600.0:
 		for i in 16:
 			var a := start + TAU * float(i) / 16.0
 			var off := Vector3(cos(a) * r, 0.0, sin(a) * r)
-			if b.plan_placement(def, off).is_valid():
+			if b.plan_placement(def, off, check_cost).is_valid():
 				return off
 		r += 110.0
 	return Vector3.INF
@@ -336,8 +417,10 @@ func _mining_contracts() -> bool:
 		if iron_short and _free_iron_cluster(sys, on):
 			for c in ContractBoard.contracts:
 				var mc := c as MiningContract
+				var mo := Economy.ore_of_belt(mc.belt.ore_type) if mc and is_instance_valid(mc.belt) else Economy.Ore.IRON
+				# Ore it is short of itself (titanium for the key builds) stays.
 				if mc and mc.corp == _cid() and not mc.is_finished() and mc.system_id == w.system_id and is_instance_valid(mc.belt) \
-						and Economy.ore_of_belt(mc.belt.ore_type) != Economy.Ore.IRON:
+						and mo != Economy.Ore.IRON and not (mo < KEEP.size() and eco().ore[mo] < KEEP[mo]):
 					ContractBoard.cancel(mc)
 					_note("", "Moved the miners off %s: iron first" % mc.belt.def.name)
 					return true
@@ -358,6 +441,10 @@ func _mining_contracts() -> bool:
 		var ore := Economy.ore_of_belt(belt.ore_type)
 		if ore < KEEP.size() and eco().ore[ore] < KEEP[ore]:
 			score -= 8.0 if ore == Economy.Ore.IRON else 4.0
+		# Far more of it than it builds with: paying miners for ore the
+		# Factory does not take fast enough drains its credits.
+		elif ore < KEEP.size() and eco().ore[ore] > KEEP[ore] * OVERSTOCK:
+			score += 30.0
 		if score < best_score:
 			best_score = score
 			best = belt
@@ -412,17 +499,10 @@ func _captains_of(id: StringName) -> int:
 
 func _turrets() -> bool:
 	var war := _hostile()
-	var want := 0
-	if _minutes() > 9.0:
-		want = 2
-	if _minutes() > 25.0:
-		want = 4
-	if war:
-		want = 6
 	# Peacetime turrets wait for spare iron (outposts and the lab come first).
 	if not war and eco().ore[Economy.Ore.IRON] < 220:
 		return false
-	return _building(&"defense_turret", 0.0, want)
+	return _building(&"defense_turret", 0.0, turret_want(_minutes(), war))
 
 
 ## The Science Lab, researchers, and the next tech of [constant TECH_ORDER].
@@ -434,10 +514,19 @@ func _science() -> bool:
 	var res := research()
 	if res.lab() == null:
 		return false
+	var goal := _saving_for()
+	return science_step(res, spare(), _minutes(), goal != null and goal.id == &"explorer_outpost", func(text: String) -> void: _note("", text))
+
+
+## Researchers and funding at a lab that stands ([param spare]: credits over
+## the reserve; [param saving_explorer]: no new funding while it saves for
+## the Explorer Outpost, tech costs ore too). [param note] gets the intel
+## line. True when it acted. Also used as data (RivalPlan).
+static func science_step(res: CorpResearch, spare: int, minutes: float, saving_explorer: bool, note: Callable) -> bool:
 	# Researchers turn work outside their field down: hire for the field the
 	# next project needs, one extra when nobody on staff would take it.
-	var need := _research_need(res)
-	var cap := (1 if _minutes() < 20.0 else 2) + (1 if need >= 0 and not res.researchers.is_empty() else 0)
+	var need := research_need(res)
+	var cap := (1 if minutes < 20.0 else 2) + (1 if need >= 0 and not res.researchers.is_empty() else 0)
 	if res.researchers.size() < mini(cap, CorpResearch.MAX_RESEARCHERS) and not res.applicants.is_empty():
 		var a: Researcher = null
 		for x in res.applicants:
@@ -445,29 +534,52 @@ func _science() -> bool:
 			var a_fits := a != null and (need < 0 or int(a.field) == need)
 			if a == null or (fits and not a_fits) or (fits == a_fits and x.skill > a.skill):
 				a = x
-		if (need < 0 or int(a.field) == need or res.researchers.is_empty()) and spare() >= a.hire_cost + 300 and res.hire(a):
-			_note("", "Hired researcher %s (%s)" % [a.researcher_name, a.field_name()])
+		if (need < 0 or int(a.field) == need or res.researchers.is_empty()) and spare >= a.hire_cost + 300 and res.hire(a):
+			note.call("Hired researcher %s (%s)" % [a.researcher_name, a.field_name()])
 			return true
-	# No new funding while it saves for the Explorer Outpost (tech costs ore too).
-	var goal := _saving_for()
-	if goal and goal.id == &"explorer_outpost":
+	if saving_explorer:
 		return false
 	if res.projects.size() >= maxi(res.researchers.size(), 1):
 		return false
 	for id in TECH_ORDER:
 		var t := res.catalog().find(id)
-		if t == null or not res.fund_problem(t).is_empty() or not _someone_takes(res, t):
+		if t == null or not res.fund_problem(t).is_empty() or not someone_takes(res, t):
 			continue
-		if spare() < t.cost_credits + 300:
+		if spare < t.cost_credits + 300:
 			return false
 		if res.fund(t):
-			_note("", "Funded research: %s" % t.display_name)
+			note.call("Funded research: %s" % t.display_name)
 			return true
 	return false
 
 
+## Credits the next research step needs (0 when none is waiting): a second
+## researcher's hire while the lab has fewer than two, else the first
+## fundable tech of [constant TECH_ORDER] someone idle would take while
+## fewer projects run than researchers. Includes the 300 cr margin
+## [method science_step] keeps.
+static func research_cost(res: CorpResearch, minutes: float) -> int:
+	if minutes < 7.0:
+		return 0
+	if not res.has_lab():
+		return 0
+	if res.researchers.size() < 2 and not res.applicants.is_empty():
+		var cheapest := 1 << 30
+		for a in res.applicants:
+			cheapest = mini(cheapest, a.hire_cost)
+		return cheapest + 300
+	if res.projects.size() >= maxi(res.researchers.size(), 1):
+		return 0
+	for id in TECH_ORDER:
+		var t := res.catalog().find(id)
+		if t == null or res.is_done(id) or res.projects.has(id) or not res.missing_prereqs(t).is_empty() or not someone_takes(res, t):
+			continue
+		return t.cost_credits + 300
+	return 0
+
+
 ## True when an idle researcher would take [param t] (or nobody is hired yet).
-func _someone_takes(res: CorpResearch, t: TechDef) -> bool:
+static func someone_takes(res: CorpResearch, t: TechDef) -> bool:
 	if res.researchers.is_empty():
 		return true
 	for r in res.researchers:
@@ -479,7 +591,7 @@ func _someone_takes(res: CorpResearch, t: TechDef) -> bool:
 ## Field (TechDef.Field) the research needs a researcher for: a funded
 ## project every researcher turned down, else the first fundable tech of
 ## [constant TECH_ORDER] no researcher would take; -1 when none.
-func _research_need(res: CorpResearch) -> int:
+static func research_need(res: CorpResearch) -> int:
 	for id: StringName in res.projects:
 		if res.researcher_on(id) == null and not res.refusal_of(id).is_empty():
 			var ft := res.catalog().find(id)
@@ -557,7 +669,7 @@ func _forward_station() -> bool:
 	var def := b.def_by_id(ForwardStations.BUILD_ID)
 	if def == null or not b.limit_reason(def).is_empty():
 		return false
-	if _pick_target().is_empty() or b.count_of(def) > 0 or spare() < def.cost_credits:
+	if pick_target(get_tree(), _cid()).is_empty() or b.count_of(def) > 0 or spare() < def.cost_credits:
 		return false
 	var need := def.cost_ore()
 	if eco().ore[Economy.Ore.IRON] < need[Economy.Ore.IRON] or eco().ore[Economy.Ore.TITANIUM] < need[Economy.Ore.TITANIUM]:
@@ -574,7 +686,7 @@ func _dispatch() -> void:
 		var ms := n as MobileStation
 		if ms == null or ms.dead or ms.corp != _cid() or ms.state != MobileStation.State.PARKED:
 			continue
-		var t := _pick_target()
+		var t := pick_target(get_tree(), _cid())
 		if t.is_empty():
 			return
 		var site := RivalCorp.hq_site(StringName(t["id"]))
@@ -587,15 +699,15 @@ func _dispatch() -> void:
 ## The best charted system for a forward station: between the two
 ## charters, danger at most ForwardStations.MAX_DANGER, no station, nobody
 ## headed there, with clusters. {} when none.
-func _pick_target() -> Dictionary:
-	var rc := RivalCorp.of(get_tree())
+static func pick_target(tree: SceneTree, cid: StringName) -> Dictionary:
+	var rc := RivalCorp.of(tree)
 	var net := Sector.network
 	if rc == null or net == null:
 		return {}
-	var mine := Corps.home_of(_cid())
+	var mine := Corps.home_of(cid)
 	var best := {}
 	var best_s := INF
-	for id in rc.charted(_cid()):
+	for id in rc.charted(cid):
 		if not Corps.corp_at_home(id).is_empty():
 			continue
 		var e := net.entry(id)
@@ -603,7 +715,7 @@ func _pick_target() -> Dictionary:
 		var def := Sector.system_def(id)
 		if e == null or st == null or def == null or not st.station.is_empty() or e.danger > ForwardStations.MAX_DANGER or def.belts.is_empty():
 			continue
-		if MobileStation.headed_to(get_tree(), id):
+		if MobileStation.headed_to(tree, id):
 			continue
 		var from_me := net.path(mine, id).size() - 1
 		var from_them := net.path(ClusterNetwork.HOME_ID, id).size() - 1

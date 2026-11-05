@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | done, uncommitted (gimbal model shipped; work folder still to delete) |
+| **Status** | done |
 | **Branch** | main (field effect committed in db35437; model change uncommitted) |
 | **Updated** | 2026-11-04 |
 | **Scope** | Rebuild the Shield Generator model in the worn-industrial style of the redesigned turret / merc outpost / mining outpost, and make it feel like a force field (in-game animated field orb). |
@@ -25,7 +25,7 @@ User ask: "redesign the Shield Generator so it matches the new designs of the re
 - `tools/shield_preview.gd` (default model now the repo glb; `--close`, `--shot-after=<s>`), `tools/shield_preview.gd.uid` (new)
 - `ongoing-implementations/shield-generator-redesign.md` (this doc)
 
-**Committed in db35437:** `scripts/buildings/shield_field_core.gd`, `shaders/shield_field_core.gdshader`, `shaders/shield_field_ring.gdshader`, `scripts/buildings/shield_generator.gd`, `tools/shield_preview.tscn`, the work folder `ongoing-implementations/shield-generator-redesign/` (variant scripts; delete it).
+**Committed in db35437:** `scripts/buildings/shield_field_core.gd`, `shaders/shield_field_core.gdshader`, `shaders/shield_field_ring.gdshader`, `scripts/buildings/shield_generator.gd`, `tools/shield_preview.tscn`, the work folder `ongoing-implementations/shield-generator-redesign/` (variant scripts; deleted from the tree since).
 
 **Not this feature** (dirty in the tree from other work): `scripts/ai/mercenary_*`, `scripts/research/*`, `scripts/ui/research_*`, `scripts/ui/science_lab_panel.gd`, `scripts/ui/tutorial_card.gd`, `scripts/rival/rival_manager.gd`, `scenes/system.tscn`, `scripts/space_dust.gd*`, `shaders/space_dust.gdshader*`.
 
@@ -47,8 +47,7 @@ User ask: "redesign the Shield Generator so it matches the new designs of the re
 
 ## Remaining
 
-1. **Delete the work folder** `ongoing-implementations/shield-generator-redesign/` (user: the agent's delete was blocked). Its scripts are in git at db35437; `out/` is ignored, 73 MB.
-2. Commit (user), then delete this doc and its README row.
+1. Commit (user), then delete this doc and its README row. The work folder `ongoing-implementations/shield-generator-redesign/` is deleted (2026-11-04); its concept scripts show as deleted in git and stay in db35437.
 
 ## Open questions
 

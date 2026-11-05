@@ -17,6 +17,13 @@ const GROUP := "surface_mode"
 const LAYER := 11
 const DIST := Vector2(90.0, 2600.0)
 const PITCH := deg_to_rad(52.0)
+## Pitch at the closest zoom: the camera levels out as it comes in, so the
+## horizon and the sky (star, parent planet) show up close to the ground.
+const PITCH_LOW := deg_to_rad(20.0)
+## Zoom distance from which the full [constant PITCH] holds, m.
+const LEVEL_FROM := 900.0
+## Real seconds of the fade in from black on entering and leaving.
+const FADE := 0.45
 
 var outpost: OutpostState
 var world: SurfaceWorld
@@ -86,7 +93,31 @@ func _ready() -> void:
 	if o:
 		o.live = outpost
 	_apply_camera()
+	fade_in(get_tree())
 	EventLog.post("Down on the surface of %s" % outpost.planet, EventLog.Kind.INFO)
+
+
+## A black cover over everything that fades out over [constant FADE] real
+## seconds: the cut into or out of planet mode reads as a fade. It never
+## takes input and runs while the game is paused.
+static func fade_in(tree: SceneTree) -> void:
+	if tree == null:
+		return
+	var layer := CanvasLayer.new()
+	layer.name = "SurfaceFade"
+	layer.layer = 100
+	layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	var rect := ColorRect.new()
+	rect.color = Color(0.0, 0.0, 0.0, 1.0)
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(rect)
+	var host: Node = ViewManager.of(tree)
+	(host if host else tree.root).add_child(layer)
+	var tw := layer.create_tween()
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_property(rect, "color:a", 0.0, FADE).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	tw.tween_callback(layer.queue_free)
 
 
 func _on_view_changed(_w: SystemWorld) -> void:
@@ -106,6 +137,7 @@ func leave() -> void:
 		for kind: String in left:
 			o.resolve_attack(outpost, float(left[kind]), kind, "the %s still on the ground" % kind)
 	_set_station_view(true)
+	fade_in(get_tree())
 	queue_free()
 
 
@@ -159,8 +191,15 @@ func _apply_camera() -> void:
 	if world == null or world.camera == null:
 		return
 	var target := world.deck_at(_pivot.x, _pivot.y)
-	var off := Vector3(sin(_yaw) * cos(PITCH), sin(PITCH), cos(_yaw) * cos(PITCH)) * _dist
-	world.camera.global_position = target + off
+	var pitch := lerpf(PITCH_LOW, PITCH, smoothstep(DIST.x, LEVEL_FROM, _dist))
+	var off := Vector3(sin(_yaw) * cos(pitch), sin(pitch), cos(_yaw) * cos(pitch)) * _dist
+	var pos := target + off
+	# Low and close, a hill behind the pivot could swallow the camera.
+	var ground := world.terrain.height(pos.x, pos.z)
+	if world.terrain.has_liquid():
+		ground = maxf(ground, SurfaceTerrain.LIQUID_LEVEL)
+	pos.y = maxf(pos.y, ground + 15.0)
+	world.camera.global_position = pos
 	world.camera.look_at(target, Vector3.UP)
 
 

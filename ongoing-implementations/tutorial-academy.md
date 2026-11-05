@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | in progress (built and tested; voice lines 11 of 37) |
+| **Status** | built; all 37 voice lines done, tutorial test passes; new lines want a listen |
 | **Branch** | main (uncommitted) |
-| **Updated** | 2026-11-04 |
+| **Updated** | 2026-11-05 |
 | **Scope** | Main menu Tutorial: a guided game (ACADEMY, 10 chapters, 35 steps) told as a story by SOLA, the station AI, with ElevenLabs voice lines, replay button and its own music. |
 
 ## Files
@@ -45,15 +45,17 @@
 
 **Station zoom.** Station step calls `show_station()`: focuses the home station, zooming in only if the camera is farther out than the station's framing. `scripts/ui/tutorial.gd`
 
-**Voice.** `_voice` AudioStreamPlayer on bus Voice plays `voice/tutorial/<voice_key()>.mp3` when a step opens; missing file is silent. Speaker toggle saved as [tutorial] voice in `user://settings.cfg` (`voice_on` / `set_voice_on`). Replay button shows only when voice is on and the step has a line, and replays it. Lines done: welcome, camera, time, station, build_mining, hire_miner, post_mining, sell_ore, merc, zone, turret. Recipe: CLAUDE.md "## Voice (SOLA)".
+**Voice.** `_voice` AudioStreamPlayer on bus Voice plays `voice/tutorial/<voice_key()>.mp3` when a step opens; missing file is silent. Speaker toggle saved as [tutorial] voice in `user://settings.cfg` (`voice_on` / `set_voice_on`). Replay button shows only when voice is on and the step has a line, and replays it. All 37 lines done: every step id in `_text_for` plus done and done_quick, in `assets/audio/voice/tutorial/<id>.mp3` (+ `.import`). Seed 33 for all after the first six, except rivals and hire_explorer (seed 41, the seed 33 takes drifted darker). Recipe: CLAUDE.md "## Voice (SOLA)".
 
 **Music.** `AudioDirector` fades `tutorial_music.mp3` in (-8 dB, Music bus) while ACADEMY runs, out on quit; Music ducks under Voice (compressor threshold -28, ratio 2.5, sidechain Voice). `scripts/audio_director.gd`, `default_bus_layout.tres`
 
-**Tests.** `Godot --headless --path . res://tools/tutorial_test.tscn`: 40 TUT ok, 0 FAIL (chapters, jumps, grants, raid gate, save round trip, quit restores raids, music and ducking, voice and replay, station zoom, time step pulse).
+**Tests.** `Godot --headless --path . res://tools/tutorial_test.tscn`: 40 TUT ok, 0 FAIL on 2026-11-04; on 2026-11-05 all ok again after the camera wait fix (Gotchas) (chapters, jumps, grants, raid gate, save round trip, quit restores raids, music and ducking, voice and replay, station zoom, time step pulse).
 
 ## Gotchas
 
-- **ElevenLabs sometimes drifts to another timbre on one take.** First time.mp3 came out deeper; user heard it at once. Every line after the first six uses `"seed": 33`; check new takes with the voiceprint script (pitch + band energies vs accepted lines; accepted 0.74 to 3.58, the bad take 3.76) and by ear. Script was in the session scratchpad, not the repo.
+- **The tutorial test waits for the camera on real time, not frames** (`tools/tutorial_test.gd`, "station step zooms in", at most 3 real s). The camera eases on frame delta; once the sim got cheaper (rival worlds as data, 2026-11-05), 120 headless frames were too short and the check failed at 3,000+ m.
+
+- **ElevenLabs sometimes drifts to another timbre on one take, even with the same seed.** First time.mp3 came out deeper; user heard it at once. In the 2026-11-05 batch, seed 33 gave rivals and hire_explorer a darker, lower take (much less energy above 1 kHz); seed 41 fixed both. Check new takes by ear and with a voiceprint: decode with `afconvert -f WAVE -d LEI16@16000 -c 1` (no ffmpeg on this machine), then median pitch, band energies (80-300, 300-1k, 1k-3k, 3k-8k Hz), spectral centroid, level and chars per second, as an RMS z-score against the accepted lines. Accepted lines scored 0.68 to 1.79 leave-one-out; the two drifted takes 3.00 and 2.19, their remakes 1.03 and 0.47. Scripts live in the session scratchpad (numpy in a venv there), not the repo; the scores are not comparable with the older script's numbers.
 - **API key lacks `voices_read` and `speech_history_read`.** Cannot list voices or fetch history; use the voice id directly. Key at `~/.config/elevenlabs/api_key`, never print it.
 - **A pulse target on a non-build step opens the build bar.** That auto-completed the station step. `bar` is gated on `cur.has("build") or zone`. `scripts/ui/tutorial_card.gd`
 - **Tests must not touch user settings.** Backing up `settings.cfg` from the test is blocked; the test sets `Tutorial.write_settings = false`. `tools/tutorial_test.gd`
@@ -63,7 +65,7 @@
 
 ## Remaining
 
-- **Voice the other 26 lines**, one batch at a time when the user asks: raid, bounty, escort, salvage_yard, hire_salvager, lab, researcher, fund, tech_done, factory, outfitter, gear_sale, jump_nav, explorer_outpost, hire_explorer, explore, map, surface_ops, found_outpost, visit_surface, forward_ops, forward_build, forward_found, rivals, done, done_quick. Text from `_text_for` / `_done_text` story entry; update CLAUDE.md "Done so far".
+- **Listen to the 26 new lines** (made 2026-11-05, checked only by voiceprint). Closest to the edge: tech_done (1.57, slow and a bit dark), explore (1.42, dark), hire_salvager (1.37, low pitch), gear_sale (1.27, short so the numbers are noisy). Remade: rivals, hire_explorer (seed 41).
 - **Play test the academy by hand** end to end; only the headless test and screenshots have run.
 - **Not run since tutorial edits:** `tools/smoke.sh` (QUICK card path in a normal game).
 

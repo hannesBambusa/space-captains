@@ -21,10 +21,12 @@ extends Node
 ## [member debug_view_all] (or the --view-all command line argument)
 ## allows every system.
 ##
-## Pinned systems ([method pin], forward stations: [ForwardStations]) stay
-## live for good: never released, not dropped by [method dematerialise]
-## (unpin first); hidden like home while not viewed, simulating at the
-## same rate.
+## Pinned systems ([method pin], the player's forward stations:
+## [ForwardStations]; rival station worlds while they must run live:
+## [RivalWorlds]) stay live: never released, not dropped by
+## [method dematerialise] (unpin first); hidden like home while not viewed,
+## simulating at the same rate. [method unpin] lets a system go at once, or
+## once the grace time has passed since the view left it.
 
 signal view_changed(world: SystemWorld)
 
@@ -50,6 +52,8 @@ var forward: ForwardStations
 var rival: RivalCorp
 ## Planet outposts (their data sim and shared rules).
 var outposts: Outposts
+## Which rival station worlds run live, and the data sim of the others.
+var rival_worlds: RivalWorlds
 
 ## Remote hosts by id, and the real time each is dropped at (INF while viewed).
 var _hosts: Dictionary = {}
@@ -58,6 +62,8 @@ var _release_at: Dictionary = {}
 var _build_ms: Dictionary = {}
 ## Pinned system ids (value true).
 var _pinned: Dictionary = {}
+## Real time the view last left each remote system.
+var _left_at: Dictionary = {}
 var _busy := false
 var _real := 0.0
 var _fade: ColorRect
@@ -88,6 +94,9 @@ func _enter_tree() -> void:
 	outposts = Outposts.new()
 	outposts.name = "Outposts"
 	add_child(outposts)
+	rival_worlds = RivalWorlds.new()
+	rival_worlds.name = "RivalWorlds"
+	add_child(rival_worlds)
 
 
 func _ready() -> void:
@@ -207,6 +216,7 @@ func view_now(id: StringName) -> SystemWorld:
 	viewed = w
 	if is_instance_valid(old) and not old.is_home:
 		_release_at[old.system_id] = INF if is_pinned(old.system_id) else _real + GRACE_TIME
+		_left_at[old.system_id] = _real
 	if not w.is_home:
 		_release_at[id] = INF
 	_apply_shown()
@@ -269,12 +279,13 @@ func pin(id: StringName) -> SystemWorld:
 	return w
 
 
-## Back to the normal rule: released after the grace time out of view.
+## Back to the normal rule: released once out of view for the grace time
+## (at once when the view has not been there for that long).
 func unpin(id: StringName) -> void:
 	if not _pinned.erase(id):
 		return
 	if _hosts.has(id) and viewed_id() != id:
-		_release_at[id] = _real + GRACE_TIME
+		_release_at[id] = maxf(_real, float(_left_at.get(id, -INF)) + GRACE_TIME)
 
 
 func is_pinned(id: StringName) -> bool:

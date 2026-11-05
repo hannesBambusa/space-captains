@@ -25,6 +25,8 @@
 #   unless the scuttle destroys it and the rival is eliminated by minute 5.
 #   --expand (with --rival): the rival gets Forward operations and its charts
 #   at minute 1; fails unless it founds a forward station.
+#   --rival-live (with --rival): rival station worlds stay pinned live (the
+#   data sim for unviewed rival worlds off), for comparisons.
 set -u
 cd "$(dirname "$0")/.."
 GODOT="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
@@ -38,6 +40,7 @@ COLONY=""
 RIVAL=""
 WAR=""
 SURFACE=""
+LIVE=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--minutes) MINUTES="$2"; shift 2 ;;
@@ -50,6 +53,7 @@ while [ $# -gt 0 ]; do
 		--colony) COLONY="--colony"; shift ;;
 		--rival) RIVAL="--rival"; shift ;;
 		--rivals=*) RIVAL="$1"; shift ;;
+		--rival-live) LIVE="--rival-live"; shift ;;
 		--war) WAR="--war"; shift ;;
 		--eliminate) WAR="--eliminate"; shift ;;
 		--expand) WAR="--expand"; shift ;;
@@ -59,7 +63,7 @@ while [ $# -gt 0 ]; do
 		*) echo "unknown arg: $1" >&2; exit 2 ;;
 	esac
 done
-OUT="$("$GODOT" --headless --path . res://tools/smoke_test.tscn -- --minutes="$MINUTES" $MULTI $EXPLORE $LONG $FORWARD $ROUNDTRIP $COLONY $RIVAL $WAR $SURFACE 2>&1)"
+OUT="$("$GODOT" --headless --path . res://tools/smoke_test.tscn -- --minutes="$MINUTES" $MULTI $EXPLORE $LONG $FORWARD $ROUNDTRIP $COLONY $RIVAL $LIVE $WAR $SURFACE 2>&1)"
 CODE=$?
 echo "$OUT" | grep '^SMOKE'
 if echo "$OUT" | grep -q 'SCRIPT ERROR\|Parse Error'; then

@@ -95,6 +95,11 @@ static func _save_hired(s: Ship, d: Dictionary, contracts: Array[Contract]) -> v
 		var m := s.loadout.get_module(slot) if s.loadout else null
 		mods.append(m.id if m else &"")
 	d["modules"] = mods
+	var wear := []
+	for slot in SLOTS:
+		var m := s.loadout.get_module(slot) if s.loadout else null
+		wear.append(m.condition if m else 1.0)
+	d["wear"] = wear
 	var b := s.brain
 	var bd := SaveUtil.props(b, BRAIN_FIELDS)
 	bd["state"] = b.state
@@ -212,6 +217,11 @@ static func _create_hired(ctx: Node, d: Dictionary, refs: SaveRefs) -> Ship:
 	s.setup_ship(cap, def.hire_ship_path, home, int(d.get("slot", 0)))
 	var dropped: Array[ShipModule] = []
 	s.loadout = _loadout(Ship.ROLE_NAMES[s.role], d.get("modules", []), dropped)
+	var wear: Array = d.get("wear", [])
+	for i in mini(wear.size(), SLOTS.size()):
+		var wm := s.loadout.get_module(SLOTS[i])
+		if wm and wm.tier >= 1:
+			wm.condition = clampf(float(wear[i]), 0.01, 1.0)
 	for m in dropped:
 		cap.wallet += m.cost
 		cap.add_history("%s taken off (wrong slot), refunded %s cr" % [m.display_name, Fmt.amount(m.cost)])

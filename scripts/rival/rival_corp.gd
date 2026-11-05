@@ -7,8 +7,12 @@ extends Node
 ##
 ## Founding: on a new game each rival's headquarters goes into its home
 ## system (Corps.home_of): a station site with "corp" and "hq"
-## (RemoteSystemState.station), pinned live for good. Its colony is run by
-## the [RivalManager] in that world.
+## (RemoteSystemState.station), built live once. Its colony is run by the
+## [RivalManager] in that world while it is live, and by the data sim
+## ([RivalData], [RivalPlan]) while it is not ([RivalWorlds] decides). This
+## node runs every rival either way: what it needs from a station world
+## that is data it reads from the saved world (strength, its explorer), and
+## a war strike asks for its station worlds live first.
 ##
 ## Discovery: a rival charts the network outward from its home, one system
 ## per [method scout_time] while its Explorer Outpost has an explorer (an
@@ -143,7 +147,9 @@ func _found_hqs() -> void:
 			site["founded_at"] = 0.0
 			st.station = site
 			fresh = true
-		if not vm.is_pinned(id):
+		# Built live once (new game, or a site without a saved world); then
+		# RivalWorlds lets it go data when nothing needs it live.
+		if not vm.is_live(id) and st.world.is_empty():
 			vm.pin(id)
 	if fresh and SimClock.time < 5.0:
 		var names: PackedStringArray = []
@@ -281,7 +287,9 @@ func _scout_step(r: Corp, dt: float) -> void:
 
 func _has_explorer(rid: StringName) -> bool:
 	var w := Corps.hq_world(get_tree(), rid)
-	if w == null or w.buildings == null:
+	if w == null:
+		return RivalData.has_explorer(Sector.state(Corps.home_of(rid)))
+	if w.buildings == null:
 		return false
 	for b in w.buildings.buildings:
 		if is_instance_valid(b) and b.def.id == &"explorer_outpost" and b.is_active() and not b.captains.is_empty():
@@ -340,9 +348,14 @@ func _home_name(rid: StringName) -> String:
 # --- Strength -------------------------------------------------------------------
 
 ## Fighting strength of [param corp_id]: its mercenaries' power, turrets,
-## shields and stations (for the boardroom and the Rival panel).
+## shields and stations (for the boardroom and the Rival panel); its
+## station worlds that are data from their saved world (RivalData.strength).
 static func strength(tree: SceneTree, corp_id: StringName) -> float:
 	var p := 0.0
+	var vm := ViewManager.of(tree)
+	for id in WarStrikes.station_systems(corp_id):
+		if id != ClusterNetwork.HOME_ID and vm and not vm.is_live(id):
+			p += RivalData.strength(Sector.state(id))
 	for w in SystemWorld.all(tree):
 		if not w.has_station or w.corp_id != corp_id:
 			continue
@@ -838,7 +851,7 @@ func _poach(r: Corp, other: StringName) -> bool:
 
 func _strike_step(r: Corp, other: StringName) -> void:
 	var t := r.mind.tie(other)
-	if not Corps.corps_at_war(r.id, other) or not t.i_know_them:
+	if not Corps.corps_at_war(r.id, other) or not (t.i_know_them or _knows_a_station(r, other)):
 		t.strike_at = -1.0
 		return
 	var n := 2 + mini(floori(SimClock.time / 1200.0), 4)
@@ -846,6 +859,10 @@ func _strike_step(r: Corp, other: StringName) -> void:
 		if SimClock.time - t.last_strike < _diff(STRIKE_TIMES):
 			return
 		if WarStrikes.volunteers(get_tree(), r.id, n).size() < 2:
+			# Its mercenaries may be data at a station world: build it first.
+			var rw := RivalWorlds.of(get_tree())
+			if rw:
+				rw.request_corp_if_data(r.id, STRIKE_WARNING + 60.0, "a war strike is forming", 2)
 			return
 		t.strike_at = SimClock.time + STRIKE_WARNING
 		if other == P:
@@ -857,9 +874,47 @@ func _strike_step(r: Corp, other: StringName) -> void:
 		return
 	t.strike_at = -1.0
 	t.last_strike = SimClock.time
-	var res := WarStrikes.launch(get_tree(), r.id, Corps.home_of(other), 120, n)
+	var target := _strike_target(r, other)
+	if target.is_empty():
+		return
+	var res := WarStrikes.launch(get_tree(), r.id, target, 120, n)
 	r.mind.stats["strikes"] = int(r.mind.stats.get("strikes", 0)) + 1
-	r.mind.note("War strike on %s: %d ships sent" % [_name_for(r, other), (res["sent"] as Array).size()])
+	var where := "" if target == Corps.home_of(other) else " (its forward station in %s)" % _system_name(target)
+	r.mind.note("War strike on %s%s: %d ships sent" % [_name_for(r, other), where, (res["sent"] as Array).size()])
+
+
+## Where [param r] strikes [param other]: a forward station of theirs it has
+## charted (an outlying station is weaker than a home: picked 60% of the
+## time when there is one, the nearest to its own home), else their home.
+## "" when it knows none of them.
+func _strike_target(r: Corp, other: StringName) -> StringName:
+	var known := charted(r.id)
+	var home := Corps.home_of(other)
+	var forward: Array[StringName] = []
+	for id in WarStrikes.station_systems(other):
+		if id != home and known.has(id):
+			forward.append(id)
+	var my_home := Corps.home_of(r.id)
+	if not forward.is_empty() and (_rng.randf() < 0.6 or not r.mind.tie(other).i_know_them):
+		forward.sort_custom(func(a: StringName, b: StringName) -> bool:
+			return Sector.hops_between(my_home, a).size() < Sector.hops_between(my_home, b).size())
+		return forward[0]
+	return home if r.mind.tie(other).i_know_them else &""
+
+
+## [param r] has charted a forward station of [param other] (it can strike
+## that one without knowing their home).
+func _knows_a_station(r: Corp, other: StringName) -> bool:
+	var known := charted(r.id)
+	for id in WarStrikes.station_systems(other):
+		if known.has(id):
+			return true
+	return false
+
+
+func _system_name(id: StringName) -> String:
+	var def := Sector.system_def(id)
+	return def.system_name if def else String(id)
 
 
 # --- Kills and losses -------------------------------------------------------------------

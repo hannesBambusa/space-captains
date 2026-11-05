@@ -93,6 +93,13 @@ func rival(id: StringName) -> Corp:
 	return null
 
 
+## Map colour of [param id]'s things: a rival's own colour ([member Corp.color]),
+## [param fallback] for the player and for ownerless things.
+func color_of(id: StringName, fallback: Color) -> Color:
+	var r := rival(id) if not id.is_empty() else null
+	return r.color if r else fallback
+
+
 ## Ids of the rivals in play (eliminated ones too).
 func rival_ids() -> Array[StringName]:
 	var out: Array[StringName] = []

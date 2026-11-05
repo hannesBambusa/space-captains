@@ -99,6 +99,15 @@ const GOAL_HEIGHT_ENTER := 18.0
 const GOAL_HEIGHT_EXIT := 45.0
 ## A goal this far above or below the plane picks the belt lane on its side, metres.
 const LANE_BASE_SIDE := 100.0
+## Final approach to a goal inside an asteroid cluster (a miner's rock):
+## the height may differ from the goal's by at most the flat distance left
+## times tan of this, so the ship glides down (or up) onto it while still
+## flying in, instead of stopping over it and sinking belly first.
+const GLIDE_ANGLE_DEG := 25.0
+## Climbing (or diving) out of a cluster's rock layer: horizontal drift
+## toward the goal, as a share of the climb rate, so the ship climbs out
+## nose first along a steep slope instead of straight up.
+const CLIMB_OUT_DRIFT := 0.5
 ## Visual and gun pitch toward a target while fighting: limit, rate (degrees, degrees/s).
 const AIM_PITCH_MAX_DEG := 35.0
 const AIM_PITCH_RATE_DEG := 120.0
@@ -287,6 +296,8 @@ func sim_step(dt: float) -> void:
 			repairing = false
 			RepairBay.end_session(self)
 		durability.shields = durability.max_shields
+	if not is_docked() and captain:
+		ModuleWear.fly(self, dt)
 	if transit:
 		# The transit flies the ship; true = it placed the ship itself (or
 		# the ship left the world through a portal).
@@ -465,6 +476,7 @@ func take_hit(amount: float, attacker: Node3D, _at: Vector3) -> void:
 	trip_was_hit = true
 	trip_lowest_hull = minf(trip_lowest_hull, durability.fraction())
 	damaged.emit(self, amount, attacker)
+	ModuleWear.use(self, ShipModule.Slot.DEFENSE, amount * ModuleWear.DAMAGE_S)
 	_on_damaged(amount, attacker)
 	if durability.is_dead():
 		destroy(attacker)
@@ -752,8 +764,46 @@ func cluster_side(belt: AsteroidCluster) -> float:
 
 
 ## Sets the mover's height for this step (world frame only, see the class
-## notes). Cheap: one disc test per cluster.
+## notes), then the glide onto a goal inside a cluster ([method _glide]).
 func _update_altitude(dt: float) -> void:
+	mover.steep = false
+	_cruise_height(dt)
+	mover.pace_height = mover.cruise_active and _fight_at != SimClock.time and cruise_free() and mover.warp_state == ShipMover.Warp.IDLE
+	_glide()
+
+
+## Final approach to a goal with a height (a miner's rock, the station's
+## approach point): the height target closes in on the goal's along
+## [constant GLIDE_ANGLE_DEG] as the flat distance shrinks, so the descent
+## (or climb) happens while flying in, not hovering over it. For a goal
+## inside a cluster it overrides the lane rule (and the straight climb out
+## of the rocks) on that slope; for any other goal it never pulls a ship
+## over a cluster down into the rocks. Not in fights, hops or formations.
+func _glide() -> void:
+	if not mover.cruise_active or _at_goal_height or mover.warp_state != ShipMover.Warp.IDLE:
+		return
+	if _fight_at == SimClock.time or not cruise_free():
+		return
+	var parent := get_parent() as Node3D
+	var goal := parent.to_global(mover.goal_pos) if parent else mover.goal_pos
+	var in_band := SpaceNav.rock_band_at(self, goal) != null
+	if not in_band and SpaceNav.rock_band_at(self, global_position) != null:
+		return
+	var left := maxf(SpaceNav.flat_distance(global_position, goal) - GOAL_HEIGHT_ENTER, 0.0)
+	var reach := left * tan(deg_to_rad(GLIDE_ANGLE_DEG))
+	var gy := mover.goal_pos.y
+	var off := mover.cruise_y - gy
+	if absf(off) <= reach:
+		return
+	mover.cruise_y = gy + clampf(off, -reach, reach)
+	mover.steep = true
+	if in_band:
+		mover.hold_climb = false
+
+
+## The height to fly at this step, before the glide (see [method
+## _update_altitude]). Cheap: one disc test per cluster.
+func _cruise_height(dt: float) -> void:
 	mover.cruise_active = mover.avoid_enabled
 	mover.hold_climb = false
 	mover.cruise_vy = 0.0
@@ -802,6 +852,10 @@ func _update_altitude(dt: float) -> void:
 			var end := mover.warp_end
 			var rem := SpaceNav.flat_distance(end, goal)
 			var exit_y := _leg.height(rem, base, goal) if _leg.active else base
+			if not fighting:
+				# Come out of the hop on the glide slope, not above or below it.
+				var g_reach := maxf(rem - GOAL_HEIGHT_ENTER, 0.0) * tan(deg_to_rad(GLIDE_ANGLE_DEG))
+				exit_y = goal.y + clampf(exit_y - goal.y, -g_reach, g_reach)
 			mover.warp_exit_y = exit_y
 			mover.cruise_y = exit_y
 		return
@@ -815,6 +869,9 @@ func _update_altitude(dt: float) -> void:
 	if _at_goal_height:
 		mover.cruise_y = mover.goal_y
 		mover.y_peak = NAN
+		# Ride a climbing goal (a station on an inclined orbit) without lag.
+		if _goal_vy_at == SimClock.time:
+			mover.cruise_vy = _goal_vy
 		return
 	var cruise := base
 	if _leg.active:
@@ -857,6 +914,10 @@ func _update_altitude(dt: float) -> void:
 			# Low among the rocks: climb (or dive) straight out with them.
 			mover.hold_climb = true
 			var v := SpaceNav.belt_point_velocity(band, pos)
+			# Drift toward the goal while climbing out, nose first.
+			var to_goal := Vector3(goal.x - pos.x, 0.0, goal.z - pos.z)
+			if to_goal.length() > 1.0:
+				v += to_goal.normalized() * absf(mover.climb_rate) * CLIMB_OUT_DRIFT
 			mover.hold_velocity = parent.global_basis.inverse() * (v - SpaceNav.world_velocity(parent)) if parent else v
 	# The lane altitude wins, unless the arc is already higher on that side.
 	mover.cruise_y = cruise if signf(cruise) == side and absf(cruise) > need else side * need

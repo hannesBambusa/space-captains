@@ -26,6 +26,7 @@ pack_size = 2
 raid_weight = 0.5
 raid_size = Vector2i(2, 2)
 raid_after = 1500.0
+wreck_loot = 70
 den_hull = 2400.0
 den_shields = 700.0
 den_shield_regen = 10.0

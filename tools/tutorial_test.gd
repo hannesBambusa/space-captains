@@ -74,7 +74,10 @@ func _run() -> void:
 	_ok(t.current()["id"] == &"station", "time -> station")
 	var cam := t.hud.camera
 	var st := t.hud.solar_system.home_station
-	for i in 120:
+	# The camera eases in on real frame time: wait for it (at most 3 real s),
+	# not a frame count (headless frames got faster as the sim got cheaper).
+	var t_end := Time.get_ticks_msec() + 3000
+	while cam.get_distance() > 700.0 and Time.get_ticks_msec() < t_end:
 		await tree.process_frame
 	print("TUT station view: %.0f m from the station, camera distance %.0f" % [cam.get_pivot().distance_to(st.global_position) if cam.has_method(&"get_pivot") else -1.0, cam.get_distance()])
 	_ok(cam.get_distance() <= 700.0, "station step zooms in (%.0f)" % cam.get_distance())

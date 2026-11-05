@@ -32,6 +32,8 @@ var _reply: Label
 var _intel: VBoxContainer
 var _buttons: Dictionary = {}
 var _strike: Button
+## Strike target: system ids as item metadata.
+var _target: OptionButton
 var _poach: Button
 var _timer := 0.0
 
@@ -83,6 +85,11 @@ func _ready() -> void:
 	_strike.custom_minimum_size.y = 26.0
 	_strike.pressed.connect(_launch_strike)
 	row2.add_child(_strike)
+	# Where the strike goes: their home or a forward station you have found.
+	_target = OptionButton.new()
+	_target.custom_minimum_size.y = 26.0
+	_target.tooltip_text = "Strike target: their home, or a forward station of theirs in a system you have surveyed"
+	row2.add_child(_target)
 	_poach = UIUtil.button("Recruit a rival captain (400 cr)", &"ChipButton")
 	_poach.custom_minimum_size.y = 26.0
 	_poach.pressed.connect(_recruit)
@@ -229,10 +236,13 @@ func _refresh() -> void:
 		var why := rc.propose_problem(rid, k) if rc else "No rival"
 		b.disabled = not why.is_empty() or m.eliminated
 		b.tooltip_text = why if not why.is_empty() else _hint(k)
-	var war_ok := war and t.they_know_me and not m.eliminated
+	var targets := strike_targets(rid, t.they_know_me)
+	_fill_targets(targets)
+	var war_ok := war and not targets.is_empty() and not m.eliminated
 	_strike.disabled = not war_ok
-	_strike.tooltip_text = "Your idle mercenaries are offered %d cr each to fly to %s's home and hit its station (up to %d volunteer)" % [STRIKE_BONUS, r.display_name, STRIKE_SHIPS] \
-			if war_ok else "Only at war, and only once you know where their home is"
+	_target.disabled = not war_ok
+	_strike.tooltip_text = "Your idle mercenaries are offered %d cr each to fly to the chosen %s station and hit it (up to %d volunteer)" % [STRIKE_BONUS, r.display_name, STRIKE_SHIPS] \
+			if war_ok else "Only at war, and only once you know where one of their stations is (their home, or a forward station in a system you surveyed)"
 	_poach.disabled = not t.contact or m.eliminated or Economy.credits < 400
 	_poach.tooltip_text = "Offer the most disloyal rival captain 400 cr to join you (needs a free berth of its role)"
 	for c in _intel.get_children():
@@ -274,8 +284,45 @@ func _propose(kind: String) -> void:
 	_refresh()
 
 
+## Station systems of rival [param id] the player can strike: its home once
+## located ([param home_known]), its forward stations in systems the player
+## has surveyed (any part revealed).
+static func strike_targets(id: StringName, home_known: bool) -> Array[StringName]:
+	var out: Array[StringName] = []
+	var home := Corps.home_of(id)
+	for sid in WarStrikes.station_systems(id):
+		if sid == home:
+			if home_known:
+				out.append(sid)
+		elif Sector.state(sid) and not Sector.state(sid).revealed.is_empty():
+			out.append(sid)
+	return out
+
+
+## Refills the target list when it changed, keeping the chosen system.
+func _fill_targets(targets: Array[StringName]) -> void:
+	var have: Array[StringName] = []
+	for i in _target.item_count:
+		have.append(StringName(_target.get_item_metadata(i)))
+	if have == targets:
+		return
+	var keep := StringName(_target.get_item_metadata(_target.selected)) if _target.selected >= 0 else &""
+	_target.clear()
+	var home := Corps.home_of(rid)
+	for sid in targets:
+		var def := Sector.system_def(sid)
+		var nm := def.system_name if def else String(sid)
+		_target.add_item(("%s (home)" % nm) if sid == home else ("%s (forward)" % nm))
+		_target.set_item_metadata(_target.item_count - 1, String(sid))
+		if sid == keep:
+			_target.select(_target.item_count - 1)
+
+
 func _launch_strike() -> void:
-	var res := WarStrikes.launch(get_tree(), Corps.PLAYER, Corps.home_of(rid), STRIKE_BONUS, STRIKE_SHIPS)
+	if _target.selected < 0:
+		return
+	var target := StringName(_target.get_item_metadata(_target.selected))
+	var res := WarStrikes.launch(get_tree(), Corps.PLAYER, target, STRIKE_BONUS, STRIKE_SHIPS)
 	var sent: Array = res["sent"]
 	var refused: PackedStringArray = res["refused"]
 	_reply.text = "%d mercenar%s on the way%s" % [sent.size(), "y" if sent.size() == 1 else "ies", (". " + "; ".join(refused)) if not refused.is_empty() else ""] \

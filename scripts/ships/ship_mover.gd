@@ -89,7 +89,7 @@ var climb_angle_deg: float = 16.0
 var min_climb_rate: float = 14.0
 var max_climb_rate: float = 40.0
 var vertical_accel: float = 9.0
-var pitch_max_deg: float = 14.0
+var pitch_max_deg: float = 22.0
 ## Combat flying (attack runs, evasive dives; the owner sets [member agile]
 ## every step): steeper, faster climbs and dives, more nose pitch.
 var agile: bool = false
@@ -97,6 +97,42 @@ var agile_climb_angle_deg: float = 32.0
 var agile_max_climb_rate: float = 70.0
 var agile_vertical_accel: float = 24.0
 var agile_pitch_max_deg: float = 28.0
+## Final approach glide (the owner sets [member steep] every step, see
+## Ship._glide): climbs and dives up to this steep, like [member agile]
+## but without the combat rates.
+var steep: bool = false
+## Pace the final approach by the height left ([constant HEIGHT_PACE_MIN]),
+## set by the owner every step (off in fights, formations and hops).
+var pace_height: bool = false
+## The goal's own vertical speed (a station riding an inclined orbit), m/s:
+## not matched as velocity, but the nose pitch and the approach pacing
+## count climbs relative to it.
+var goal_vy: float = 0.0
+const STEEP_CLIMB_DEG := 27.0
+## Final approach: the flat approach speed is capped so the height left can
+## be lost (or gained) at the rate the height control allows at the
+## current speed ([method vertical_limit]) before arriving; the ship comes
+## in on a slope instead of arriving high and sinking straight down. Never
+## slower than [constant HEIGHT_PACE_MIN] m/s.
+const HEIGHT_PACE_MIN := 6.0
+const STEEP_PITCH_DEG := 28.0
+## Slow flight (horizontal speed relative to the goal under
+## [constant SLOW_PITCH_SPEED].y): the nose may follow a climb or dive up to
+## this steep, so a ship sinking onto its rock or climbing out of a belt
+## points where it goes instead of moving belly first.
+const SLOW_PITCH_MAX_DEG := 65.0
+## Relative horizontal speeds (m/s) over which the pitch limit eases from
+## [constant SLOW_PITCH_MAX_DEG] down to the cruise limit.
+const SLOW_PITCH_SPEED := Vector2(12.0, 60.0)
+## Vertical speeds (m/s) below which a slow ship keeps its nose level (no
+## nodding on small height corrections while hovering).
+const PITCH_DEADZONE := Vector2(2.0, 8.0)
+## A waypoint's facing ([member goal_face]) only takes over near it: within
+## the braking distance plus this margin (m, at least [constant
+## FACE_NEAR_MIN]), eased in over twice that; farther out the ship flies
+## nose first and turns as it slows in.
+const FACE_NEAR_MARGIN := 8.0
+const FACE_NEAR_MIN := 12.0
 
 ## Velocity in the parent frame, m/s.
 var velocity := Vector3.ZERO
@@ -179,6 +215,7 @@ func set_goal(pos: Vector3, vel: Vector3 = Vector3.ZERO, speed: float = -1.0, st
 	# Flight is flat; height follows through cruise_y / goal_y (an inclined
 	# orbit's slow rise or sink is not matched as velocity).
 	goal_vel = Vector3(vel.x, 0.0, vel.z)
+	goal_vy = vel.y
 	goal_speed = speed
 	goal_stop = stop
 	goal_face = face
@@ -298,6 +335,15 @@ func step(dt: float) -> void:
 			var brake := acceleration * 0.45
 			s = minf(limit, sqrt(2.0 * brake * maxf(d - goal_radius * 0.25, 0.0)))
 			s = minf(s, d * 1.1)
+			if cruise_active and pace_height and not agile:
+				# Do not arrive before the height is made up.
+				var dy_signed := goal_pos.y - pos.y
+				var dy := absf(dy_signed) - goal_radius
+				if dy > 0.0:
+					# Closing rate on the goal's height: a goal climbing away
+					# (a station on an inclined orbit) is caught up slower.
+					var vtop := maxf(vertical_limit(SpaceNav.flat_length(velocity)) - signf(dy_signed) * goal_vy, 5.0)
+					s = minf(s, maxf(maxf(d - goal_radius * 0.25, 0.0) * vtop / dy, HEIGHT_PACE_MIN))
 		desired += dir * s
 	desired.y = 0.0
 	if avoid_enabled and not hold_climb:
@@ -327,6 +373,17 @@ func step(dt: float) -> void:
 	_turn(dt, d)
 
 
+## Fastest climb or dive the height control allows at flat speed
+## [param hs], m/s: hovering the full rate, moving no steeper than the
+## climb angle ([member steep] and [member agile] raise it), never under
+## [member min_climb_rate].
+func vertical_limit(hs: float) -> float:
+	var top := agile_max_climb_rate if agile else max_climb_rate
+	var hover := lerpf(top, min_climb_rate, smoothstep(0.0, 40.0, hs))
+	var angle := agile_climb_angle_deg if agile else (maxf(climb_angle_deg, STEEP_CLIMB_DEG) if steep else climb_angle_deg)
+	return clampf(maxf(hs * tan(deg_to_rad(angle)), hover), min_climb_rate, top)
+
+
 ## New height after [param dt]. World frame: ease toward [member cruise_y]
 ## (speed-limited approach, so climbs start and end smoothly), no steeper
 ## than [member climb_angle_deg] once moving, and pitch the nose with it.
@@ -342,8 +399,7 @@ func _step_height(y: float, dt: float) -> float:
 		# the climb angle.
 		var top := agile_max_climb_rate if agile else max_climb_rate
 		var accel := agile_vertical_accel if agile else vertical_accel
-		var hover := lerpf(top, min_climb_rate, smoothstep(0.0, 40.0, hs))
-		var vmax := clampf(maxf(hs * tan(deg_to_rad(agile_climb_angle_deg if agile else climb_angle_deg)), hover), min_climb_rate, top)
+		var vmax := vertical_limit(hs)
 		var want := clampf(cruise_vy + signf(err) * minf(vmax, sqrt(1.6 * accel * absf(err))), -top * 1.25, top * 1.25)
 		# Holding a slot on a climbing lead: twice the vertical authority.
 		climb_rate = move_toward(climb_rate, want, accel * (2.0 if absf(cruise_vy) > 0.5 else 1.0) * dt)
@@ -351,9 +407,20 @@ func _step_height(y: float, dt: float) -> float:
 		if absf(cruise_y - y) < 0.05 and absf(climb_rate) < 0.3:
 			y = cruise_y
 			climb_rate = 0.0
-	var pitch_max := deg_to_rad(agile_pitch_max_deg if agile else pitch_max_deg)
-	var pitch_target := clampf(atan2(climb_rate, maxf(hs, 30.0)), -pitch_max, pitch_max)
-	pitch = lerpf(pitch, pitch_target, 1.0 - exp(-3.0 * dt))
+	# The nose follows the 3D path relative to what the ship is matching (a
+	# drifting rock, an orbiting station): slow and climbing or sinking, it
+	# may point steeply up or down; at speed the cruise limit holds.
+	var rel := velocity - goal_vel
+	var hs_rel := Vector2(rel.x, rel.z).length()
+	var base_max := deg_to_rad(agile_pitch_max_deg if agile else (maxf(pitch_max_deg, STEEP_PITCH_DEG) if steep else pitch_max_deg))
+	var pitch_max := lerpf(deg_to_rad(SLOW_PITCH_MAX_DEG), base_max, smoothstep(SLOW_PITCH_SPEED.x, SLOW_PITCH_SPEED.y, hs_rel))
+	# Riding with a goal that climbs (a station on an inclined orbit) is
+	# not a climb: only the vertical speed relative to it pitches the nose.
+	var vy_rel := climb_rate - (goal_vy if cruise_active else 0.0)
+	var pitch_target := clampf(atan2(vy_rel, maxf(hs_rel, 4.0)), -pitch_max, pitch_max)
+	if hs_rel < SLOW_PITCH_SPEED.y:
+		pitch_target *= lerpf(smoothstep(PITCH_DEADZONE.x, PITCH_DEADZONE.y, absf(vy_rel)), 1.0, smoothstep(SLOW_PITCH_SPEED.x, SLOW_PITCH_SPEED.y, hs_rel))
+	pitch = lerpf(pitch, pitch_target, 1.0 - exp(-2.5 * dt))
 	return y
 
 
@@ -363,21 +430,30 @@ func relative_speed() -> float:
 
 
 func _turn(dt: float, goal_dist: float) -> void:
+	# Face the motion relative to the target once close, so a ship matching
+	# an orbiting outpost's speed noses toward it instead of crabbing.
+	var blend := 1.0 - smoothstep(800.0, 3000.0, goal_dist)
+	var motion := velocity - goal_vel * blend
+	motion.y = 0.0
 	var face := goal_face
+	var want_yaw := NAN
 	if warp_state == Warp.SPOOL and warp_dir != Vector3.ZERO:
 		face = warp_dir
-	if face == Vector3.ZERO:
-		# Face the motion relative to the target once close, so a ship matching
-		# an orbiting outpost's speed noses toward it instead of crabbing.
-		var blend := 1.0 - smoothstep(800.0, 3000.0, goal_dist)
-		var fv := velocity - goal_vel * blend
-		fv.y = 0.0
-		if fv.length() > 3.0:
-			face = fv
+	elif face != Vector3.ZERO and motion.length() > 3.0:
+		# A waypoint's facing (lining up to back into a berth) takes over
+		# only near it: farther out the ship flies nose first, then turns
+		# as it slows in.
+		var spd := motion.length()
+		var near := maxf(spd * spd / (2.0 * acceleration * 0.45) + FACE_NEAR_MARGIN, FACE_NEAR_MIN)
+		var k := smoothstep(near, near * 2.0, goal_dist)
+		if k > 0.0:
+			want_yaw = lerp_angle(yaw_for(face), yaw_for(motion), k)
+	if face == Vector3.ZERO and motion.length() > 3.0:
+		face = motion
 	var turn := deg_to_rad(turn_rate_deg)
 	var target_rate := 0.0
-	if face != Vector3.ZERO:
-		var diff := angle_difference(yaw, yaw_for(face))
+	if face != Vector3.ZERO or not is_nan(want_yaw):
+		var diff := angle_difference(yaw, want_yaw if not is_nan(want_yaw) else yaw_for(face))
 		target_rate = clampf(diff * 2.5, -turn, turn)
 	_yaw_rate = lerpf(_yaw_rate, target_rate, 1.0 - exp(-6.0 * dt))
 	yaw = wrapf(yaw + _yaw_rate * dt, -PI, PI)

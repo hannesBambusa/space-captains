@@ -9,6 +9,8 @@ extends Node
 ## lets it make). Modules not researched yet (Research) are not offered,
 ## except a salvaged rare part in the warehouse. Without an Outfitter
 ## captains cannot buy modules at all.
+## Bought modules wear out with use (ModuleWear): a worn one is replaced
+## with the same tier or better, before anything else.
 ## A captain only buys what the ship needs as what it is
 ## (ShipLoadout.needs, the ship's own role): an explorer gets no drill and
 ## no guns. A module it has no use for is sold back on the next visit.
@@ -45,6 +47,8 @@ const SLOT_WEIGHTS := [
 ## Credits each personality keeps back (Bold, Cautious, Greedy, Lazy).
 const RESERVE: PackedInt32Array = [20, 60, 80, 30]
 const MAX_SALES_LISTED := 12
+## Score factor for a module that replaces a worn one (ModuleWear).
+const WORN_PRIORITY := 3.0
 
 @export var sale_share: float = 0.35
 
@@ -144,6 +148,9 @@ func choose_for(ship: Ship, in_stock_only: bool = false) -> ShipModule:
 			score *= 1.0 + 0.3 * float(m.tier)
 		if m.eject_bonus > 0.0:
 			score *= 1.25 if (cap.personality == Captain.Personality.CAUTIOUS or cap.has_trait(CaptainTraits.SURVIVOR)) else 0.6
+		# A part wearing out is replaced first.
+		if ModuleWear.is_worn(ship.loadout.get_module(m.slot)):
+			score *= WORN_PRIORITY
 		if score > best_score:
 			best_score = score
 			best = m

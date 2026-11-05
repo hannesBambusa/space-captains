@@ -407,6 +407,13 @@ func _station_site() -> Dictionary:
 func add_station(site: Dictionary) -> Orbiter:
 	var planet := String(site.get("planet", ""))
 	var host := find_child(planet.validate_node_name(), false, false) as PlanetBody
+	if host == null and not planets.is_empty():
+		# A save from an older generator version: the same seed made other
+		# planets. Keep the station (and everything at it) on the innermost
+		# planet that is not a gas giant, and remember the new host.
+		host = _fallback_host()
+		push_warning("SolarSystem: station planet '%s' not found, the station moves to '%s'" % [planet, host.def.name])
+		site["planet"] = host.def.name
 	if host == null:
 		push_warning("SolarSystem: station planet '%s' not found" % planet)
 		return null
@@ -458,6 +465,18 @@ func _make_orbit_material(px: float) -> ShaderMaterial:
 	m.set_shader_parameter("line_px", px)
 	m.set_shader_parameter("opacity", 0.0)
 	return m
+
+
+## The planet a station whose saved planet is gone moves to: the innermost
+## that is not a gas giant, else the innermost.
+func _fallback_host() -> PlanetBody:
+	var best: PlanetBody = null
+	for p in planets:
+		var rocky := p.def.type != PlanetDef.Type.GAS_GIANT
+		var best_rocky := best != null and best.def.type != PlanetDef.Type.GAS_GIANT
+		if best == null or (rocky and not best_rocky) or (rocky == best_rocky and p.def.orbit_radius < best.def.orbit_radius):
+			best = p
+	return best
 
 
 func _add_orbit_line(parent: Node3D, radius: float, mat: ShaderMaterial, color: Color, plane: Basis = Basis.IDENTITY) -> MeshInstance3D:

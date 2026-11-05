@@ -2,7 +2,7 @@ class_name ForwardStations
 extends Node
 ## The player's forward stations: remote systems with a station site
 ## (RemoteSystemState.station, SystemWorld.has_station). Child of the
-## [ViewManager] (made in its _enter_tree). Each one is pinned
+## [ViewManager] (made in its _enter_tree). Each of the player's is pinned
 ## (ViewManager.pin): live for good, hidden while not viewed, simulating
 ## at full rate. A new game has none; on a load the saved sites are pinned
 ## and built right after the home system is restored (deferred).
@@ -19,6 +19,9 @@ extends Node
 ## calls [method found]. [method free_slots]: what is left of
 ## [constant MAX_STATIONS] after the stations, the mobile ones and the
 ## ones under construction.
+##
+## A rival corp's sites are pinned when founded too; [RivalWorlds] lets
+## them go data once nothing needs them live.
 
 ## A station was founded in [param system_id] ([param world]: its live world).
 signal founded(system_id: StringName, world: SystemWorld)
@@ -228,12 +231,15 @@ static func site_problem(tree: SceneTree, system_id: StringName, planet: PlanetB
 	return ""
 
 
+## The player's saved sites. Rival sites are RivalWorlds' (live ones were
+## pinned by the load, GameSnapshot.apply_scene; data ones stay data).
 func _pin_saved() -> void:
 	var vm := get_parent() as ViewManager
 	if vm == null:
 		return
 	for id in ids(&""):
-		vm.pin(id)
+		if not Corps.is_rival(Corps.corp_of_system(id)):
+			vm.pin(id)
 
 
 static func _planet_def(def: SystemDef, planet_name: String) -> PlanetDef:

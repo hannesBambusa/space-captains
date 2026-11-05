@@ -9,7 +9,8 @@ extends RefCounted
 ##   marked lost: SaveManager.mark_lost);
 ## - a rival's headquarters: that rival is eliminated ([method eliminate]):
 ##   its forward stations go too, its captains sign on with the corp that
-##   destroyed it (the player when that corp has no berth for them). When
+##   destroyed it (the player when that corp has no berth for them); its
+##   station worlds that are data are built first (RivalWorlds). When
 ##   the last rival is gone the player wins ([EndScreen], Continue playing).
 
 const SCRAP := 900
@@ -82,6 +83,10 @@ static func eliminate(tree: SceneTree, rid: StringName, by: StringName = Corps.P
 	var r := Corps.rival(rid)
 	if r == null or r.mind.eliminated:
 		return
+	# Its station worlds that are data are built first: they go the same way.
+	var rw := RivalWorlds.of(tree)
+	if rw:
+		rw.materialise_corp(rid)
 	# Free agents: every captain of its stations, before they go.
 	var agents: Array[Captain] = []
 	for w in SystemWorld.all(tree):

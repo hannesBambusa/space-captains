@@ -19,9 +19,9 @@ ending a session. A stale doc is worse than no doc, because it is trusted.
 
 | Feature | Doc | Status | Branch |
 |---|---|---|---|
-| Rival corporation | [`rival-corporation.md`](rival-corporation.md) | Ready for review (M1: 1 to 3 rivals) | — |
-| Planet outposts | [`planet-outposts.md`](planet-outposts.md) | Built, needs play test | main |
-| Shield generator redesign | [`shield-generator-redesign.md`](shield-generator-redesign.md) | Done, uncommitted (gimbal shipped) | main |
-| Defense turret redesign | [`defense-turret-redesign.md`](defense-turret-redesign.md) | In progress (model exported, silhouette rework left) | main |
-| Merc outpost redesign | [`merc-outpost-redesign.md`](merc-outpost-redesign.md) | In progress (model exported, 3 look fixes left) | main |
-| Tutorial academy and SOLA voice | [`tutorial-academy.md`](tutorial-academy.md) | In progress (built, 11 of 37 voice lines) | main |
+| Rival corporation | [`rival-corporation.md`](rival-corporation.md) | Ready for review; data sim for unviewed rival worlds built 2026-11-05; growth tuning open (uncommitted) | — |
+| Planet outposts | [`planet-outposts.md`](planet-outposts.md) | Built, follow-ups done (uncommitted), needs play test | main |
+| Shield generator redesign | [`shield-generator-redesign.md`](shield-generator-redesign.md) | Done | main |
+| Defense turret redesign | [`defense-turret-redesign.md`](defense-turret-redesign.md) | Done (uncommitted; one open question) | main |
+| Merc outpost redesign | [`merc-outpost-redesign.md`](merc-outpost-redesign.md) | Done (look fixes built, viewer checked; uncommitted) | main |
+| Tutorial academy and SOLA voice | [`tutorial-academy.md`](tutorial-academy.md) | Built, 37 of 37 voice lines, test passes (new lines want a listen) | main |

@@ -61,6 +61,10 @@ var rng := RandomNumberGenerator.new()
 ## The last load had no research data (an older save): [method grant_legacy]
 ## runs once the scene is loaded.
 var legacy_pending: bool = false
+## A rival corp whose headquarters runs as data (RivalData) has its Science
+## Lab there: funding and hiring work as with a lab ([method has_lab]); set
+## by the data sim, never saved.
+var data_lab: bool = false
 
 
 func _ready() -> void:
@@ -191,6 +195,11 @@ func lab() -> ScienceLab:
 	return ScienceLab.find(hq) if hq else null
 
 
+## A Science Lab stands: live, or in the corp's data headquarters ([member data_lab]).
+func has_lab() -> bool:
+	return data_lab or lab() != null
+
+
 ## This corp's credits and ore.
 func eco() -> CorpEconomy:
 	return Corps.economy_of_corp(corp_id)
@@ -210,7 +219,7 @@ func fund_problem(t: TechDef) -> String:
 		for m in miss:
 			names.append(m.display_name)
 		return "Needs research: %s first" % " and ".join(names)
-	if lab() == null:
+	if not has_lab():
 		return "Build a Science Lab first"
 	var short := eco().shortfall_text(t.cost_credits, t.cost_ore())
 	if not short.is_empty():
@@ -297,7 +306,7 @@ func active_projects() -> Array[Dictionary]:
 
 ## Why [param a] cannot be hired now, or "".
 func hire_problem(a: Researcher) -> String:
-	if lab() == null:
+	if not has_lab():
 		return "Build a Science Lab first"
 	if researchers.size() >= MAX_RESEARCHERS:
 		return "The lab has room for %d researchers" % MAX_RESEARCHERS

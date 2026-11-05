@@ -63,6 +63,10 @@ enum Mode { NONE, PATROL, DEFEND, BOUNTY, ESCORT, STRIKE }
 
 ## Sim seconds between target / retreat checks.
 const AI_INTERVAL := 0.3
+## strike_targets of this sim moment (see there).
+var _strike_cache: Array[Node3D] = []
+var _strike_cache_time := -1.0
+var _strike_cache_ship: Ship
 ## Defence radius around the Home Station at Loyalty 5.5, metres.
 const DEFENSE_RADIUS := 3600.0
 ## Patrol loop radius range around the station, metres.
@@ -684,6 +688,15 @@ func _begin_strike() -> void:
 ## the turrets and shield generators, the station and the other
 ## structures, then the other corp's ships.
 func strike_targets() -> Array[Node3D]:
+	# One scan per AI tick: _check_job and _pick_target both ask in the same
+	# tick, and the scan (every combatant in the system, sorted) is the
+	# costly part of a strike late in a war.
+	if _strike_cache_time == SimClock.time and _strike_cache_ship == ship:
+		var kept: Array[Node3D] = []
+		for c in _strike_cache:
+			if Combat.is_live_target(c):
+				kept.append(c)
+		return kept
 	var out: Array[Node3D] = []
 	var me := ship.get_faction()
 	var ranks := {}
@@ -706,6 +719,9 @@ func strike_targets() -> Array[Node3D]:
 		ranks[c] = r * 1e7 + SpaceNav.flat_distance(ship.global_position, c.global_position)
 		out.append(c)
 	out.sort_custom(func(a: Node3D, b: Node3D) -> bool: return float(ranks[a]) < float(ranks[b]))
+	_strike_cache = out
+	_strike_cache_time = SimClock.time
+	_strike_cache_ship = ship
 	return out
 
 
@@ -938,8 +954,12 @@ func _check_job() -> bool:
 				return_home(false)
 				return false
 		Mode.STRIKE:
+			# A home system's corp, else the corp of the station there (a
+			# forward station is a strike target too, WarStrikes.station_systems).
 			var foe := Corps.corp_at_home(strike_system)
-			var war := Corps.corps_at_war(corp_id(), foe)
+			if foe.is_empty():
+				foe = Corps.corp_of_system(strike_system)
+			var war := foe != corp_id() and Corps.corps_at_war(corp_id(), foe)
 			if SimClock.time > strike_until or not war or strike_targets().is_empty():
 				if captain:
 					note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "War strike on %s is over, heading home" % _system_label(strike_system),

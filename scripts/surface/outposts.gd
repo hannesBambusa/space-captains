@@ -22,6 +22,8 @@ const NEST_CHECK := 60.0
 const RAID_WARNING := 30.0
 ## Upkeep is paid in installments of this many credits.
 const UPKEEP_STEP := 15
+## Sim seconds after landing in which ground raids bring 2 tanks at most.
+const FIRST_RAIDS_GRACE := 1500.0
 ## Seconds after landing before a claim's ground raid hits a new outpost.
 const CLAIM_GRACE := 150.0
 ## One data attack takes at most this share of a building's full hull.
@@ -40,6 +42,10 @@ var _rng := RandomNumberGenerator.new()
 var _mark_clock := 0.0
 ## Planet label -> the outpost key it shows (labels of live station systems).
 var _marked := {}
+## Outpost key -> its founding lander visual (UplinkShuttle) while one flies.
+var _landers := {}
+## Lifts shown so far: the next one takes the next docking pad.
+var _lift_count := 0
 
 
 static func of(tree: SceneTree) -> Outposts:
@@ -156,6 +162,7 @@ func found(body: PlanetBody) -> OutpostState:
 	o.lift_seconds = clampf(30.0 + km * 1.5, 40.0, 110.0)
 	Sector.outposts[o.key()] = o
 	EventLog.post("Lander on its way down to %s: the outpost lands in %d s" % [o.planet, roundi(OutpostState.FOUND_TIME)], EventLog.Kind.INFO, body)
+	_show_lander(o)
 	changed.emit(o)
 	return o
 
@@ -303,6 +310,7 @@ func sim_step(dt: float) -> void:
 func _common_step(o: OutpostState, dt: float) -> void:
 	# The lander.
 	if o.founded_at < 0.0:
+		_show_lander(o)
 		if SimClock.time - o.ordered_at >= OutpostState.FOUND_TIME:
 			o.founded_at = SimClock.time
 			o.pad()["built"] = 1.0
@@ -459,18 +467,47 @@ func _deliver(o: OutpostState, units: PackedInt32Array) -> void:
 	EventLog.post("Shuttle from %s landed: %s" % [o.planet, Economy.cost_text(units)], EventLog.Kind.REWARD)
 
 
-## A shuttle flying up in the station's system (visual only: delivery is the timer).
-func _show_lift(o: OutpostState, seconds: float) -> void:
+## The live world of [param o]'s station system, or null (not live, no station).
+## (The surface sky asks it for the star and the parent planet.)
+func station_world(o: OutpostState) -> SystemWorld:
 	var vm := get_parent() as ViewManager
 	var w := vm.world(o.system_id) if vm and o.system_id != ClusterNetwork.HOME_ID else SystemWorld.home(get_tree())
 	if w == null or w.sys == null or w.sys.home_station == null:
-		return
-	var body := PlanetInfo.find_planet(w, o.planet)
+		return null
+	return w
+
+
+## A shuttle flying up in the station's system (visual only: delivery is the timer).
+func _show_lift(o: OutpostState, seconds: float) -> void:
+	var w := station_world(o)
+	var body := PlanetInfo.find_planet(w, o.planet) if w else null
 	if body == null:
 		return
 	var s := UplinkShuttle.new()
-	s.setup(body, w.sys.home_station, seconds)
+	s.setup(body, w.sys.home_station, seconds, _lift_count)
+	_lift_count += 1
 	SpaceNav.space_root(w).add_child(s)
+
+
+## The founding lander flying down in the station's system while [param o]
+## is not founded yet (visual only: the founding is the timer). Shown again
+## part way through after a load or when its system comes back live.
+func _show_lander(o: OutpostState) -> void:
+	var k := o.key()
+	if is_instance_valid(_landers.get(k)):
+		return
+	_landers.erase(k)
+	var left := OutpostState.FOUND_TIME - (SimClock.time - o.ordered_at)
+	if left <= 1.0:
+		return
+	var w := station_world(o)
+	var body := PlanetInfo.find_planet(w, o.planet) if w else null
+	if body == null:
+		return
+	var s := UplinkShuttle.new()
+	s.setup_lander(body, w.sys.home_station, OutpostState.FOUND_TIME, SimClock.time - o.ordered_at)
+	SpaceNav.space_root(w).add_child(s)
+	_landers[k] = s
 
 
 # --- Data simulation -------------------------------------------------------------------
@@ -510,7 +547,7 @@ func _data_step(o: OutpostState, dt: float) -> void:
 		var ag := float(n["agitation"])
 		if ag >= OutpostState.AGITATION_ATTACK:
 			n["agitation"] = ag - OutpostState.AGITATION_ATTACK
-			var size := 2 + floori(ag / 25.0)
+			var size := mini(2 + floori(ag / 25.0), 2 + o.danger)
 			resolve_attack(o, size * 0.3, "critters", "%d critters" % size)
 		# Soldiers with a bounty on it clear it.
 		if o.bounties.has(i) and o.crew_of(OutpostState.SOLDIER).size() >= 2:
@@ -646,12 +683,16 @@ func _raid_clock(o: OutpostState) -> void:
 	if o.next_raid < 0.0:
 		return
 	if o.raid.is_empty() and SimClock.time >= o.next_raid - RAID_WARNING:
-		var size := clampi(1 + o.danger + _rng.randi_range(-1, 1), 2, 5)
+		# Tanks by danger: 1-2: 2, 3: 2-3, 4: 3-4, 5: 4-5; the raids of the
+		# first 25 min after landing bring 2 at most.
+		var size := clampi(o.danger + _rng.randi_range(-1, 0), 2, 5)
+		if SimClock.time - o.founded_at < FIRST_RAIDS_GRACE:
+			size = 2
 		var source := "Pirate"
 		for r in Corps.living_rivals():
 			if Corps.corps_at_war(r.id, Corps.PLAYER):
 				source = r.display_name
-		o.raid = {"at": o.next_raid, "size": size, "source": source}
+		o.raid = {"at": o.next_raid, "size": size, "source": source, "a": _rng.randf() * TAU}
 		EventLog.post("Ground raid forming at %s: %s, %d tanks, landing in %d s" % [o.planet, source, size, roundi(RAID_WARNING)], EventLog.Kind.THREAT)
 		_toast("Ground raid on %s in %d s" % [o.planet, roundi(RAID_WARNING)])
 	if not o.raid.is_empty() and SimClock.time >= float(o.raid["at"]):
@@ -661,7 +702,7 @@ func _raid_clock(o: OutpostState) -> void:
 		if o == live:
 			var sw := SurfaceWorld.current(get_tree())
 			if sw:
-				sw.spawn_raid(int(r["size"]), String(r["source"]))
+				sw.spawn_raid(int(r["size"]), String(r["source"]), float(r.get("a", -1.0)))
 				return
 		resolve_attack(o, int(r["size"]) * 0.8, "raiders", "%s raiders" % String(r["source"]))
 
@@ -674,13 +715,12 @@ func claim_blocked(body: PlanetBody, size: int, source: String) -> bool:
 	if o == null or o.lost:
 		return false
 	if o.raid.is_empty():
-		# A lander still in flight: the raid comes once it is down.
 		# A lander still in flight: the raid comes a while after it is down,
 		# so there is time for a turret or a garrison.
 		var at := SimClock.time + RAID_WARNING
 		if not o.is_founded():
 			at = o.ordered_at + OutpostState.FOUND_TIME + CLAIM_GRACE
-		o.raid = {"at": at, "size": clampi(size, 2, 6), "source": source}
+		o.raid = {"at": at, "size": clampi(size, 2, 6), "source": source, "a": _rng.randf() * TAU}
 		var secs := roundi(at - SimClock.time)
 		EventLog.post("%s tried to claim %s and found your outpost: a ground raid of %d tanks lands in %d s" % [source, o.planet, int(o.raid["size"]), secs], EventLog.Kind.THREAT, body)
 		_toast("Ground raid on %s in %d s" % [o.planet, secs])

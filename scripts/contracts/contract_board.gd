@@ -391,6 +391,23 @@ func drop_held(c: Contract) -> void:
 		ec.escrow = 0
 
 
+## Takes [param c] off the board without any of the cancel side effects
+## (no refunds, no compensation): a rival world going data saved it
+## (RivalData.capture) and builds it again when it comes back. Marked
+## cancelled in place, so its target and ward callbacks do nothing.
+func shelve(c: Contract) -> void:
+	if c == null:
+		return
+	held.erase(c)
+	if not contracts.has(c):
+		return
+	contracts.erase(c)
+	if c.changed.is_connected(_on_contract_changed):
+		c.changed.disconnect(_on_contract_changed)
+	c.status = Contract.Status.CANCELLED
+	contract_removed.emit(c)
+
+
 ## The contract with save id [param sid] on the board or held, or null.
 func find_saved(sid: int) -> Contract:
 	if sid <= 0:

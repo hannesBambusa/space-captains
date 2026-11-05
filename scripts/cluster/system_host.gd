@@ -22,6 +22,13 @@ extends SystemView
 ## and frees the world (hired ships let go of their berth and captain
 ## links the way a gate jump does). First visit: no state yet, the dens
 ## launch their starting ships as in a new game.
+##
+## A rival station world (RivalData.is_rival_world) is saved whole when it
+## goes: [method dematerialise] puts RivalData.capture into
+## RemoteSystemState.world (buildings, captains, ships and contracts with
+## the save code), [method materialise] applies it back with
+## RivalData.restore once the world's nodes exist. [RivalWorlds] decides
+## when such a world may go.
 
 const SYSTEM_SCENE := "res://scenes/system.tscn"
 
@@ -66,7 +73,10 @@ func materialise(id: StringName) -> SystemWorld:
 		env.environment = env.environment.duplicate(true) as Environment
 	viewport.add_child(w)
 	world = w
-	apply_state(Sector.state(id))
+	var st := Sector.state(id)
+	# A rival world that was data: its saved world holds the bases and ships.
+	var whole := st != null and not st.world.is_empty() and w.has_station
+	apply_state(st, not whole)
 	# A rival corp's headquarters runs its AI there (rival corporation plan).
 	if w.has_station and Corps.is_rival(w.corp_id):
 		var mgr_ai := RivalManager.new()
@@ -82,15 +92,19 @@ func materialise(id: StringName) -> SystemWorld:
 		var fog := FogOfWar.new()
 		fog.name = "FogOfWar"
 		w.add_child(fog)
+	if whole:
+		RivalData.restore(w, st)
 	_refresh_contract_targets()
 	return w
 
 
-## Puts [param st] into the freshly built world.
-func apply_state(st: RemoteSystemState) -> void:
+## Puts [param st] into the freshly built world. Without [param bases]
+## only the ships stored in [param st] (a rival world's saved world brings
+## its clusters, bases and scrap, RivalData.restore).
+func apply_state(st: RemoteSystemState, bases: bool = true) -> void:
 	if st == null or world == null:
 		return
-	var sys := world.sys
+	var sys := world.sys if bases else null
 	var refs := known_refs(get_tree())
 	if sys:
 		for b in sys.belts:
@@ -106,7 +120,7 @@ func apply_state(st: RemoteSystemState) -> void:
 			den.load_state(dd)
 			refs.add(int(dd.get("id", 0)), den)
 			den_data[den] = dd
-	if world.combat:
+	if world.combat and bases:
 		for fd: Dictionary in st.scrap:
 			refs.add(int(fd.get("id", 0)), ScrapField.restore(world.combat, fd))
 	var made := []
@@ -133,14 +147,7 @@ func capture_into_state() -> void:
 	var st := Sector.state(system_id)
 	if st == null or world == null:
 		return
-	var sys := world.sys
-	if sys:
-		st.clusters.clear()
-		for b in sys.belts:
-			st.clusters[b.def.name] = {"left": b.loads_left, "total": b.reserve, "gone": Array(b.gone_list())}
-		for den in sys.dens:
-			if is_instance_valid(den) and den.def:
-				st.dens[den.def.name] = den.save_state()
+	_capture_bases(st)
 	st.scrap.clear()
 	if world.combat:
 		for f in world.combat.get_scrap_fields():
@@ -149,12 +156,33 @@ func capture_into_state() -> void:
 	st.ships = ShipCodec.save_all(world, contracts)
 
 
+## Cluster loads and bases into [param st] (RemoteSim steps the bases).
+func _capture_bases(st: RemoteSystemState) -> void:
+	var sys := world.sys
+	if sys:
+		st.clusters.clear()
+		for b in sys.belts:
+			st.clusters[b.def.name] = {"left": b.loads_left, "total": b.reserve, "gone": Array(b.gone_list())}
+		for den in sys.dens:
+			if is_instance_valid(den) and den.def:
+				st.dens[den.def.name] = den.save_state()
+
+
 ## Writes the state, then frees the world. Hired ships let go of their
-## berth list and captain (the state holds them now).
+## berth list and captain (the state holds them now). A rival station
+## world is saved whole (RivalData.capture).
 func dematerialise() -> void:
 	if world == null:
 		return
-	capture_into_state()
+	var st := Sector.state(system_id)
+	var whole := st != null and RivalData.is_rival_world(world)
+	if whole:
+		st.world = RivalData.capture(world)
+		_capture_bases(st)
+		st.ships.clear()
+		st.scrap.clear()
+	else:
+		capture_into_state()
 	for n in SystemWorld.nodes_in(world, Ship.GROUP):
 		var s := n as Ship
 		if s:
@@ -164,6 +192,10 @@ func dematerialise() -> void:
 		if ec and ec.from_system == system_id:
 			ec.target = null
 	if viewport:
+		# A rival world leaves the tree now: its RivalManager and captains
+		# must not post or take contracts after the capture in this frame.
+		if whole and viewport.get_parent() == self:
+			remove_child(viewport)
 		viewport.queue_free()
 	world = null
 	viewport = null

@@ -21,11 +21,15 @@ from a cross-girder (service tunnel in a box truss) armoured on the threat side 
 bolted, patched plates, with an ops gondola, propellant tanks and sodium work floods on
 top. Two armoured torpedo magazines flank the rack (a dark steel threat face with
 chamfered gunmetal cheeks, bolt rows and six recessed tube bores, VLS lids on top with one
-hatch open, hull number "12"), with PDC turrets on their tops and bellies. Behind the
-girder a non-rotating axle runs through a standing spin drum habitat (bearing collars,
-hazard seams, contrasting spokes and a SPIN stencil imply the rotation), then two radiator
-fans (a short boom off the axle, a coolant hub per side, three long narrow blades each,
-swept in plan and twisted about their long axis), a comms mast, two rear PDCs and the
+hatch open, hull number "12"; staggered courses of thick bolted plates, a conduit run, a
+louvred vent and loading hatches on the sides, bolted chamfer armour on both upper edges),
+with PDC turrets on their tops and bellies. Behind the
+girder a non-rotating axle runs through a standing spin drum habitat (bearing hubs wider
+than the axle, hazard seams, spokes on both dark end faces and a SPIN stencil imply the
+rotation; rim facets darken toward the sides, longitudinal stringers and a lit porthole
+band on the red spin band make it read round from straight above), then two radiator
+wings (a box-truss boom per side off a gimbal on the axle, swept forward in plan, carrying
+broad flat dark panels on both sides of the truss), a comms mast, two rear PDCs and the
 shuttle link port at the axle tail.
 
 Layout (Blender Z up, exported +Y up; Blender -Y = Godot +Z). Centre at origin, docking
@@ -36,9 +40,9 @@ plane z = 0, docking face toward Blender -Y.
   fingers   inner x = -10, 0, 10, outer x = +-20.6, y -12..4.9, guide arms to y -17,
             z 6.2
   girder    x -31..31, y 4.9..9.1, z +-5 (brow armour, gondola, tanks on top)
-  magazines x +-23..31, y -12.65..9, z +-4.6
-  drum      r 11.4, y 10..21 around the axle (y 9.1..32.3)
-  back      radiator hubs x +-8 y 28, blades to x +-24.8 y 19..31, mast y 24,
+  magazines x +-22.6..32, y -12.76..9, z +-4.6 (side armour to x +-31.6, conduits +-31.95)
+  drum      r 11.4, y 10..21 around the axle (y 9.1..32.3), bearing hubs r 6.6 y 9.1..10, 21..23.2
+  back      radiator booms from x +-3 y 28, panels x +-11.6..30.1 y 17.1..29.3, mast y 24,
             link port y 32.3..33.6
 Hierarchy: mercenary_outpost (empty root) -> mercenary_outpost_hull,
   mercenary_outpost_lights, dock_point, spawn_point, link_point (empties).
@@ -406,23 +410,66 @@ def magazine(sx):
     label("ORD", V((x0, -11.95, 4.05)) + n * 0.24, n, V((0, 1, 1)).normalized(), 0.6,
           wk.INK_LIGHT)
     SCORCH.append((x0, -12.6, 0.0, 1.8))
-    # outboard armour: 2 courses x 6, bolted; the MX-12 plates stay hull2
-    cyc = ("hull2", "hull2", "hull3", "merc")
-    xo = sx * 31.25
-    for course, zc in ((0, 1.55), (1, -1.55)):
-        for k in range(6):
-            y = -10.4 + 3.5 * k
-            mat = cyc[(k + 2 * course) % 4]
+    # outboard armour: two staggered courses of thick bevelled plates (brick bond, so the
+    # side reads as armour, not container corrugation), bolt rows on every plate, a louvred
+    # vent and a loading hatch in the lower course; the MX-12 plates stay hull2
+    upper = [(-10.4 + 3.5 * k, 3.3) for k in range(6)]
+    lower = [(-11.2, 1.7)] + [(-8.65 + 3.5 * k, 3.3) for k in range(5)] + [(7.9, 1.7)]
+    cyc = ("hull2", "hull3", "hull2", "hull2", "merc", "hull2", "hull3")
+    for course, zc, row in ((0, 1.6, upper), (1, -1.6, lower)):
+        for k, (y, ln) in enumerate(row):
+            mat = cyc[(k + 3 * course) % len(cyc)]
             if course == 0 and k in (2, 3):
                 mat = "hull2"
-            if (sx < 0 and course == 1 and k == 4) or (sx > 0 and course == 1 and k == 1):
+            if (sx < 0 and course == 1 and k == 5) or (sx > 0 and course == 1 and k == 2):
                 mat = "scrap"
-            H.box(V((xo, y, zc)), (0.5, 3.3, 2.9), mat, bevel=0.04)
+            if course == 1 and k == (2 if sx < 0 else 5):               # louvred vent
+                H.box(V((sx * 31.2, y, zc)), (0.4, ln - 0.2, 2.9), "dark", bevel=0.0)
+                for j in range(5):
+                    H.box(V((sx * 31.45, y, zc - 1.1 + 0.55 * j)), (0.12, ln - 0.6, 0.42),
+                          "hull2", r=Matrix.Rotation(sx * math.radians(35), 4, "Y"),
+                          bevel=0.0)
+                continue
+            H.box(V((sx * 31.3, y, zc)), (0.6, ln - 0.2, 2.9), mat, bevel=0.12)
+            if course == 1 and k == 4:                                  # loading hatch
+                H.box(V((sx * 31.62, y, zc)), (0.06, 2.5, 2.2), "dark", bevel=0.0)
+                H.box(V((sx * 31.64, y, zc)), (0.08, 2.1, 1.8), "hull3", bevel=0.0)
+                H.box(V((sx * 31.66, y, zc + 1.25)), (0.06, 2.5, 0.2), "hazard", bevel=0.0)
+                H.box(V((sx * 31.72, y + 0.75, zc)), (0.12, 0.18, 0.9), "metal", bevel=0.0)
+                continue
             zb = zc + (1.2 if zc > 0 else -1.2)
-            for o in (-1.2, 0.0, 1.2):
-                H.box(V((sx * 31.55, y + o, zb)), (0.12, 0.22, 0.22), "dark", bevel=0.0)
-    H.box(V((sx * 31.52, -1.5, 0)), (0.06, 21, 0.8), "merc", bevel=0.0)
-    label("MX-12", V((sx * 31.52, -1.65, 1.7)), V((sx, 0, 0)), V((0, 0, 1)), 1.2, wk.INK_DARK)
+            offs = (-1.1, 0.0, 1.1) if ln > 3 else (0.0,)
+            for o in offs:
+                H.box(V((sx * 31.62, y + o, zb)), (0.12, 0.22, 0.22), "dark", bevel=0.0)
+    # conduit run in the course joint, clamped to the plates
+    H.tube(V((sx * 31.78, -11.6, 0.0)), V((sx * 31.78, 8.6, 0.0)), 0.17, 0.17, "accent",
+           segs=8)
+    H.tube(V((sx * 31.72, -11.6, -0.36)), V((sx * 31.72, 8.6, -0.36)), 0.1, 0.1, "metal",
+           segs=6)
+    for k in range(7):
+        H.box(V((sx * 31.75, -10.4 + 3.2 * k, -0.15)), (0.4, 0.3, 0.75), "dark", bevel=0.0)
+    # chamfered armour caps on both upper edges, bolted along their lower edge
+    for e in (1, -1):                                   # outboard, inboard
+        sgn = sx * e
+        rot = Matrix.Rotation(sgn * math.radians(45), 4, "Y")
+        nrm = V((sgn, 0, 1)).normalized()
+        down = V((sgn, 0, -1)).normalized()
+        for k, yc in enumerate((-9.4, -4.2, 1.0, 6.2)):
+            c = V((x0 + sgn * 3.2, yc, 3.8)) + nrm * 0.15
+            H.box(c, (2.3, 5.0, 0.3), "hull3" if (k + (e > 0)) % 3 == 0 else "hull2", r=rot,
+                  bevel=0.1)
+            for o in (-1.8, 0.0, 1.8):
+                H.box(c + down * 0.8 + nrm * 0.17 + V((0, o, 0)), (0.2, 0.2, 0.1), "dark",
+                      r=rot, bevel=0.0)
+    # inboard face: ordnance loading hatch toward the rack and a feed conduit pair
+    xi = sx * 22.95
+    H.box(V((xi, 1.0, -0.4)), (0.2, 3.8, 3.6), "dark", bevel=0.0)
+    H.box(V((sx * 22.88, 1.0, -0.4)), (0.2, 3.2, 3.0), "hull3", bevel=0.0)
+    for zz in (1.55, -2.35):
+        H.box(V((sx * 22.86, 1.0, zz)), (0.2, 3.8, 0.22), "hazard", bevel=0.0)
+    for zz, rr, mat in ((3.25, 0.15, "accent"), (2.85, 0.11, "metal")):
+        H.tube(V((sx * 22.8, -11.6, zz)), V((sx * 22.8, 8.6, zz)), rr, rr, mat, segs=6)
+    label("MX-12", V((sx * 31.62, -1.65, 1.7)), V((sx, 0, 0)), V((0, 0, 1)), 1.2, wk.INK_DARK)
     # hull number on top, text up +Y so it reads from the RTS camera
     label("12", V((x0, -3.0, 4.62)), V((0, 0, 1)), V((0, 1, 0)), 2.6, wk.INK_DARK, 0.8)
     # VLS lids, one open with a torpedo nose showing
@@ -443,7 +490,8 @@ def magazine(sx):
     for dx in (-2.1, 2.1):          # armour rails along the top edges
         H.box(V((x0 + dx, -1.5, 4.7)), (0.3, 20.0, 0.2), "dark", bevel=0.0)
     H.box(V((sx * 22.2, 2.0, -3.6)), (1.8, 1.4, 1.0), "dark", bevel=0.04)
-    lamp(V((sx * 30.6, -10.9, 4.75)), 0.45, "red")       # one strobe per magazine
+    lamp(V((x0 + sx * 3.2, -10.9, 3.8)) + V((sx, 0, 1)).normalized() * 0.5, 0.45,
+         "red")                                         # one strobe per magazine
     # PDCs on top and belly, aimed forward and outboard
     yaw, pit = math.radians(25), math.radians(8)
     for zs in (1, -1):
@@ -457,18 +505,26 @@ DRUM_PROFILE = [(4.6, 10.0), (10.4, 10.0), (11.0, 10.4), (11.4, 10.4), (11.4, 11
                 (11.0, 11.4), (11.0, 15.1), (11.2, 15.1), (11.2, 15.9), (11.0, 15.9),
                 (11.0, 19.6), (11.4, 19.6), (11.4, 20.6), (11.0, 20.6), (10.4, 21.0),
                 (4.6, 21.0), (4.6, 10.0)]
+DRUM_SEGS = 32
 
 
 def drum_mat(i, j):
+    """Rim facets darken toward the sides (|cos| of the facet angle), so the drum shades
+    like a cylinder from straight above. End faces are dark against the light rim."""
     if j in (0, 14):
-        return "hull2"
+        return "dark"
     if j in (1, 13, 2, 3, 4, 10, 11, 12, 15):
         return "dark"
     if j in (6, 7, 8):
         return "merc"
     if i % 11 == 3:
         return "scrap"
-    if i % 5 == 0:
+    side = abs(math.cos((i + 0.5) * 2 * math.pi / DRUM_SEGS))
+    if side > 0.94:
+        return "dark"
+    if side > 0.75:
+        return "hull2"
+    if side > 0.5:
         return "hull3"
     return "hull"
 
@@ -483,87 +539,136 @@ def build_axle():
 
 
 def build_drum():
-    H.lathe(DRUM_PROFILE, 32, drum_mat, matrix=parts.ALONG_Y)
-    for k in range(6):
-        a = math.radians(30 + 60 * k)
-        H.box(V((7.6 * math.cos(a), 9.85, 7.6 * math.sin(a))), (5.6, 0.3, 0.9),
-              "merc" if k % 2 == 0 else "dark", bevel=0.04, r=Matrix.Rotation(-a, 4, "Y"))
+    H.lathe(DRUM_PROFILE, DRUM_SEGS, drum_mat, matrix=parts.ALONG_Y)
+    for y, r0 in ((9.85, 4.8), (21.15, 6.0)):           # spokes on both end faces
+        for k in range(6):
+            a = math.radians(30 + 60 * k)
+            rc = (r0 + 10.4) / 2
+            H.box(V((rc * math.cos(a), y, rc * math.sin(a))), (10.4 - r0, 0.3, 0.9),
+                  "merc" if k % 2 == 0 else "hull2", bevel=0.04, r=Matrix.Rotation(-a, 4, "Y"))
     for k in range(6):
         for da in (-14, 14):
             a = math.radians(60 * k + da)
             parts.window(L, V((9 * math.cos(a), 10.0, 9 * math.sin(a))), V((0, -1, 0)),
                          V((0, 0, 1)), 0.6, 0.5, parts.pick_lit(RNG, "hab"))
-    rf = 11.0 * math.cos(math.pi / 32)
+    rf = 11.0 * math.cos(math.pi / DRUM_SEGS)
     for y in (12.6, 18.4):
-        for k in range(32):
+        for k in range(DRUM_SEGS):
             if k % 4 == 3:                              # 24 per row, a blank every 4th
                 continue
-            a = (k + 0.5) * 2 * math.pi / 32
+            a = (k + 0.5) * 2 * math.pi / DRUM_SEGS
             d = V((math.cos(a), 0, -math.sin(a)))      # lathe facet direction (ALONG_Y)
             if d.z < -math.cos(math.radians(15)):
                 continue
             parts.window(L, d * rf + V((0, y, 0)), d, V((0, 1, 0)), 0.55, 0.45,
                          parts.pick_lit(RNG, "hab"))
+    # lit porthole band on the red spin band, one per facet: from straight above the
+    # lights bunch up toward the sides, which reads as curvature
+    rb = 11.2 * math.cos(math.pi / DRUM_SEGS)
+    for k in range(DRUM_SEGS):
+        a = (k + 0.5) * 2 * math.pi / DRUM_SEGS
+        d = V((math.cos(a), 0, -math.sin(a)))
+        if d.z < -0.5:
+            continue
+        parts.window(L, d * rb + V((0, 15.5, 0)), d, V((0, 1, 0)), 0.5, 0.36, "window_cool")
+    # longitudinal stringers every 22.5 deg: their spacing shrinks toward the sides
+    for k in range(16):
+        a = k * 2 * math.pi / 16
+        d = V((math.cos(a), 0, -math.sin(a)))
+        H.box(d * 11.13 + V((0, 15.5, 0)), (0.36, 8.2, 0.32), "dark", bevel=0.0,
+              r=Matrix.Rotation(a, 4, "Y"))
     for deg in (45, 135, 225, 315):
         a = math.radians(deg)
         lamp(V((11.5 * math.cos(a), 10.9, 11.5 * math.sin(a))), 0.45, "red")
     for deg, text in ((60, "MERC"), (120, "SPIN")):
         a = math.radians(deg)
-        c = V((6.2 * math.cos(a), 9.95, 6.2 * math.sin(a)))
+        c = V((8.0 * math.cos(a), 9.95, 8.0 * math.sin(a)))
         H.box(c, (2.8, 0.08, 1.0), "hull2", bevel=0.0)
         label(text, c - V((0, 0.05, 0)), V((0, -1, 0)), V((0, 0, 1)), 0.7, wk.INK_DARK)
-    # bearing collars and hazard seams: fixed axle vs spinning drum
-    for y0, y1 in ((8.9, 10.0), (21.0, 22.2)):
-        H.lathe([(2.8, y0), (5.4, y0), (5.4, y1), (2.8, y1), (2.8, y0)], 24,
-                lambda i, j: "dark", matrix=parts.ALONG_Y)
-        H.cyl(V((0, (y0 + y1) / 2, 0)), 5.47, 5.47, 0.25, "hazard", segs=24,
-              axis_rot=parts.ALONG_Y)
+    # bearing hubs on the axle at both ends (fixed axle vs spinning drum): wider than the
+    # axle so the top view shows a wheel on an axle, with a hazard seam on each rim
+    hubs = (([(2.8, 9.1), (6.0, 9.1), (6.6, 9.6), (6.6, 10.0), (2.8, 10.0), (2.8, 9.1)], 9.8),
+            ([(2.8, 21.0), (6.6, 21.0), (6.6, 21.7), (4.6, 23.2), (2.8, 23.2), (2.8, 21.0)],
+             21.35))
+    for prof, yh in hubs:
+        H.lathe(prof, 24, lambda i, j: "dark", matrix=parts.ALONG_Y)
+        H.cyl(V((0, yh, 0)), 6.67, 6.67, 0.25, "hazard", segs=24, axis_rot=parts.ALONG_Y)
+    for k in range(8):                                  # bearing bolts on the rear hub cone
+        a = k * 2 * math.pi / 8 + math.pi / 8
+        d = V((math.cos(a), 0, -math.sin(a)))
+        H.box(d * 5.7 + V((0, 22.45, 0)), (0.5, 0.5, 0.5), "metal", bevel=0.0,
+              r=Matrix.Rotation(a, 4, "Y"))
 
 
-RAD_HUB_X = 8.0                              # fin hub, both sides of the axle
-RAD_FANS = (8.0, -12.0, -32.0)               # blade sweep in plan, deg from +-X toward +Y
-RAD_R0, RAD_R1 = 3.0, 16.5                   # blade span from the hub
-RAD_W = 1.9                                  # blade chord
-RAD_TILT = 40.0                              # blade twist about its long axis, deg
+RAD_ROOT = (3.0, 28.0)                       # boom root beside the axle (x mirrored)
+RAD_SWEEP = -15.0                            # boom sweep in plan, deg from +-X toward -Y
+RAD_T0, RAD_T1 = 10.0, 27.0                  # panel span along the boom
+RAD_TIP = 28.4                               # boom length
+RAD_IN, RAD_OUT = 0.7, 4.0                   # panel inner / outer edge off the boom axis
+RAD_PANELS = 3                               # panel sections along the boom
+RAD_PANEL_GAP = 0.4
+
+
+def truss_along(p0, d, n, length, hw, hh, bays):
+    """Open box truss from p0 along unit d: four longerons at +-hw along n and +-hh along Z,
+    frames at every bay, alternating diagonals on the top, bottom and both sides."""
+    corners = [(sn, sz) for sn in (-1, 1) for sz in (-1, 1)]
+    at = lambda t, sn, sz: p0 + d * t + n * sn * hw + UP * sz * hh   # noqa: E731
+    for sn, sz in corners:
+        H.beam(at(0, sn, sz), at(length, sn, sz), 0.24, 0.24, "dark", up=n)
+    ts = [length * k / bays for k in range(bays + 1)]
+    for k, t in enumerate(ts):
+        for sz in (-1, 1):
+            H.beam(at(t, -1, sz), at(t, 1, sz), 0.16, 0.16, "dark")
+        for sn in (-1, 1):
+            H.beam(at(t, sn, -1), at(t, sn, 1), 0.16, 0.16, "dark", up=d)
+        if k == bays:
+            continue
+        ta, tb = (t, ts[k + 1]) if k % 2 == 0 else (ts[k + 1], t)
+        for sz in (-1, 1):
+            parts.strut(H, at(ta, -1, sz), at(tb, 1, sz), 0.12, 0.12, "dark")
+        for sn in (-1, 1):
+            parts.strut(H, at(ta, sn, -1), at(tb, sn, 1), 0.12, 0.12, "dark", up=n)
 
 
 def build_radiators():
-    """Radiator fans: a short boom off the axle carries a coolant hub each side, and each
-    hub fans three long, narrow blades out in plan (swept 8, -12 and -32 deg) so they show
-    as separate feathers from the top camera. The blades are twisted 40 deg about their
-    long axis (alternating), plain dark grey with fine lengthwise ribs, a coolant spar and
-    a faint warm core strip in _lights."""
-    for y in (27.6, 28.4):
-        for z in (-0.5, 0.5):
-            H.beam(V((-RAD_HUB_X, y, z)), V((RAD_HUB_X, y, z)), 0.32, 0.32, "dark")
-    for k in range(4):
-        x = -RAD_HUB_X + 4 * k
-        parts.strut(H, V((x, 27.6, -0.5)), V((x + 4, 28.4, 0.5)), 0.18, 0.18, "dark")
-    length = RAD_R1 - RAD_R0
+    """Radiator wings: from a gimbal beside the axle each side a box-truss boom runs out,
+    swept 15 deg forward in plan, and carries three broad, flat, dark panel sections on
+    both sides of the truss (8 m chord, 17 m span, the truss open between the halves).
+    Panels lie in the docking plane so the broad face shows from the top and the 3/4
+    camera. Each panel has a grey edge frame, a bare-metal coolant header along the truss
+    and faint amber coolant lines across the chord in _lights."""
+    a = math.radians(RAD_SWEEP)
+    span = (RAD_T1 - RAD_T0 - (RAD_PANELS - 1) * RAD_PANEL_GAP) / RAD_PANELS
+    w = RAD_OUT - RAD_IN
     for sx in (-1, 1):
-        hub = V((sx * RAD_HUB_X, 28.0, 0))
-        H.cyl(hub, 1.3, 1.3, 1.8, "dark", segs=12)
-        H.cyl(hub, 1.38, 1.38, 0.35, "merc", segs=12)
-        for k, phi in enumerate(RAD_FANS):
-            p = math.radians(phi)
-            d = V((sx * math.cos(p), math.sin(p), 0))
-            yaw = p if sx > 0 else math.pi - p
-            R = rz(yaw) @ rx(RAD_TILT * (1 if k % 2 == 0 else -1))
-            ch = R.to_3x3() @ V((0, 1, 0))
-            nrm = R.to_3x3() @ V((0, 0, 1))
-            c = hub + d * ((RAD_R0 + RAD_R1) / 2)
-            H.tube(hub + d * 1.0, hub + d * (RAD_R0 + 0.3), 0.24, 0.24, "metal", segs=8)
-            H.box(c, (length, RAD_W, 0.1), "dark", r=R, bevel=0.0)
-            for t in (-0.6, 0.6):               # fine lengthwise ribs, both faces
-                for s in (-1, 1):
-                    H.box(c + ch * t + nrm * s * 0.06, (length - 0.4, 0.05, 0.03), "hull2",
-                          r=R, bevel=0.0)
-            H.tube(hub + d * RAD_R0, hub + d * (RAD_R1 - 0.2), 0.13, 0.1, "metal", segs=6)
-            for s in (-1, 1):                   # faint warm core strip
-                L.box(c + d * 0.4 + nrm * s * 0.07 + ch * 0.25, (length - 1.6, 0.14, 0.02),
-                      "window_dim", r=R, bevel=0.0)
-        tip = hub + V((sx * math.cos(math.radians(8)), math.sin(math.radians(8)), 0)) * RAD_R1
-        lamp(tip + V((0, 0, 0.12)), 0.45, "red")
+        d = V((sx * math.cos(a), math.sin(a), 0))
+        n = V((-sx * math.sin(a), math.cos(a), 0))
+        R = rz(math.atan2(d.y, d.x))
+        root = V((sx * RAD_ROOT[0], RAD_ROOT[1], 0))
+        # gimbal on the axle side
+        H.cyl(root + V((sx * 0.6, 0, 0)), 1.2, 1.2, 2.0, "dark", segs=12)
+        H.cyl(root + V((sx * 0.6, 0, 0)), 1.28, 1.28, 0.4, "merc", segs=12)
+        truss_along(root + d * 0.8, d, n, RAD_TIP - 0.8, 0.45, 0.5, 12)
+        for s in (-1, 1):                       # coolant headers along the truss
+            H.tube(root + d * 1.0 + n * s * 0.62, root + d * (RAD_T1 + 0.2) + n * s * 0.62,
+                   0.15, 0.15, "metal", segs=8)
+        for k in range(RAD_PANELS):
+            tc = RAD_T0 + span / 2 + k * (span + RAD_PANEL_GAP)
+            for s in (-1, 1):
+                c = root + d * tc + n * s * (RAD_IN + w / 2)
+                H.box(c, (span, w, 0.12), "dark", r=R, bevel=0.0)
+                H.box(root + d * tc + n * s * (RAD_OUT - 0.1), (span, 0.2, 0.22), "hull2",
+                      r=R, bevel=0.0)
+                for e in (-1, 1):
+                    H.box(c + d * e * (span / 2 - 0.1), (0.2, w, 0.2), "hull2", r=R,
+                          bevel=0.0)
+                for j in range(4):              # faint coolant lines across the chord
+                    cl = c + d * (span * (j + 0.5) / 4 - span / 2)
+                    L.box(cl, (0.06, w - 0.5, 0.16), "window_dim", r=R, bevel=0.0)  # both faces
+        tip = root + d * RAD_TIP
+        H.box(tip, (0.7, 1.3, 1.3), "merc", r=R, bevel=0.06)
+        lamp(tip + V((0, 0, 0.8)), 0.45, "red")
 
 
 def build_back():

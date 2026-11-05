@@ -21,6 +21,25 @@ const MIN_HULL := 0.75
 const VOLUNTEER: PackedFloat32Array = [0.9, 0.35, 0.6, 0.4]
 
 
+## Systems a strike on [param corp_id] can go to: its home first, then the
+## systems of its forward stations (network order). Headquarters of other
+## corps and sites of other corps are left out.
+static func station_systems(corp_id: StringName) -> Array[StringName]:
+	var out: Array[StringName] = []
+	var home := Corps.home_of(corp_id)
+	if not home.is_empty():
+		out.append(home)
+	if Sector.network == null:
+		return out
+	for id in Sector.network.remote_ids():
+		var st := Sector.state(id)
+		if st == null or st.station.is_empty() or id == home:
+			continue
+		if Corps.norm(StringName(st.station.get("corp", Corps.PLAYER))) == corp_id and not bool(st.station.get("hq", false)):
+			out.append(id)
+	return out
+
+
 ## Mercs of [param corp_id] free to go now, best first, at most [param n].
 static func volunteers(tree: SceneTree, corp_id: StringName, n: int) -> Array[Ship]:
 	var out: Array[Ship] = []

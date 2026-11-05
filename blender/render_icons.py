@@ -14,7 +14,6 @@ ICONS = {
     "mining_outpost": M + "buildings/mining_outpost.glb",
     "mercenary_outpost": M + "buildings/mercenary_outpost.glb",
     "salvage_yard": M + "buildings/salvage_yard.glb",
-    "raider_dock": M + "buildings/raider_dock.glb",
     "explorer_outpost": M + "buildings/explorer_outpost.glb",
     "defense_turret": M + "buildings/defense_turret.glb",
     "shield_generator": M + "buildings/shield_generator.glb",

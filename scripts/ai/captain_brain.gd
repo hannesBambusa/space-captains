@@ -59,6 +59,10 @@ const UNLOAD_TIME := 4.0
 const DOCK_HANDOFF_DISTANCE := 120.0
 ## Height gap to the approach point at which the home frame takes over, metres.
 const DOCK_HANDOFF_HEIGHT := 25.0
+## Climb or dive relative to the approach point (m/s) under which the home
+## frame takes over: the building frame has no climb, so a ship handed over
+## mid-climb would stop dead and snap its nose level.
+const DOCK_HANDOFF_CLIMB := 8.0
 ## Hostiles within this distance raise the threat level, metres.
 const THREAT_RADIUS := 1300.0
 ## Friendly mercenaries within this distance lower it (escort cover), metres.
@@ -284,6 +288,7 @@ func update(dt: float) -> void:
 			_steer_to_job(true)
 			if _check_threats(dt):
 				return
+			ModuleWear.use(ship, ShipModule.Slot.TOOL, dt)
 			if ship.job_work(trip, dt * ship.work_speed()):
 				ship.job_end(trip)
 				trip.loaded = true
@@ -541,7 +546,8 @@ func _steer_home(speed: float = -1.0) -> void:
 	var rel := approach - ship.global_position
 	var dy := absf(rel.y)
 	rel.y = 0.0
-	if rel.length() < DOCK_HANDOFF_DISTANCE and dy < DOCK_HANDOFF_HEIGHT and ship.mover.relative_speed() < 45.0:
+	var climb := absf(ship.mover.climb_rate - ship.mover.goal_vy)
+	if rel.length() < DOCK_HANDOFF_DISTANCE and dy < DOCK_HANDOFF_HEIGHT and ship.mover.relative_speed() < 45.0 and climb < DOCK_HANDOFF_CLIMB:
 		ship.enter_home_frame()
 		ship.start_dock()
 		_set_state(State.DOCKING)
@@ -551,6 +557,8 @@ func _deliver() -> void:
 	if trip == null:
 		return
 	var c := trip.contract
+	if trip.loaded:
+		ModuleWear.use(ship, ShipModule.Slot.CARGO, ModuleWear.LOAD_S)
 	if trip.loaded and c is MiningContract:
 		var res := ContractBoard.deliver_mining_load(c as MiningContract, ship, trip.ore, trip.cargo)
 		var ore := trip.ore

@@ -245,18 +245,20 @@ func _draw_node(ci: CanvasItem, id: StringName, is_selected: bool, is_hovered: b
 	var ms := _f_mono.get_string_size(mid, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
 	ci.draw_string(_f_mono, p + Vector2(-ms.x * 0.5, ms.y * 0.32), mid, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(col.lerp(Color.WHITE, 0.3), a))
 	var site := station_site(id)
+	# A rival's station (HQ or forward) in the rival's colour.
+	var site_col := Corps.color_of(Corps.corp_of_system(id), H.HOLO) if not site.is_empty() else H.HOLO
 	if home or not site.is_empty():
 		var ic := H.icon(&"station")
 		if ic:
 			var isz := 12.0 if compact else 20.0
-			ci.draw_texture_rect(ic, Rect2(p + Vector2(-isz * 0.5, -r - isz - (2.0 if compact else 6.0)), Vector2(isz, isz)), false, H.HOLO)
+			ci.draw_texture_rect(ic, Rect2(p + Vector2(-isz * 0.5, -r - isz - (2.0 if compact else 6.0)), Vector2(isz, isz)), false, site_col)
 	var lines: Array = []
 	if compact:
 		lines.append([name_of(id).to_upper(), _f_name, 12, Color(H.TEXT_BRIGHT if known else H.TEXT_DIM, a)])
 	else:
 		lines.append([name_of(id).to_upper(), _f_name, 16, Color(H.TEXT_BRIGHT, a)])
 		if not site.is_empty():
-			lines.append([String(site.get("name", "Station")), _f_small, 13, H.HOLO])
+			lines.append([String(site.get("name", "Station")), _f_small, 13, site_col])
 		if not home:
 			lines.append([Sector.danger_text(id), _f_small, 13, Color(H.TEXT_DIM, a)])
 			if known or not (Sector.state(id).revealed.is_empty()):

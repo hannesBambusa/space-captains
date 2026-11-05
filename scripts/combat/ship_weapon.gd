@@ -73,6 +73,7 @@ func try_fire(target: Node3D) -> bool:
 		# A station-sized bubble cannot be missed: aim at its near surface.
 		pool.fire(from, (target as StationShield).aim_point(from, _rng), target, stats.weapon_damage, true, ship, color)
 		shots_fired += 1
+		ModuleWear.shot(ship as Ship)
 		return true
 	var tpos := target.global_position
 	var dist := from.distance_to(tpos)
@@ -90,6 +91,7 @@ func try_fire(target: Node3D) -> bool:
 		aim += (aim - from).normalized() * _rng.randf_range(20.0, 120.0)
 	pool.fire(from, aim, target, stats.weapon_damage, hits, ship, color)
 	shots_fired += 1
+	ModuleWear.shot(ship as Ship)
 	return true
 
 

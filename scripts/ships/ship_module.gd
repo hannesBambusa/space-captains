@@ -62,6 +62,10 @@ const TIER_NAMES: PackedStringArray = ["Stock", "Mk I", "Mk II", "Mk III"]
 ## Added to the hit chance per shot (targeting arrays).
 @export var accuracy_bonus: float = 0.0
 
+## Wear, 1 = new, 0 = broken (ModuleWear). A plain member, so a fresh copy
+## (duplicate) starts new; ShipCodec saves it per fitted module.
+var condition: float = 1.0
+
 
 func get_tier_name() -> String:
 	return TIER_NAMES[clampi(tier, 0, TIER_NAMES.size() - 1)]

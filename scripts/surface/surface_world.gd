@@ -76,6 +76,8 @@ var _nnodes := {}
 var _nest_clock := {}
 var _tracers: Array = []
 var _sync := 0.0
+## Landing time of the raid whose dropships are already shown.
+var _drops_for := -1.0
 
 
 static func current(tree: SceneTree) -> SurfaceWorld:
@@ -175,6 +177,75 @@ func _build_environment() -> void:
 	sun.shadow_enabled = true
 	sun.directional_shadow_max_distance = 3000.0
 	add_child(sun)
+	_build_sky(sun)
+
+
+## Sky distance of the star disc and the parent planet, m (inside camera.far).
+const SKY_DIST := 16000.0
+## Elevation of the star disc and the parent planet over the horizon. Low on
+## purpose: the camera only sees the sky when it levels out close to the
+## ground (SurfaceMode.PITCH_LOW). The sun light itself stays higher, for
+## readable shadows.
+const SKY_ELEVATION := deg_to_rad(11.0)
+
+
+## The system's star as a glowing disc on the sun's bearing and, on a moon,
+## its parent planet hanging low in the sky (the planet's own shader, lit
+## from the sun's side), in the camera's starting direction.
+func _build_sky(sun: DirectionalLight3D) -> void:
+	var outposts := Outposts.of(get_tree())
+	var w := outposts.station_world(outpost) if outposts else null
+	var to_sun := sun.basis.z
+	var sun_flat := Vector2(to_sun.x, to_sun.z).normalized()
+	var star_color := Color(1.0, 0.92, 0.8)
+	if w and w.sys and w.sys.star:
+		star_color = w.sys.star.color
+	sun.light_color = star_color.lerp(Color.WHITE, 0.6)
+	var star := MeshInstance3D.new()
+	star.name = "SkyStar"
+	var disc := SphereMesh.new()
+	disc.radius = 330.0
+	disc.height = 660.0
+	star.mesh = disc
+	var sm := StandardMaterial3D.new()
+	sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	sm.albedo_color = Star.surface_color(star_color).lerp(Color.WHITE, 0.5)
+	sm.emission_enabled = true
+	sm.emission = sm.albedo_color
+	sm.emission_energy_multiplier = 6.0
+	sm.disable_fog = true
+	star.material_override = sm
+	star.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	star.position = _sky_point(sun_flat)
+	add_child(star)
+	var body := PlanetInfo.find_planet(w, outpost.planet) if w else null
+	var parent := body.get_parent() as PlanetBody if body else null
+	if parent == null or parent.surface == null:
+		return
+	var pm := parent.surface.material_override as ShaderMaterial
+	if pm == null:
+		return
+	var mat := pm.duplicate() as ShaderMaterial
+	mat.set_shader_parameter("use_star_position", false)
+	mat.set_shader_parameter("sun_direction", to_sun.normalized())
+	var sky := MeshInstance3D.new()
+	sky.name = "SkyParent"
+	sky.mesh = parent.surface.mesh
+	sky.material_override = mat
+	sky.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# About 18 degrees across for a gas giant, 13 for anything else, its
+	# lower edge just over the horizon.
+	var r := 2600.0 if parent.def.type == PlanetDef.Type.GAS_GIANT else 1800.0
+	sky.scale = Vector3.ONE * r
+	# Where SurfaceMode's camera looks at the start (yaw 0.6), a little aside.
+	var look := Vector2(-sin(0.6), -cos(0.6)).rotated(deg_to_rad(-14.0))
+	sky.position = _sky_point(look)
+	add_child(sky)
+
+
+func _sky_point(flat_dir: Vector2) -> Vector3:
+	var d := flat_dir.normalized() * cos(SKY_ELEVATION)
+	return Vector3(d.x, sin(SKY_ELEVATION), d.y) * SKY_DIST
 
 
 # --- Nodes -------------------------------------------------------------------------
@@ -196,7 +267,10 @@ func _add_building_node(b: Dictionary) -> void:
 	n.position = deck_at(float(b["x"]), float(b["z"]))
 	if terrain.is_gas():
 		var deck := SurfaceModels.make("platform")
-		deck.scale = Vector3.ONE * (float(OutpostState.BUILDINGS[StringName(b["kind"])]["radius"]) + 12.0) / 60.0
+		deck.name = "PlatformDeck"
+		var ds := (float(OutpostState.BUILDINGS[StringName(b["kind"])]["radius"]) + 12.0) / 60.0
+		deck.scale = Vector3.ONE * ds
+		deck.set_meta(&"deck_scale", ds)
 		n.add_child(deck)
 	add_child(n)
 	_bnodes.append([b, n])
@@ -217,6 +291,12 @@ func _update_building_look(b: Dictionary) -> void:
 		return
 	var k := clampf(float(b.get("built", 1.0)), 0.05, 1.0)
 	n.scale = Vector3(1.0, k, 1.0)
+	# The gas giant deck under it is finished from the start: undo the build
+	# squash on it (its top sits at the node's origin, so only its depth scales).
+	var deck := n.get_node_or_null(^"PlatformDeck") as Node3D
+	if deck:
+		var ds := float(deck.get_meta(&"deck_scale", 1.0))
+		deck.scale = Vector3(ds, ds / k, ds)
 
 
 func _add_deposit_node(i: int) -> void:
@@ -267,9 +347,12 @@ func add_crew(c: Dictionary) -> void:
 	_spawn_crew(c)
 
 
-func spawn_raid(size: int, source: String) -> void:
-	var a := randf() * TAU
-	var at := Vector2(cos(a), sin(a)) * (OutpostState.ZONE_SIZE * 0.47)
+## Ground raid of [param size] tanks at the drop point on bearing [param a]
+## (radians round the pad; below 0 picks one), where its dropships set down.
+func spawn_raid(size: int, source: String, a: float = -1.0) -> void:
+	if a < 0.0:
+		a = randf() * TAU
+	var at := drop_point(a)
 	for i in size:
 		var u := Unit.new()
 		u.kind = "raider"
@@ -279,6 +362,40 @@ func spawn_raid(size: int, source: String) -> void:
 		u.leave_at = SimClock.time + 240.0
 		_add_unit(u, "raider_tank", at + Vector2(randf_range(-60, 60), randf_range(-60, 60)))
 	EventLog.post("%s raiders landed on %s: %d tanks" % [source, outpost.planet, size], EventLog.Kind.THREAT)
+
+
+## A raid's drop point on bearing [param a], near the zone edge.
+static func drop_point(a: float) -> Vector2:
+	return Vector2(cos(a), sin(a)) * (OutpostState.ZONE_SIZE * 0.47)
+
+
+## The coming raid's dropships, shown [constant RaidDropship.DESCENT] sim
+## seconds before it lands (one per three tanks, side by side).
+func _drop_step() -> void:
+	var r := outpost.raid
+	if r.is_empty():
+		return
+	var at := float(r["at"])
+	if SimClock.time < at - RaidDropship.DESCENT or SimClock.time >= at or is_equal_approx(_drops_for, at):
+		return
+	_drops_for = at
+	if not r.has("a"):
+		r["a"] = randf() * TAU      # a raid formed before drop bearings were saved
+	var a := float(r["a"])
+	var c := drop_point(a)
+	var inward := Vector3(-cos(a), 0.0, -sin(a))
+	var side := Vector2(-sin(a), cos(a))
+	var n := ceili(int(r["size"]) / 3.0)
+	for i in n:
+		var p := c + side * (float(i) - (n - 1) * 0.5) * 70.0
+		var land := ground_at(p.x, p.y)
+		if terrain.has_liquid():
+			land.y = maxf(land.y, SurfaceTerrain.LIQUID_LEVEL)
+		if terrain.is_gas():
+			land.y = maxf(land.y, 0.0) + DRONE_HEIGHT
+		var ship := RaidDropship.new()
+		ship.setup(land, at, inward)
+		add_child(ship)
 
 
 ## Hostiles saved on the ground (OutpostState.pending_ground) come back live.
@@ -334,6 +451,7 @@ func sim_step(dt: float) -> void:
 			_update_building_look(b)
 	_nests_step(dt)
 	_dome_step(dt)
+	_drop_step()
 	for u in units.duplicate():
 		if u.dead:
 			continue
@@ -585,7 +703,7 @@ func _nests_step(dt: float) -> void:
 		var ag := float(n["agitation"])
 		if ag >= OutpostState.AGITATION_ATTACK:
 			n["agitation"] = ag - OutpostState.AGITATION_ATTACK
-			_spawn_wave(i, 2 + floori(ag / 25.0))
+			_spawn_wave(i, mini(2 + floori(ag / 25.0), 2 + outpost.danger))
 
 
 func _dome_step(dt: float) -> void:

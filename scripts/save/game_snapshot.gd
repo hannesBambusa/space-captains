@@ -8,7 +8,8 @@ extends RefCounted
 ## both in the same flat Dictionary. Home is saved as a system, and so is
 ## every forward station system (F3: "forward", by id, loaded together
 ## with home, [method apply_systems]); the other remote ones are data in
-## Sector ("cluster"), live ones sync into it first (ViewManager.sync_states);
+## Sector ("cluster"), live ones sync into it first (ViewManager.sync_states;
+## a rival station world that is data keeps its whole world there, RivalData);
 ## a load always starts at home.
 ##
 ## Saved: the sim clock, economy, event log, every captain (all fields,
@@ -97,7 +98,10 @@ static func capture(tree: SceneTree) -> Dictionary:
 	return d
 
 
-## The live forward station systems (pinned, with a station), by id.
+## The live forward station systems (pinned, with a station; a live rival
+## station world also while it is out of view in the grace time), by id. A
+## rival world that is data is saved with Sector (RemoteSystemState.world,
+## RivalData).
 static func station_worlds(tree: SceneTree) -> Dictionary:
 	var out := {}
 	var vm := ViewManager.of(tree)
@@ -105,7 +109,7 @@ static func station_worlds(tree: SceneTree) -> Dictionary:
 		return out
 	for id: StringName in vm.worlds:
 		var w := vm.world(id)
-		if w and not w.is_home and w.has_station and vm.is_pinned(id):
+		if w and not w.is_home and w.has_station and (vm.is_pinned(id) or RivalData.is_rival_world(w)):
 			out[id] = w
 	return out
 

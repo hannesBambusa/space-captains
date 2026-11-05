@@ -19,7 +19,9 @@ extends Node
 ##   is on a [GateTransit] (that one runs its phases as data, step_data).
 ## Ships between gates ([method enqueue]) come out after
 ## GateTransit.TRANSIT_TIME: built in the target if it is live (home always
-## is), else stored in its state.
+## is), else stored in its state. A rival station world that is data is
+## built first for another corp's ships (RivalWorlds.before_arrival); its
+## own data step is RivalData's.
 ##
 ## Explorers ([Survey.step_data]): an explorer dict surveying here walks
 ## its route with [method start_trip] and reveals along it with the same
@@ -140,6 +142,9 @@ func _step_transits() -> void:
 		Sector.transits.erase(t)
 		var to: StringName = t["to"]
 		var d: Dictionary = t["ship"]
+		# Another corp's ships coming into a rival world that is data build it first.
+		if vm and vm.rival_worlds:
+			vm.rival_worlds.before_arrival(to, d)
 		var w := vm.world(to) if vm else null
 		var def := Sector.system_def(to)
 		var where := def.system_name if def else String(to)

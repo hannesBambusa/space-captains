@@ -459,8 +459,10 @@ func _draw_map() -> void:
 	c.draw_circle(origin, 5.5, Color(STAR_COLOR, 0.25))
 	if is_instance_valid(sys.home_station):
 		var hm := _to_map(sys.home_station.global_position)
-		c.draw_rect(Rect2(hm - Vector2(3.5, 3.5), Vector2(7.0, 7.0)), HOME_COLOR, true)
-		if markers:
+		var w := SystemWorld.of(sys)
+		var corp := Corps.corp_of_system(w.system_id) if w else Corps.PLAYER
+		c.draw_rect(Rect2(hm - Vector2(3.5, 3.5), Vector2(7.0, 7.0)), Corps.color_of(corp, HOME_COLOR), true)
+		if markers and corp == Corps.PLAYER:
 			c.draw_arc(hm, markers.home_threat_radius / sc, 0.0, TAU, 64, Color(HOME_COLOR, 0.25), 1.0, true)
 	var bubble := StationShield.find(self)
 	if bubble and bubble.is_up():

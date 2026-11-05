@@ -668,7 +668,8 @@ static func _loadout_tooltip(s: Ship) -> String:
 	var lines: PackedStringArray = []
 	for slot in ShipModule.Slot.values():
 		var m := s.loadout.get_module(slot)
-		lines.append("%s: %s" % [ShipModule.SLOT_NAMES[slot], m.display_name if m else "empty"])
+		var wear := ModuleWear.condition_text(m)
+		lines.append("%s: %s%s" % [ShipModule.SLOT_NAMES[slot], m.display_name if m else "empty", " (%s%s)" % [wear, ", worn" if ModuleWear.is_worn(m) else ""] if not wear.is_empty() else ""])
 	lines.append("")
 	lines.append("Hull %d, shields %d (+%d/s)" % [roundi(st.max_hull), roundi(st.max_shields), roundi(st.shield_regen)])
 	lines.append("Speed %d m/s, turn %d deg/s, dodge %d%%" % [roundi(st.max_speed), roundi(st.turn_rate_deg), roundi(st.dodge * 100.0)])

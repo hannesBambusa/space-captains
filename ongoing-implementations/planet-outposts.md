@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | built, needs a play test |
-| **Branch** | main (uncommitted) |
-| **Updated** | 2026-11-03 |
+| **Status** | built (follow-ups done but the play test and raid sizes), needs a play test |
+| **Branch** | main (S0 to S5 in db35437; follow-ups uncommitted) |
+| **Updated** | 2026-11-04 |
 | **Scope** | Surface outposts on planets and moons (4 km landing zone, own world while viewed), replacing planet raids. S0 to S5 built; follow-ups in Remaining. |
 
 ## Files
@@ -16,8 +16,12 @@
 - `scripts/surface/surface_terrain.gd`, `shaders/terrain_surface.gdshader`: heightfield and ground shader
 - `scripts/surface/surface_world.gd`: live world (units, combat, picking)
 - `scripts/surface/surface_mode.gd`: planet mode overlay, camera, input
-- `scripts/surface/surface_models.gd`: .glb or primitive stand-ins
-- `scripts/surface/uplink_shuttle.gd`: the visual lift in the station's system
+- `scripts/surface/surface_models.gd`: loads `assets/models/surface/<id>.glb`, primitive stand-ins for the rest (floater, storm_cell, deposits)
+- `blender/gen_surface.py` (`-- --only=<id>[,<id>]`, `--no-textures`, `--no-preview`, `--no-sheet`; full run about 3 min), `blender/surface/<id>.blend`
+- `assets/models/surface/<id>.glb` (+ extracted textures and `.import`) for landing_pad, harvester_bay, garrison, ground_turret, shield_dome, harvester, hover_tank, raider_tank, critter, nest, platform
+- `blender/textures/surface_<id>_{albedo,mr,normal}.jpg`, `_decals.png`; `blender/previews/surface_<id>.png`, `blender/previews/surface_sheet.png`
+- `scripts/surface/uplink_shuttle.gd`: the station-system flights, visual only: lifts up onto a docking pad, the founding lander (dropship) down to the planet
+- `scripts/surface/raid_dropship.gd`: RaidDropship, a ground raid's dropship on the live surface (visual only)
 - `scripts/ui/surface_hud.gd`: planet mode HUD
 - `scripts/planet_info.gd`: find_planet, danger_for (moved off the raid contract)
 
@@ -26,8 +30,9 @@
 - `scripts/cluster/sector.gd` (outposts dict, save), `scripts/view_manager.gd` (Outposts child)
 - `scripts/ui/planet_panel.gd` (OUTPOST section, raid form gone), `scripts/ui/overview_panel.gd`, `scripts/selection_controller.gd` (double-click)
 - `scripts/enemies/planet_claims.gd`, `scripts/enemies/threat_director.gd` (claim_blocked)
-- `scripts/building_manager.gd` (_retire_dock), `scripts/save/{contract_codec,ship_codec,game_snapshot,save_manager}.gd`
+- `scripts/building_manager.gd` (_retire_dock), `scripts/solar_system.gd` (add_station falls back to another planet for old saves, `_fallback_host`), `scripts/save/{contract_codec,ship_codec,game_snapshot,save_manager}.gd`
 - Raid removal edits: `scripts/ai/{captain_brain,decision_notes}.gd`, `scripts/contracts/{contract,contract_board,contract_markers}.gd`, `scripts/enemies/{scavenger_brain,claim_garrison}.gd`, `scripts/ships/ship_loadout.gd`, `scripts/combat/scrap_field.gd`, `scripts/defense/defense_zones.gd`, `scripts/economy.gd`, `scripts/ui/{top_bar,contract_strip,contract_row,pilot_card,factory_panel,captain_panel,post_contract_form,research_tip,pilot_roster,tutorial_card,hud}.gd`
+- Deleted (follow-ups): the Raider Dock model: `assets/models/buildings/raider_dock*` (glb, 3 textures, imports), `blender/gen_raider_dock.py`, `blender/raider_dock.blend`, `blender/textures/raider_dock_*`, `blender/previews/raider_dock_*`, `assets/ui/icons/build/raider_dock.png` (+ import); its line in `blender/render_icons.py`. `BuildingManager.RETIRED_DOCK` stays for old saves.
 - Deleted: `scripts/contracts/planet_raid_{contract,rules}.gd`, `scripts/lander_ship.gd`, `scripts/ai/lander_{brain,evaluator}.gd`, `data/buildings/raider_dock.tres`, `data/contracts/planet_raid_rules.tres`, `data/loadouts/lander_default.tres`
 - `data/research/{pln_assault_doctrine,pln_heavy_dropships,eng_armoured_dropships}.tres` (renamed in text, ids kept), `data/modules/*.tres` ("Lander" role dropped), `scenes/system.tscn` (dock def dropped)
 - `tools/smoke.sh`, `tools/smoke_test.gd` (`--surface`), `docs/DESIGN.md`, `CLAUDE.md`
@@ -43,6 +48,14 @@
 - S5: planet raid code deleted; techs renamed with effects wired (OutpostState.shuttle_load, max_hull); old-save migration (dock refunded, landers bought out, raid contracts dropped); loads tuned to about 200 cr/min net for 2 harvesters; `--surface` smoke; DESIGN.md and CLAUDE.md.
 - Review round (workflow, 5 areas, 3 skeptics per finding): 29 of 30 findings confirmed and fixed except fuel. Fixed: building nodes piling up, hidden-HUD keys, view switch under the surface, disabled dome still shielding, saves erasing a live raid (hostiles saved as "ground", resolved after load), offers expiring unseen (they wait, the surface HUD shows a button), trackpad zoom, fleeing harvesters dropping loads, a dead pad repaired before the loss check, repair cost piling up unpaid, data soldiers never healing, claims during the lander flight, lifts lost with the outpost, deposits under buildings, outposts outliving their station, berths counting unfinished bays, dock depot loot and orphaned lander captains in old saves, the outposts RNG not saved, ledger entries without their system.
 - Second review round (fix check per finding plus a regression hunt): 21 of 27 fixes clean; fixed the rest and 14 new findings: offers now frozen (not floored), Escape handled on the surface, Shift+'+' passes, panels closed on entering, hire reasons shown as text, saved hostiles kept through a second save and spawned live when entering, harvester trips synced on leaving, dome shield back after a data repair, soldier repair needs a working garrison, claim raids give 150 s after landing, data hits capped at 60% of hull, dock refund pads the ore array.
+- Follow-ups (2026-11-04):
+  - Founding lander: a dropship flies from a station docking pad down to the planet over the 60 s founding (`UplinkShuttle.setup_lander`, `Outposts._show_lander`; shown again part way after a load or a view switch). Lifts settle on a docking pad, alternating pads (`UplinkShuttle.setup`, `Outposts._lift_count`).
+  - Ground raids: every raid gets a drop bearing (`o.raid["a"]`, set in `_raid_clock` and `claim_blocked`; old raids get one on the surface). The live surface shows one dropship per three tanks 14 s before landing; they set down at the drop point exactly when the tanks spawn there (`SurfaceWorld._drop_step`, `drop_point`, `spawn_raid(size, source, a)`), wait 5 s and leave.
+  - Fade from black on entering and leaving the surface (`SurfaceMode.fade_in`, 0.45 s, input passes through, runs paused).
+  - The surface camera levels out from 52 to 20 degrees as it zooms in (`SurfaceMode.PITCH_LOW`, `LEVEL_FROM`) and stays 15 m over the ground. Close in, the sky shows the star as a glowing disc on the sun's bearing (tinted by the system's star) and, on a moon, its parent planet low over the horizon with the planet's own shader (`SurfaceWorld._build_sky`).
+  - Surface models: `blender/gen_surface.py` exports 11 models in the station's worn-industrial style (worn_kit bake, 1024 or 2048 per model; critter and nest vertex colour, organic). Tris: pad 3.1k, bay 2.8k, garrison 3.1k, turret 0.9k, dome 2.5k, platform 2.1k, harvester 1.0k, hover tank 1.0k, raider tank 1.1k, critter 1.6k, nest 4.4k. All inside the stand-in footprints. Checked in game next to the 44 m dropships. The gas giant deck under a building is counter-scaled while it is built (`SurfaceWorld._update_building_look`, "PlatformDeck"); seen live on Tavros with a bay at 8%, and a raid's dropship and tanks set down over the clouds at deck height.
+  - Old saves: all 16 real pre-outpost saves (generator v2 to v4) load and run 2 sim min. Saves 10 to 12 failed: their forward / rival stations sat on planets the v5 generator no longer makes ("Planet 101"), so BuildingManager spawned onto a null frame. `SolarSystem.add_station` now moves such a station to the innermost non-gas-giant planet and writes the new name into the site (`_fallback_host`); all 16 load with 0 script errors. The Raider Dock refund, injected into a real save: 900 + 550 per lander cr, ore plus depot, crew retired, feed line posted. (Temporary tool, deleted.) Default smoke and `--forward --save-roundtrip` 0 errors after the change.
+  - Checked live in a window (temporary tool, deleted): lander at the pad and on its way, the lift 13 m over pad 0 at 95%, fade frames black then clear, Noctis over Iru, 2 dropships landing 4 tanks at the drop point; `--surface` smoke 0 errors.
 - Checked: smoke default, --surface (12 and 20 min), --forward --save-roundtrip, --rival --war, --rival --save-roundtrip, --multi, --multi --long, --explore: all 0 errors. Screenshots of lava, rocky and ice surfaces looked right.
 
 ## Gotchas
@@ -52,6 +65,12 @@
 - Leaving the surface frees its hostiles; SurfaceMode.leave resolves them as a data attack so leaving is not an escape.
 - look_at errors when the direction is parallel to up: tracers and the uplink shuttle guard it.
 - Godot hashes a Dictionary used as a key by its contents: building dicts change every step, so SurfaceWorld keeps [dict, node] pairs and looks up with is_same.
+- Surface models are not dimmed like station buildings (`ModelLoader.BUILDING_LIGHT_DIM`): gen_surface.py scales the worn_kit emissives by `EMIT_K = 0.4` and keeps its own glows at 2 to 4.
+- Building nodes scale on Y by build progress: anything parented under a building (the gas giant deck) gets squashed unless it undoes the scale.
+- Old saves regenerate their systems with the current SystemGenerator.VERSION (v5 since db35437, which also changed ore weights and star colours): planet names can differ, so anything saved by planet name (station sites, outposts "system|planet") can point at a planet that no longer exists. Stations fall back (`SolarSystem._fallback_host`); outposts did not exist before v5.
+- A headless check that never quits (a parse error in a tool scene) hangs until the timeout: run new tool scenes once briefly first.
+- `SolarSystem.home_station` is an Orbiter; the HomeStation (docking pads) is its "Station" child. A typed `as HomeStation` cast on it fails to parse.
+- The surface camera only sees sky when it levels out close in (pitch 20 at 90 m). The star disc and the parent planet sit 11 degrees up for that reason; the sun light stays at 38 degrees for readable shadows, so the disc is lower than the light.
 - Godot runs _unhandled_key_input on every node before any _unhandled_input, and a hidden CanvasLayer still gets input: SurfaceMode takes keys in _input, or the hidden HUD's shortcuts fire first.
 - Outposts must join its group in _enter_tree: the HUD's _ready asks for it before Outposts._ready runs.
 - Ship.Role.LANDER, Captain.Specialty.LANDING and Contract.Type.PLANET_RAID stay in their enums: saves store the indices.
@@ -59,21 +78,13 @@
 ## Remaining
 
 
-- Play test in the editor: placing, hiring, contracts, a raid on screen, the feel of the camera.
-- Blender models for the surface (assets/models/surface/<id>.glb, blender/gen_surface.py); stand-ins now.
-- Raids appear at the zone edge with no dropship; the founding lander is a timer with no visual.
-- Uplink shuttles fly to the station centre, not a docking pad.
-- No fade on entering or leaving; the sky has no star disc or parent planet.
-- Old-save migration not tried on a real pre-outpost save.
-- Raid sizes are harsh early: a forced 5-tank raid at danger 3 killed a harvester against 2 soldiers and a turret.
-- assets/models/buildings/raider_dock.glb and assets/models/ships/dropship.glb are unused now: delete, or reuse the dropship for the founding lander and raid drops.
+- **Play test in the editor (user):** placing, hiring, contracts, a raid on screen, the feel of the camera (it now levels out close in).
+- Vehicles are a few pixels across at the default zoom: they tell apart by colour and glow only (soldier: red hull, cyan glow; raider: dark hull, red turret, orange glow). Worth a look in the play test.
+- Raid sizes: the new table (Decisions) is not play-tested yet; part of the play test.
 
 ## Open questions
 
-- Should rivals found outposts too, and when? (v1: no)
-- Exact critter and pirate drop sizes per danger level?
-- How fast new deposits turn up after one runs out?
-- Is hovering over the heightfield enough, or do outposts need obstacles and ground pathfinding?
+- None.
 
 ## Decisions
 
@@ -96,3 +107,8 @@
 - **Outposts are plain data in Sector; the live world edits that data directly.** Nothing to write back on leaving.
 - **Harvest contracts live in OutpostState, not the ContractBoard.** Keeps the board and its UI free of surface rules.
 - **Danger and planet lookup moved to PlanetInfo** so nothing depends on the deleted raid classes.
+- **Rivals found no outposts in v1; deposit respawn timing stays; hovering over the heightfield is enough (no obstacles or ground pathfinding).** Claude's call, the user delegated these (2026-11-04).
+- **Ground raid sizes by danger: tanks 2 (danger 1 to 2), 2 to 3 (3), 3 to 4 (4), 4 to 5 (5); 2 at most in the first 25 min after landing (`Outposts.FIRST_RAIDS_GRACE`); critter swarms capped at 2 + danger.** Claude's call, delegated; claim raids keep their own size (2 to 6). `scripts/surface/outposts.gd` `_raid_clock`, `_data_step`; `scripts/surface/surface_world.gd` `_nests_step`
+- **The dropship model is reused for the founding lander and raid drops; the Raider Dock model is deleted.** Recommended by Claude, user said to build it.
+- **Raid dropships are visual only and land exactly at the raid time.** Raid timing and data rolls are unchanged.
+- **Fade in from black, not a fade out first.** SurfaceMode.enter and leave stay synchronous (smoke and callers rely on it).

@@ -30,12 +30,17 @@ var raid_timer := -1.0
 ## (deg), founded_at (SimClock time), name} (SolarSystem.add_station,
 ## SystemWorld.has_station).
 var station: Dictionary = {}
+## A rival station world while it is data (RivalData.capture: the
+## GameSnapshot.capture_system part with its contracts and the data sim's
+## "data"), {} while it is live or for any other system.
+var world: Dictionary = {}
 
 
 func to_dict() -> Dictionary:
 	# Deep copies: the snapshot must not change with the live state.
 	return {"known": known, "seen": last_seen, "revealed": revealed.duplicate(), "dens": dens.duplicate(true), "clusters": clusters.duplicate(true),
-			"looted": looted.duplicate(), "ships": ships.duplicate(true), "scrap": scrap.duplicate(true), "raid": raid_timer, "station": station.duplicate(true)}
+			"looted": looted.duplicate(), "ships": ships.duplicate(true), "scrap": scrap.duplicate(true), "raid": raid_timer, "station": station.duplicate(true),
+			"world": world.duplicate(true)}
 
 
 static func from_dict(d: Dictionary) -> RemoteSystemState:
@@ -50,4 +55,5 @@ static func from_dict(d: Dictionary) -> RemoteSystemState:
 	s.scrap = (d.get("scrap", []) as Array).duplicate(true)
 	s.raid_timer = float(d.get("raid", -1.0))
 	s.station = (d.get("station", {}) as Dictionary).duplicate(true)
+	s.world = (d.get("world", {}) as Dictionary).duplicate(true)
 	return s

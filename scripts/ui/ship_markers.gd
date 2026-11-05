@@ -212,7 +212,8 @@ func arrow_targets() -> Array[Node3D]:
 
 
 ## Role colour of the pilot list for captain ships, hostiles in their
-## faction's colour (scavengers red, their raiders orange).
+## faction's colour (scavengers red, their raiders orange), a rival corp's
+## ships in that corp's colour.
 static func color_for(n: Node3D) -> Color:
 	if n is ScavengerDen:
 		return (n as ScavengerDen).faction_def.color
@@ -224,6 +225,11 @@ static func color_for(n: Node3D) -> Color:
 	var s := n as Ship
 	if s == null:
 		return Color.WHITE
+	# A rival corp's ships (at war or not) in its own colour, so they never
+	# pass for the player's.
+	var corp := Corps.owner_of(s)
+	if corp != Corps.PLAYER and not corp.is_empty() and Corps.rival(corp):
+		return Corps.color_of(corp, Color.WHITE)
 	if s.is_hostile():
 		return SCAVENGER_COLOR
 	match s.role:
