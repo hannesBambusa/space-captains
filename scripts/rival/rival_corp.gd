@@ -206,6 +206,7 @@ func sim_step(dt: float) -> void:
 func _step_rival(r: Corp) -> void:
 	var m := r.mind
 	_check_contacts(r)
+	_milestones(r)
 	for k: StringName in m.ties:
 		var t: RivalMind.Tie = m.ties[k]
 		t.grudge = maxf(t.grudge - 0.02, 0.0)
@@ -980,6 +981,87 @@ func _pact_trade(r: Corp, dt: float) -> void:
 
 
 # --- Helpers ----------------------------------------------------------------------------
+
+# --- Milestones -------------------------------------------------------------------
+
+## Rival milestones the player hears about: [building id, how many finished,
+## what it reads as]. Then its first research and its first forward station
+## ([method _milestones]).
+const MILESTONES := [
+	[&"mining_outpost", 1, "its first Mining Outpost"],
+	[&"mercenary_outpost", 1, "its first Mercenary Outpost"],
+	[&"defense_turret", 1, "its first Defense Turret"],
+	[&"science_lab", 1, "a Science Lab"],
+	[&"explorer_outpost", 1, "an Explorer Outpost"],
+	[&"outfitter", 1, "an Outfitter"],
+	[&"shield_generator", 1, "a Shield Generator"],
+	[&"mining_outpost", 3, "its third Mining Outpost"],
+	[&"mercenary_outpost", 2, "a second Mercenary Outpost"],
+]
+## Milestones that also get a toast (the rest only the event feed and intel).
+const BIG_MILESTONES: PackedStringArray = ["b:science_lab:1", "b:explorer_outpost:1", "forward", "research"]
+
+
+## Announces each milestone [param r] reached since the last check, once
+## (keys in its mind's stats "milestones", saved with it). Named once you are
+## in contact, "a rival charter" before. A save from before milestones
+## existed (RivalMind.from_dict) marks what the rival already has without
+## announcing it. Counts
+## finished buildings at every station of the rival, live or data.
+func _milestones(r: Corp) -> void:
+	var m := r.mind
+	var silent := bool(m.stats.get("milestones_silent", false))
+	m.stats.erase("milestones_silent")
+	var done: Array = m.stats.get("milestones", [])
+	var have := _finished_buildings(r.id)
+	var reached: Array = []
+	for ms: Array in MILESTONES:
+		if int(have.get(ms[0], 0)) >= int(ms[1]):
+			reached.append(["b:%s:%d" % [ms[0], ms[1]], "built %s" % ms[2]])
+	if not r.research.done.is_empty():
+		var first: StringName = r.research.done.keys()[0]
+		var t := r.research.catalog().find(first)
+		reached.append(["research", "finished its first research%s" % (" (%s)" % t.display_name if t else "")])
+	if WarStrikes.station_systems(r.id).size() > 1:
+		reached.append(["forward", "founded its first forward station"])
+	for x: Array in reached:
+		if done.has(x[0]):
+			continue
+		done.append(x[0])
+		if silent:
+			continue
+		var who := r.display_name if m.tie(P).contact else "a rival charter"
+		var text := "Intel: %s %s" % [who, x[1]]
+		if not m.tie(P).contact:
+			text = "Long-range intel: %s %s" % [who, x[1]]
+		_public(r, text)
+		if BIG_MILESTONES.has(x[0]):
+			_toast(text.trim_prefix("Intel: ").trim_prefix("Long-range intel: "))
+	m.stats["milestones"] = done
+
+
+## Finished buildings of [param rid] by def id, over its HQ and forward
+## stations (live worlds, or the saved world of a data one).
+func _finished_buildings(rid: StringName) -> Dictionary:
+	var out := {}
+	var vm := get_parent() as ViewManager
+	for sid in WarStrikes.station_systems(rid):
+		var w := vm.world(sid) if vm else null
+		if w and w.buildings:
+			for b in w.buildings.buildings:
+				if is_instance_valid(b) and b.is_active() and Corps.corp_of_node(b) == rid:
+					out[b.def.id] = int(out.get(b.def.id, 0)) + 1
+			continue
+		var st := Sector.state(sid)
+		if st == null or st.world.is_empty():
+			continue
+		var ids := {}
+		for ms: Array in MILESTONES:
+			ids[ms[0]] = true
+		for id: StringName in ids:
+			out[id] = int(out.get(id, 0)) + RivalData.count(st.world, id, true)
+	return out
+
 
 func _public(r: Corp, text: String, kind: EventLog.Kind = EventLog.Kind.INFO) -> void:
 	r.mind.note(text, true)

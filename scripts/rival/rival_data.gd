@@ -37,8 +37,11 @@ extends RefCounted
 ##   wages included (CorpResearch.data_lab stands in for the lab);
 ## - the build plan: RivalManager's priorities and thresholds on the counts
 ##   ([method _plan]), paying the real costs into "builds" and "hires".
-## Not modelled while data: pirate raids and losses, escorts, defence
-## zones, den bounties. A Forward Station that is due asks for the world
+## Not modelled while data: escorts, defence zones, den bounties. Pirate
+## raids are left out on purpose: measured live (smoke --rival --rival-live,
+## 60 min) they cost a rival next to nothing, its mercs and turrets kill
+## the raiders (0 ships lost, no cargo stolen, 1 to 2% of miner time
+## fleeing over 5 to 8 raids). A Forward Station that is due asks for the world
 ## live (RivalWorlds.request) so RivalManager founds it.
 ##
 ## The rates are from live smoke runs (see the rival corporation doc).

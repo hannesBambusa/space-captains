@@ -40,13 +40,9 @@ func run() -> void:
 	var note := func(text: String) -> void: _note("", text)
 	if hq:
 		RivalManager.swap_for_iron(eco, note)
+		RivalManager.sell_surplus(eco, note)
 		RivalManager.swap_for_goal(eco, _goal_or_forward(), note)
-	var done := 0
-	for step: Callable in _plan():
-		if done >= RivalManager.ACTIONS_PER_TICK:
-			break
-		if bool(step.call()):
-			done += 1
+	RivalManager.run_plan(r.id, _plan())
 
 
 func _minutes() -> float:

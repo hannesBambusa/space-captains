@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Status** | built; all 37 voice lines done, tutorial test passes; new lines want a listen |
-| **Branch** | main (uncommitted) |
+| **Status** | built and committed; needs your listen and play test |
+| **Branch** | main (all committed, last in c4c3778) |
 | **Updated** | 2026-11-05 |
 | **Scope** | Main menu Tutorial: a guided game (ACADEMY, 10 chapters, 35 steps) told as a story by SOLA, the station AI, with ElevenLabs voice lines, replay button and its own music. |
 
@@ -49,7 +49,7 @@
 
 **Music.** `AudioDirector` fades `tutorial_music.mp3` in (-8 dB, Music bus) while ACADEMY runs, out on quit; Music ducks under Voice (compressor threshold -28, ratio 2.5, sidechain Voice). `scripts/audio_director.gd`, `default_bus_layout.tres`
 
-**Tests.** `Godot --headless --path . res://tools/tutorial_test.tscn`: 40 TUT ok, 0 FAIL on 2026-11-04; on 2026-11-05 all ok again after the camera wait fix (Gotchas) (chapters, jumps, grants, raid gate, save round trip, quit restores raids, music and ducking, voice and replay, station zoom, time step pulse).
+**Tests.** `Godot --headless --path . res://tools/tutorial_test.tscn`: 40 TUT ok, 0 FAIL on 2026-11-04; on 2026-11-05 all ok again after the camera wait fix (Gotchas), and again later that day after the asteroid cluster change (chapters, jumps, grants, raid gate, save round trip, quit restores raids, music and ducking, voice and replay, station zoom, time step pulse). `tools/smoke.sh` (QUICK card in a normal game) ran clean on 2026-11-05: 0 script errors.
 
 ## Gotchas
 
@@ -67,7 +67,6 @@
 
 - **Listen to the 26 new lines** (made 2026-11-05, checked only by voiceprint). Closest to the edge: tech_done (1.57, slow and a bit dark), explore (1.42, dark), hire_salvager (1.37, low pitch), gear_sale (1.27, short so the numbers are noisy). Remade: rivals, hire_explorer (seed 41).
 - **Play test the academy by hand** end to end; only the headless test and screenshots have run.
-- **Not run since tutorial edits:** `tools/smoke.sh` (QUICK card path in a normal game).
 
 ## Open questions
 

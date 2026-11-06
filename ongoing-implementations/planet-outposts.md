@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Status** | built (follow-ups done but the play test and raid sizes), needs a play test |
-| **Branch** | main (S0 to S5 in db35437; follow-ups uncommitted) |
-| **Updated** | 2026-11-04 |
+| **Branch** | main (S0 to S5 in db35437, follow-ups in c4c3778; raider range fix uncommitted) |
+| **Updated** | 2026-11-05 |
 | **Scope** | Surface outposts on planets and moons (4 km landing zone, own world while viewed), replacing planet raids. S0 to S5 built; follow-ups in Remaining. |
 
 ## Files
@@ -58,6 +58,10 @@
   - Checked live in a window (temporary tool, deleted): lander at the pad and on its way, the lift 13 m over pad 0 at 95%, fade frames black then clear, Noctis over Iru, 2 dropships landing 4 tanks at the drop point; `--surface` smoke 0 errors.
 - Checked: smoke default, --surface (12 and 20 min), --forward --save-roundtrip, --rival --war, --rival --save-roundtrip, --multi, --multi --long, --explore: all 0 errors. Screenshots of lava, rocky and ice surfaces looked right.
 
+- Raider range fix: raiders weigh buildings at 0.6 of their distance to prefer them, but that scaled number also fed the range check, so they hit buildings from about 550 m plus the radius, outside the turret's 520 m (seen: a raider 770 m out shooting the Harvester Bay). The range check now uses the real gap. `scripts/surface/surface_world.gd` `_hostile_step`
+- Live raid check (temp harness, removed), 2 soldiers and a turret: 2 tanks die in 60 to 80 s with no building damage and no crew lost; 4 tanks disable the turret and the bay and scratch the pad, but no crew are lost and the raiders die by 150 s. The raid size table stays.
+- Vehicle readability at the default zoom (520 m) checked in screenshots: yellow harvesters, red soldiers and dark raiders with orange beams read apart; soldiers repairing next to the garrison are hard to spot.
+
 ## Gotchas
 
 - JSON turns ints into floats. OutpostState.from_dict re-ints crew, deposit and lift fields (_ints); real saves use var_to_bytes, but keep the dict round trip clean.
@@ -77,10 +81,8 @@
 
 ## Remaining
 
-
-- **Play test in the editor (user):** placing, hiring, contracts, a raid on screen, the feel of the camera (it now levels out close in).
-- Vehicles are a few pixels across at the default zoom: they tell apart by colour and glow only (soldier: red hull, cyan glow; raider: dark hull, red turret, orange glow). Worth a look in the play test.
-- Raid sizes: the new table (Decisions) is not play-tested yet; part of the play test.
+- **Play test in the editor (user):** placing, hiring, contracts, and the feel of the camera (it now levels out close in). Vehicle readability and raid sizes were checked by Claude (see Built); worth a second look while playing.
+- Smoke `--surface` net income varies 77 to 287 cr/min between runs (unseeded surface rolls) and mostly sits under the 150 to 250 target. 9 minutes with the founding and a raid is a short window; judge it in the play test before tuning.
 
 ## Open questions
 

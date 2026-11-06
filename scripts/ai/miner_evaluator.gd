@@ -17,6 +17,13 @@ extends RoleEvaluator
 ## the defense and engine slots count one danger level less (at most
 ## [constant GEAR_MAX_RELIEF]), so Mk II/III gear from the Factory opens the
 ## dangerous belts.
+## Escort queue: miners on an escorted contract wait in the berth until an
+## escort joins them, and each escort flies with one miner at a time. So a
+## miner refuses an escorted contract ([constant ESCORT_QUEUE]) while as
+## many miners already wait for an escort on it as mercenaries have taken
+## the escort contract (at least one waits for the first): a well-paid
+## escorted job no longer pulls every miner into the berths while the
+## other work stops.
 ## Traits (see CaptainTraits): Crystal Hound +[constant CRYSTAL_HOUND_BONUS] on
 ## crystal belts; Lone Wolf ignores escort cover and scores solo work
 ## +[constant LONE_WOLF_BONUS]; Union Rep scores below-fair pay
@@ -27,6 +34,7 @@ const ESCORT_DANGER_RELIEF := 2
 const CRYSTAL_HOUND_BONUS := 0.3
 const GEAR_TIERS_PER_LEVEL := 3
 const GEAR_MAX_RELIEF := 2
+const ESCORT_QUEUE := "Too many waiting for an escort"
 
 
 ## Danger levels a ship's defense and engine modules take off.
@@ -77,4 +85,25 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 			"reward": mc.reward, "danger_level": danger, "base_danger": base_danger, "loyal": loyal, "noise": noise,
 			"warp_s": trip.x, "flight_s": trip.y, "pay_div": PAY_SCALE, "time_div": TRAVEL_SCALE_S}
 	judge(e, prof, danger, mc.reward, fair, sulking)
+	if e.accept and escorted:
+		var ec := ContractBoard.escort_for_mining(mc)
+		var waiting := waiting_for_escort(mc, brain.ship)
+		var room := maxi(ec.takers.size(), 1)
+		if waiting >= room:
+			e.accept = false
+			e.reason = ESCORT_QUEUE
+			e.terms["why"] = "%d miner%s already wait%s for an escort on %s, %d mercenar%s on the escort contract" % [waiting, "" if waiting == 1 else "s",
+					"s" if waiting == 1 else "", mc.get_target_name(), ec.takers.size(), "y" if ec.takers.size() == 1 else "ies"]
 	return e
+
+
+## Miners on [param mc] (other than [param except]) waiting for an escort.
+static func waiting_for_escort(mc: MiningContract, except: Ship = null) -> int:
+	var n := 0
+	for s in mc.takers:
+		if not is_instance_valid(s):
+			continue
+		var sh := s as Ship
+		if sh and sh != except and not sh.dead and sh.brain and sh.brain.state == CaptainBrain.State.WAITING_ESCORT:
+			n += 1
+	return n

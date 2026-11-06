@@ -19,7 +19,9 @@ extends RefCounted
 ## of every system is unchanged from v3.
 ## v5: iron the most common cluster everywhere (ORE_WEIGHTS), loads per
 ## cluster by ore (ClusterDef.RESERVE_BY_ORE).
-const VERSION := 5
+## v6: clusters ClusterDef.SPREAD times wider (same rock count), so their
+## orbits move.
+const VERSION := 6
 ## The version mixed into [method system_seed]. Kept at 2 on purpose: v3 only
 ## added systems, so the systems of v2 keep their content.
 const SEED_VERSION := 2
@@ -313,7 +315,7 @@ func _clusters(gate_r: float) -> void:
 		var ore: AsteroidBelt.OreType = ores[_rng.rand_weighted(w)]
 		if _rival_home and i < 2:
 			ore = ORE.IRON
-		var size := snappedf(_rng.randf_range(1500.0, 2800.0) + (200.0 if ore == ORE.CRYSTAL else 0.0), 50.0)
+		var size := snappedf(_rng.randf_range(1500.0, 2800.0) + (200.0 if ore == ORE.CRYSTAL else 0.0), 50.0) * ClusterDef.SPREAD
 		var r := _cluster_radius(size, gate_r)
 		var c := ClusterDef.new()
 		c.name = _names.take(&"cluster")

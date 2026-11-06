@@ -147,7 +147,7 @@ func _make_def(ore: int) -> ClusterDef:
 	bdef.ore_type = ore as AsteroidBelt.OreType
 	match ore:
 		AsteroidBelt.OreType.IRON:
-			bdef.size = rng.randf_range(1200.0, 2200.0)
+			bdef.size = rng.randf_range(1200.0, 2200.0) * ClusterDef.SPREAD
 			bdef.richness = rng.randf_range(0.2, 0.35)
 			bdef.vertical_spread = rng.randf_range(220.0, 320.0)
 			bdef.max_scale = 18.0
@@ -156,14 +156,14 @@ func _make_def(ore: int) -> ClusterDef:
 				bdef.secondary_share = 0.15
 			bdef.dust_color = Color(0.66, 0.52, 0.42, 1.0)
 		AsteroidBelt.OreType.TITANIUM:
-			bdef.size = rng.randf_range(1400.0, 2600.0)
+			bdef.size = rng.randf_range(1400.0, 2600.0) * ClusterDef.SPREAD
 			bdef.richness = rng.randf_range(0.4, 0.6)
 			bdef.vertical_spread = rng.randf_range(320.0, 480.0)
 			bdef.secondary_ore = AsteroidBelt.OreType.IRON
 			bdef.secondary_share = 0.3
 			bdef.dust_color = Color(0.6, 0.6, 0.62, 1.0)
 		_:
-			bdef.size = rng.randf_range(1800.0, 3000.0)
+			bdef.size = rng.randf_range(1800.0, 3000.0) * ClusterDef.SPREAD
 			bdef.richness = rng.randf_range(0.6, 0.85)
 			bdef.vertical_spread = rng.randf_range(500.0, 700.0)
 			bdef.max_scale = 23.0
@@ -179,7 +179,7 @@ func _make_def(ore: int) -> ClusterDef:
 		spot = _pick_spot(bdef, ore)
 		if spot.x > 0.0:
 			break
-		bdef.size = maxf(bdef.size * 0.8, 1000.0)
+		bdef.size = maxf(bdef.size * 0.8, 1000.0 * ClusterDef.SPREAD)
 	if spot.x <= 0.0:
 		push_warning("ClusterSpawner: no free spot for a new cluster")
 		return null

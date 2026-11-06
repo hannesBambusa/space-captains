@@ -47,6 +47,10 @@ instance uniform float lod_fade_end = 0.0;
 // Per MultiMeshInstance3D cluster thinning: instances whose seed
 // (INSTANCE_CUSTOM.w) is below thin_level shrink away (0 = all shown).
 instance uniform float thin_level = 0.0;
+// Per MultiMeshInstance3D size floor: far rocks grow so their radius never
+// drops under this many screen pixels (0 = off), so a far cluster reads as
+// small lit rocks instead of vanishing.
+instance uniform float min_px = 0.0;
 // Slight per-instance brightness variation so repeated meshes read as different rocks.
 uniform float tint_variation : hint_range(0.0, 0.5) = 0.18;
 
@@ -104,6 +108,10 @@ void vertex() {
 	v_obj = VERTEX * scale_m + vec3(INSTANCE_CUSTOM.w * 173.0, INSTANCE_CUSTOM.w * 91.0, INSTANCE_CUSTOM.w * 57.0);
 	v_seed = INSTANCE_CUSTOM.w;
 	v_dist = distance(MODEL_MATRIX[3].xyz, INV_VIEW_MATRIX[3].xyz);
+	if (min_px > 0.0) {
+		float world_per_px = 2.0 * v_dist / (PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
+		lod *= max(1.0, min_px * world_per_px / max(scale_m, 0.01));
+	}
 	VERTEX = rot * VERTEX * lod;
 	NORMAL = rot * NORMAL;
 	TANGENT = rot * TANGENT;

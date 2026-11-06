@@ -153,6 +153,9 @@ static func from_dict(d: Dictionary) -> RivalMind:
 	var st: Dictionary = d.get("stats", {})
 	for k: String in st:
 		m.stats[k] = st[k]
+	# A save from before milestones: what it has is marked, not announced.
+	if not st.has("milestones"):
+		m.stats["milestones_silent"] = true
 	m.eliminated = bool(d.get("eliminated", false))
 	var td: Dictionary = d.get("ties", {})
 	for k: String in td:

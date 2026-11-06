@@ -642,12 +642,15 @@ func _hostile_step(u: Unit, dt: float, dps: float, rng: float) -> void:
 		return
 	var best: Variant = null
 	var best_pos := Vector2.ZERO
+	var best_score := INF
+	# best_d is the real gap; best_score only ranks (raiders favour buildings).
 	var best_d := INF
 	for o in units:
 		if o.dead or o.kind == "critter" or o.kind == "raider":
 			continue
 		var d := u.pos.distance_to(o.pos)
-		if d < best_d:
+		if d < best_score:
+			best_score = d
 			best_d = d
 			best = o
 			best_pos = o.pos
@@ -657,9 +660,9 @@ func _hostile_step(u: Unit, dt: float, dps: float, rng: float) -> void:
 		var bp := Vector2(float(b["x"]), float(b["z"]))
 		var d := u.pos.distance_to(bp) - float(OutpostState.BUILDINGS[StringName(b["kind"])]["radius"])
 		# Raiders go for the buildings, critters for whatever is nearest.
-		if u.kind == "raider":
-			d *= 0.6
-		if d < best_d:
+		var score := d * 0.6 if u.kind == "raider" else d
+		if score < best_score:
+			best_score = score
 			best_d = d
 			best = b
 			best_pos = bp

@@ -1,6 +1,6 @@
 class_name ClusterDef
 extends Resource
-## An asteroid cluster: a dense clump of rock 1 to 3 km across that orbits
+## An asteroid cluster: a clump of rock 2 to 5 km across that orbits
 ## the star like a planet (inclined circular orbit). AsteroidCluster builds it.
 ## (The class keeps its old name; "belt" in code means a cluster.)
 ## Starting clusters live in SystemDef.belts; ClusterSpawner makes new ones
@@ -46,6 +46,11 @@ extends Resource
 ## Colour of the far-view dust.
 @export var dust_color: Color = Color(0.62, 0.55, 0.48, 1.0)
 
+## How much wider generated clusters are than the size their reserve is
+## rated for: the rock count stays, the rocks spread out ([method get_reserve]
+## divides it back out). The generators multiply their drawn size by it.
+const SPREAD := 1.7
+
 ## Orbit period per metre of radius (sim s / m): every cluster drifts at
 ## about 12.6 m/s, slower than the planets.
 const PERIOD_PER_M := 0.5
@@ -61,7 +66,7 @@ func get_count() -> int:
 	return clampi(int(1500.0 * pow(size / 1000.0, 1.6)), 1200, 9000)
 
 
-## Loads per cluster by ore, against the 25 to 60 a cluster's size and
+## Loads per cluster by ore, against the 25 to 60 a cluster's rated size and
 ## richness give: iron is the plentiful one (x1.6), titanium as is, crystal
 ## scarce (x0.5).
 const RESERVE_BY_ORE: PackedFloat32Array = [1.0, 1.6, 1.0, 0.5]
@@ -72,7 +77,7 @@ const RESERVE_BY_ORE: PackedFloat32Array = [1.0, 1.6, 1.0, 0.5]
 func get_reserve() -> int:
 	if reserve_loads > 0:
 		return reserve_loads
-	var s := clampf((size - 1000.0) / 2000.0, 0.0, 1.0)
+	var s := clampf((size / SPREAD - 1000.0) / 2000.0, 0.0, 1.0)
 	var base := clampf(25.0 + 20.0 * s + 15.0 * richness, 25.0, 60.0)
 	return maxi(roundi(base * RESERVE_BY_ORE[clampi(ore_type, 0, RESERVE_BY_ORE.size() - 1)]), 10)
 

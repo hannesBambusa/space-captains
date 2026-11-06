@@ -42,6 +42,9 @@ const SWAP_MAX := 100
 ## Holding more than this many times [constant KEEP] of an ore, it mines
 ## other ore first.
 const OVERSTOCK := 4
+## Surplus iron the corp office sells per tick, and its price (cr a unit).
+const SURPLUS_SALE := 20
+const SURPLUS_PRICE := 6
 
 var _clock := 0.0
 var _rng := RandomNumberGenerator.new()
@@ -140,6 +143,37 @@ func spare() -> int:
 	return eco().credits - RESERVE
 
 
+## Diagnostics for the smoke report (SMOKE rival plan): per corp, the plan
+## steps that acted, ticks whose actions ran out before the research step,
+## and why the research step did nothing. Counters only, never read by play.
+static var plan_stats := {}
+
+
+static func stat(corp: StringName, key: String) -> void:
+	var d: Dictionary = plan_stats.get(corp, {})
+	d[key] = int(d.get(key, 0)) + 1
+	plan_stats[corp] = d
+
+
+## Runs [param plan] (Callables returning true when they acted), at most
+## [constant ACTIONS_PER_TICK] actions; counts what acted for [member plan_stats].
+static func run_plan(corp: StringName, plan: Array) -> void:
+	var done := 0
+	var reached := false
+	for step: Callable in plan:
+		if done >= ACTIONS_PER_TICK:
+			break
+		if step.get_method().ends_with("_science"):
+			reached = true
+		if bool(step.call()):
+			done += 1
+			var args := step.get_bound_arguments()
+			stat(corp, "act " + step.get_method().trim_prefix("_") + (":" + str(args[0]) if not args.is_empty() else ""))
+	stat(corp, "ticks")
+	if not reached:
+		stat(corp, "research not reached")
+
+
 func _tick() -> void:
 	var b := mgr()
 	if b == null or b.frame == null:
@@ -148,14 +182,10 @@ func _tick() -> void:
 		_keep_ore()
 		var note := func(text: String) -> void: _note("swap", text)
 		swap_for_iron(eco(), note)
+		sell_surplus(eco(), note)
 		swap_for_goal(eco(), _goal_or_forward(), note)
 		_dispatch()
-	var done := 0
-	for step: Callable in _plan():
-		if done >= ACTIONS_PER_TICK:
-			break
-		if bool(step.call()):
-			done += 1
+	run_plan(_cid(), _plan())
 
 
 ## The build plan in priority order (each returns true when it acted):
@@ -195,6 +225,24 @@ func _keep_ore() -> void:
 ## some (at most [constant SWAP_MAX] iron a tick, [constant SWAP_RATES] iron
 ## per unit). An AI-only crutch: it has no planet raids or refinery.
 ## [param note] (String) gets the intel line. Also used as data (RivalPlan).
+## Iron above its overstock line ([constant OVERSTOCK] x [constant KEEP]):
+## the corp office sells up to [constant SURPLUS_SALE] units a tick at
+## [constant SURPLUS_PRICE] cr each, under the Factory's price. An AI-only
+## crutch like the swaps: the Factory takes iron too slowly, so a rival sat
+## on 2,500 iron and could not pay a researcher (the research stall).
+static func sell_surplus(e: CorpEconomy, note: Callable) -> void:
+	var iron := Economy.Ore.IRON
+	var extra := e.ore[iron] - KEEP[iron] * OVERSTOCK
+	if extra <= 0:
+		return
+	var units := mini(extra, SURPLUS_SALE)
+	var take := Economy.zero_ore()
+	take[iron] = units
+	if e.spend(0, take):
+		e.add(units * SURPLUS_PRICE, PackedInt32Array(), Ledger.FACTORY, "Corp office sold surplus iron")
+		note.call("The corp office sold %d surplus iron for %d cr" % [units, units * SURPLUS_PRICE])
+
+
 static func swap_for_iron(e: CorpEconomy, note: Callable) -> void:
 	var o := e.ore
 	var iron := Economy.Ore.IRON
@@ -527,6 +575,9 @@ static func science_step(res: CorpResearch, spare: int, minutes: float, saving_e
 	# next project needs, one extra when nobody on staff would take it.
 	var need := research_need(res)
 	var cap := (1 if minutes < 20.0 else 2) + (1 if need >= 0 and not res.researchers.is_empty() else 0)
+	var cid := res.corp_id
+	if res.researchers.size() < mini(cap, CorpResearch.MAX_RESEARCHERS) and res.applicants.is_empty():
+		stat(cid, "research: no applicants")
 	if res.researchers.size() < mini(cap, CorpResearch.MAX_RESEARCHERS) and not res.applicants.is_empty():
 		var a: Researcher = null
 		for x in res.applicants:
@@ -537,19 +588,34 @@ static func science_step(res: CorpResearch, spare: int, minutes: float, saving_e
 		if (need < 0 or int(a.field) == need or res.researchers.is_empty()) and spare >= a.hire_cost + 300 and res.hire(a):
 			note.call("Hired researcher %s (%s)" % [a.researcher_name, a.field_name()])
 			return true
+		stat(cid, "research: hire %s" % ("short of credits" if spare < a.hire_cost + 300 else "no applicant in the field"))
 	if saving_explorer:
+		stat(cid, "research: saving for the explorer outpost")
 		return false
 	if res.projects.size() >= maxi(res.researchers.size(), 1):
+		stat(cid, "research: projects full" if not res.researchers.is_empty() else "research: no researcher")
 		return false
+	var why := "nothing fundable"
 	for id in TECH_ORDER:
 		var t := res.catalog().find(id)
-		if t == null or not res.fund_problem(t).is_empty() or not someone_takes(res, t):
+		if t == null:
+			continue
+		var fp := res.fund_problem(t)
+		if not fp.is_empty():
+			if why == "nothing fundable" and not fp.begins_with("Already") and not fp.begins_with("Needs research"):
+				why = "first tech: " + fp.get_slice(":", 0)
+			continue
+		if not someone_takes(res, t):
+			if why == "nothing fundable":
+				why = "nobody takes " + String(id)
 			continue
 		if spare < t.cost_credits + 300:
+			stat(cid, "research: tech short of credits")
 			return false
 		if res.fund(t):
 			note.call("Funded research: %s" % t.display_name)
 			return true
+	stat(cid, "research: " + why)
 	return false
 
 

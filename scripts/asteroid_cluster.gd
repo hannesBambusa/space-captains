@@ -6,12 +6,15 @@ extends Orbiter
 ## drifts with the orbit). The class keeps its old name; "belt" in code
 ## means a cluster.
 ##
-## Three layers, so it reads at every zoom:
-## - near: detailed asteroid meshes in grid chunks (one MultiMeshInstance3D
-##   per chunk and mesh variant) with visibility ranges; each asteroid shrinks
-##   away in the vertex shader before its chunk is culled. No shadows.
-## - mid/far: one camera-facing dot per asteroid (shaders/belt_glint.gdshader).
+## Two layers, so it reads at every zoom:
+## - the rocks: detailed asteroid meshes, one MultiMeshInstance3D per mesh
+##   variant for the whole cluster (a few dozen rocks, so they draw at every
+##   zoom). Far away each rock grows to a floor of [constant MIN_PX] screen
+##   pixels (shaders/asteroid.gdshader min_px), so a far cluster reads as a
+##   scatter of small lit rocks. No shadows.
 ## - far: a dust disc (shaders/cluster_dust.gdshader).
+## The grid chunks ([constant CHUNK_SIZE]) only index the rocks for the
+## proximity queries.
 ##
 ## The clump is thick: rock heights are gaussian around the centre (sigma
 ## [constant HEIGHT_SIGMA] of [member ClusterDef.vertical_spread], thinner
@@ -32,7 +35,6 @@ signal depleted(belt: AsteroidCluster)
 signal faded(belt: AsteroidCluster)
 
 const OreType := AsteroidBelt.OreType
-const GLINT_SHADER: Shader = preload("res://shaders/belt_glint.gdshader")
 const DUST_SHADER: Shader = preload("res://shaders/cluster_dust.gdshader")
 ## Gap between the highest (lowest) rock and a ship's centre in a lane, metres.
 const LANE_MARGIN := 15.0
@@ -40,8 +42,10 @@ const LANE_MARGIN := 15.0
 const HEIGHT_SIGMA := 0.38
 ## Share of the far dust light in each of the sheets above and below the middle.
 const DUST_SIDE_SHARE := 0.22
-## Grid chunk edge, metres.
+## Grid chunk edge (query index only), metres.
 const CHUNK_SIZE := 600.0
+## Smallest on-screen rock radius at any zoom, pixels.
+const MIN_PX := 3.4
 ## Thinning share reached just before the last load (the rest goes in the fade).
 const THIN_MAX := 0.8
 ## Rock sizes over the def's (one rock per load: fewer, bigger rocks).
@@ -55,7 +59,8 @@ const FADE_TIME := 12.0
 ## danger bonus, metres.
 const DEN_REACH := 6000.0
 
-## Camera distance where detailed asteroids start / finish shrinking away.
+## Camera distance where the dust starts to show / reaches full strength
+## (scaled in [method _build_dust]).
 @export var detail_fade_start: float = 2300.0
 @export var detail_fade_end: float = 3300.0
 @export var size_bias: float = 2.8
@@ -95,9 +100,7 @@ var _gone := PackedByteArray()
 ## Each rock's mesh MultiMesh and its instance there, for removing it.
 var _rock_mm: Array[MultiMesh] = []
 var _rock_slot := PackedInt32Array()
-var _glint_mm: MultiMesh
 var _dust_mats: Array[ShaderMaterial] = []
-var _glint_mat: ShaderMaterial
 var _mesh_nodes: Array[MultiMeshInstance3D] = []
 ## Highest rock top above (or bottom below) the centre, metres (from the data).
 var _layer_height := 0.0
@@ -114,8 +117,7 @@ func build(cluster_def: ClusterDef, star_position: Vector3, star_color: Color) -
 	_variant_names = _variant_list()
 	var t0 := Time.get_ticks_msec()
 	var data := _generate()
-	_build_chunks(data)
-	_build_glints(star_position, star_color)
+	_build_meshes(data)
 	_build_dust(star_position, star_color)
 	print("AsteroidCluster %s: %d asteroids, %d chunks, built in %d ms" % [def.name, _positions.size(), _chunk_count, Time.get_ticks_msec() - t0])
 
@@ -179,10 +181,6 @@ func _remove_rock(i: int) -> void:
 		var c := mm.get_instance_custom_data(_rock_slot[i])
 		c.a = 0.0
 		mm.set_instance_custom_data(_rock_slot[i], c)
-	if _glint_mm:
-		var g := _glint_mm.get_instance_custom_data(i)
-		g.a = 0.0
-		_glint_mm.set_instance_custom_data(i, g)
 
 
 ## Restores the depletion state (save / load). [param gone]: the rocks
@@ -225,8 +223,6 @@ func _set_thin(level: float) -> void:
 	thin_level = level
 	for mmi in _mesh_nodes:
 		mmi.set_instance_shader_parameter("thin_level", level)
-	if _glint_mat:
-		_glint_mat.set_shader_parameter("thin_level", level)
 	if level > THIN_MAX:
 		# The fade after the last load: the dust goes too.
 		var amount := clampf(1.0 - level, 0.0, 1.0) * 0.25 / maxf(1.0 - THIN_MAX, 0.01)
@@ -410,11 +406,6 @@ func _cell_of(lp: Vector3) -> Vector2i:
 	return Vector2i(clampi(int((lp.x + half) / CHUNK_SIZE), 0, _grid - 1), clampi(int((lp.z + half) / CHUNK_SIZE), 0, _grid - 1))
 
 
-func _chunk_center(ci: int) -> Vector3:
-	var half := float(_grid) * CHUNK_SIZE * 0.5
-	return Vector3((float(ci % _grid) + 0.5) * CHUNK_SIZE - half, 0.0, (float(ci / _grid) + 0.5) * CHUNK_SIZE - half)
-
-
 ## Generates all asteroids in a few overlapping gaussian sub-clumps plus a
 ## thin halo, then stores them sorted by chunk. Returns the per-asteroid
 ## rotation/custom data needed for the meshes, in sorted order.
@@ -559,134 +550,66 @@ func _generate() -> Dictionary:
 	return {"quats": s_quats, "customs": s_customs}
 
 
-func _build_chunks(data: Dictionary) -> void:
+func _build_meshes(data: Dictionary) -> void:
 	var quats: PackedFloat32Array = data["quats"]
 	var customs: PackedFloat32Array = data["customs"]
 	var v_count := _variant_names.size()
-	var meshes: Array[Mesh] = []
-	for v_name in _variant_names:
-		meshes.append(AsteroidBelt.get_variant_mesh(v_name))
-	var chunk_radius := sqrt(2.0 * pow(CHUNK_SIZE * 0.5, 2.0) + pow(def.vertical_spread, 2.0))
+	var per_variant: Array[PackedInt32Array] = []
+	per_variant.resize(v_count)
+	for i in _positions.size():
+		var lst := per_variant[_variants[i]]
+		lst.append(i)
+		per_variant[_variants[i]] = lst
 	var glow := def.glow
-
-	for c in _chunk_count:
-		var a0 := _chunk_offsets[c]
-		var a1 := _chunk_offsets[c + 1]
-		if a1 <= a0:
+	for v in v_count:
+		var ids := per_variant[v]
+		if ids.is_empty():
 			continue
-		var center := _chunk_center(c)
-		var chunk_node := Node3D.new()
-		chunk_node.name = "Chunk%03d" % c
-		chunk_node.position = center
-		add_child(chunk_node)
-		# Group this chunk's asteroids by variant.
-		var per_variant: Array[PackedInt32Array] = []
-		per_variant.resize(v_count)
-		for i in range(a0, a1):
-			var lst := per_variant[_variants[i]]
-			lst.append(i)
-			per_variant[_variants[i]] = lst
-		for v in v_count:
-			var ids := per_variant[v]
-			if ids.is_empty():
-				continue
-			var buf := PackedFloat32Array()
-			buf.resize(ids.size() * 16)
-			var aabb := AABB(_positions[ids[0]] - center, Vector3.ZERO)
-			var max_s := 0.0
-			for j in ids.size():
-				var i := ids[j]
-				var q := Quaternion(quats[i * 4], quats[i * 4 + 1], quats[i * 4 + 2], quats[i * 4 + 3])
-				var b := Basis(q).scaled(Vector3.ONE * _radii[i])
-				var o := _positions[i] - center
-				var kk := j * 16
-				buf[kk] = b.x.x
-				buf[kk + 1] = b.y.x
-				buf[kk + 2] = b.z.x
-				buf[kk + 3] = o.x
-				buf[kk + 4] = b.x.y
-				buf[kk + 5] = b.y.y
-				buf[kk + 6] = b.z.y
-				buf[kk + 7] = o.y
-				buf[kk + 8] = b.x.z
-				buf[kk + 9] = b.y.z
-				buf[kk + 10] = b.z.z
-				buf[kk + 11] = o.z
-				buf[kk + 12] = customs[i * 4]
-				buf[kk + 13] = customs[i * 4 + 1]
-				buf[kk + 14] = customs[i * 4 + 2]
-				buf[kk + 15] = customs[i * 4 + 3]
-				aabb = aabb.expand(o)
-				max_s = maxf(max_s, _radii[i])
-			var mm := MultiMesh.new()
-			mm.transform_format = MultiMesh.TRANSFORM_3D
-			mm.use_custom_data = true
-			mm.mesh = meshes[v]
-			mm.instance_count = ids.size()
-			mm.buffer = buf
-			for j in ids.size():
-				_rock_mm[ids[j]] = mm
-				_rock_slot[ids[j]] = j
-			var mmi := MultiMeshInstance3D.new()
-			mmi.name = _variant_names[v]
-			mmi.multimesh = mm
-			mmi.custom_aabb = aabb.grow(max_s * 2.0)
-			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			mmi.visibility_range_end = detail_fade_end + chunk_radius
-			mmi.visibility_range_end_margin = 0.0
-			mmi.set_instance_shader_parameter("emission_boost", glow)
-			mmi.set_instance_shader_parameter("lod_fade_start", detail_fade_start)
-			mmi.set_instance_shader_parameter("lod_fade_end", detail_fade_end)
-			chunk_node.add_child(mmi)
-			_mesh_nodes.append(mmi)
-
-
-func _build_glints(star_position: Vector3, star_color: Color) -> void:
-	var n := _positions.size()
-	if n == 0:
-		return
-	var quad := QuadMesh.new()
-	quad.size = Vector2.ONE
-	_glint_mat = ShaderMaterial.new()
-	_glint_mat.shader = GLINT_SHADER
-	_glint_mat.set_shader_parameter("star_position", star_position)
-	_glint_mat.set_shader_parameter("star_color", Color(star_color, 1.0).lerp(Color.WHITE, 0.5))
-	_glint_mat.set_shader_parameter("near_start", detail_fade_start + 200.0)
-	_glint_mat.set_shader_parameter("near_end", detail_fade_end)
-	_glint_mat.set_shader_parameter("crystal_glow", def.glow * 0.5)
-	quad.material = _glint_mat
-	var buf := PackedFloat32Array()
-	buf.resize(n * 16)
-	var rng := RandomNumberGenerator.new()
-	rng.seed = hash(def.seed + 5)
-	for i in n:
-		var o := _positions[i]
-		var k := i * 16
-		buf[k] = 1.0
-		buf[k + 3] = o.x
-		buf[k + 5] = 1.0
-		buf[k + 7] = o.y
-		buf[k + 10] = 1.0
-		buf[k + 11] = o.z
-		buf[k + 12] = _radii[i]
-		buf[k + 13] = rng.randf_range(0.55, 1.0)
-		buf[k + 14] = float(_ores[i])
-		buf[k + 15] = _keys[i]
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.use_custom_data = true
-	mm.mesh = quad
-	mm.instance_count = n
-	mm.buffer = buf
-	_glint_mm = mm
-	var mmi := MultiMeshInstance3D.new()
-	mmi.name = "Glints"
-	mmi.multimesh = mm
-	var r := def.radius() + 50.0
-	var h := rock_layer_height() + 50.0
-	mmi.custom_aabb = AABB(Vector3(-r, -h, -r), Vector3(r * 2.0, h * 2.0, r * 2.0))
-	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(mmi)
+		var buf := PackedFloat32Array()
+		buf.resize(ids.size() * 16)
+		var aabb := AABB(_positions[ids[0]], Vector3.ZERO)
+		for j in ids.size():
+			var i := ids[j]
+			var q := Quaternion(quats[i * 4], quats[i * 4 + 1], quats[i * 4 + 2], quats[i * 4 + 3])
+			var b := Basis(q).scaled(Vector3.ONE * _radii[i])
+			var o := _positions[i]
+			var kk := j * 16
+			buf[kk] = b.x.x
+			buf[kk + 1] = b.y.x
+			buf[kk + 2] = b.z.x
+			buf[kk + 3] = o.x
+			buf[kk + 4] = b.x.y
+			buf[kk + 5] = b.y.y
+			buf[kk + 6] = b.z.y
+			buf[kk + 7] = o.y
+			buf[kk + 8] = b.x.z
+			buf[kk + 9] = b.y.z
+			buf[kk + 10] = b.z.z
+			buf[kk + 11] = o.z
+			buf[kk + 12] = customs[i * 4]
+			buf[kk + 13] = customs[i * 4 + 1]
+			buf[kk + 14] = customs[i * 4 + 2]
+			buf[kk + 15] = customs[i * 4 + 3]
+			aabb = aabb.expand(o)
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_custom_data = true
+		mm.mesh = AsteroidBelt.get_variant_mesh(_variant_names[v])
+		mm.instance_count = ids.size()
+		mm.buffer = buf
+		for j in ids.size():
+			_rock_mm[ids[j]] = mm
+			_rock_slot[ids[j]] = j
+		var mmi := MultiMeshInstance3D.new()
+		mmi.name = _variant_names[v]
+		mmi.multimesh = mm
+		# Grown far rocks stay inside: the floor is a few pixels at most.
+		mmi.custom_aabb = aabb.grow(def.max_scale * ROCK_SCALE * 2.0 + 200.0)
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mmi.set_instance_shader_parameter("emission_boost", glow)
+		mmi.set_instance_shader_parameter("min_px", MIN_PX)
+		add_child(mmi)
+		_mesh_nodes.append(mmi)
 
 
 func _build_dust(star_position: Vector3, star_color: Color) -> void:

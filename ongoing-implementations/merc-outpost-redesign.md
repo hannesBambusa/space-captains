@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | done (all three look fixes built, viewer checked; uncommitted, smoke test not re-run on the new geometry) |
-| **Branch** | main (first model committed in db35437; look fixes uncommitted) |
-| **Updated** | 2026-11-04 |
+| **Status** | done (look fixes built, viewer checked, smoke re-run clean) |
+| **Branch** | main (first model in db35437, look fixes in c4c3778; all committed) |
+| **Updated** | 2026-11-05 |
 | **Scope** | Rebuild the Mercenary Outpost model so it reads as an Expanse-style space structure, not an Earth airport hangar. Blender generator only, no game code. |
 
 User ask: "looks to much like an airport on earth.. this is an oupost in space..make it look cooler and more inline woth the expanse series". Then: "fix what is not done".
@@ -38,7 +38,7 @@ User ask: "looks to much like an airport on earth.. this is an oupost in space..
 
 **Built-in check.** `-- --check` re-measures `merc_interceptor.glb`, tests the four docking corridors, the sideways path, the outer berth spots and r <= 40, and prints `BERTH CHECK ... ALL OK`. Last full textured run: ALL OK, max XY radius 39.06 (radiator panel outer corner). `blender/gen_mercenary_outpost.py` (`check_build`, `measure_fighter`)
 
-**Verified in game tooling.** The look-fix model loads in `tools/model_viewer.tscn` at `--dim=0.35` with four `merc_interceptor.glb` docked (`--model=<glb>@bx,0,3.5,180`): 5 of 5 loaded, no errors in the log. `Godot --headless --import` ran clean. Earlier (pre-look-fix geometry): two independent geometry checks and `tools/smoke.sh` with 0 errors.
+**Verified in game tooling.** The look-fix model loads in `tools/model_viewer.tscn` at `--dim=0.35` with four `merc_interceptor.glb` docked (`--model=<glb>@bx,0,3.5,180`): 5 of 5 loaded, no errors in the log. `Godot --headless --import` ran clean. Earlier (pre-look-fix geometry): two independent geometry checks. On the look-fix geometry: `tools/smoke.sh` and `tools/smoke.sh --multi` with 0 errors (2026-11-05).
 
 **Previews.** Use `--no-ships` for previews without the docked ships. With ships, each berth gets a `merc_interceptor.glb`.
 
@@ -53,7 +53,7 @@ User ask: "looks to much like an airport on earth.. this is an oupost in space..
 
 ## Remaining
 
-- **Re-run `tools/smoke.sh` on the new geometry** (optional; no game code changed, the berth check passed and the viewer loads it). Skip if it would need another reimport.
+- None. Delete this doc once you are happy with it.
 
 ## Open questions
 
