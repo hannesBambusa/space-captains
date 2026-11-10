@@ -23,6 +23,10 @@ extends PanelContainer
 ## ([method Tutorial.voice_on], saved); turned on, it replays the line.
 ## The replay button next to it reads the current line again (shown while
 ## the voice is on and the step has a line).
+## A step never cuts its line off: once it is met ([member Tutorial.met])
+## the card says so and the step moves on when the line ends
+## ([method is_speaking], the player's finished signal); Next skips the wait.
+## The done card's countdown also waits for its line.
 
 const H := preload("res://scripts/ui/theme/hud_style.gd")
 const VOICE_DIR := "res://assets/audio/voice/tutorial/"
@@ -74,6 +78,9 @@ func _ready() -> void:
 	_voice = AudioStreamPlayer.new()
 	_voice.name = "Voice"
 	_voice.bus = VOICE_BUS
+	_voice.finished.connect(func() -> void:
+		if tutorial:
+			tutorial._check())
 	add_child(_voice)
 	_replay_button = UIUtil.button("", &"IconButton")
 	_replay_button.custom_minimum_size = Vector2(22.0, 18.0)
@@ -168,7 +175,7 @@ func setup(owner_hud: HUD, t: Tutorial) -> void:
 
 
 func _process(delta: float) -> void:
-	if tutorial == null or not tutorial.is_done_card():
+	if tutorial == null or not tutorial.is_done_card() or is_speaking():
 		return
 	_done_left -= delta
 	if _done_left <= 0.0:
@@ -212,13 +219,17 @@ func _sync() -> void:
 	_title.text = text[0]
 	_body.text = text[1]
 	_goal.text = text[2]
-	if bar and not hud.build_menu.visible:
+	var waiting := tutorial.met and not done
+	if waiting:
+		_goal.text = "Done. Next step when SOLA finishes, or press Next."
+	elif bar and not hud.build_menu.visible:
 		_goal.text = "Select your station (click it or press H) to open the build bar. " + text[2]
+	_goal.add_theme_color_override("font_color", H.ACCENT if waiting else H.HOLO)
 	_goal.visible = not _goal.text.is_empty()
 	_body_box.visible = not minimised
 	var info := bool(cur.get("info", false))
-	_next.visible = info and not done
-	_skip_step.visible = academy and not done and not info
+	_next.visible = (info or waiting) and not done
+	_skip_step.visible = academy and not done and not info and not waiting
 	_chapters.visible = academy and not done
 	_skip.visible = not done
 	_skip.text = "Quit tutorial" if academy else "Skip tutorial"
@@ -272,6 +283,14 @@ func _speak() -> void:
 		return
 	_voice.stream = load(path) as AudioStream
 	_voice.play()
+
+
+## SOLA is reading a line the player can hear (a muted Voice bus does not count).
+func is_speaking() -> bool:
+	if _voice == null or not _voice.playing:
+		return false
+	var bus := AudioServer.get_bus_index(VOICE_BUS)
+	return bus < 0 or not AudioServer.is_bus_mute(bus)
 
 
 ## The current step has a voice line on disk.

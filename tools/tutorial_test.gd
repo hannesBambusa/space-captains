@@ -64,11 +64,16 @@ func _run() -> void:
 	t._on_camera(Vector3.ZERO, 700.0, 0.0)
 	t._on_camera(Vector3(400, 0, 0), 700.0, 0.0)
 	t._check()
-	_ok(t.current()["id"] == &"time", "camera -> time")
+	if Tutorial.voice_on():
+		_ok(t.current()["id"] == &"camera" and t.met, "a met step waits for its line to end")
+		vp.stop()
+		vp.finished.emit()
+	_ok(t.current()["id"] == &"time", "camera -> time once the line ends")
 	await tree.process_frame
 	_ok(not t.hud.build_menu.visible, "time step leaves the build bar closed (the station step stays open)")
 	var pulse := t.hud.get_node_or_null(^"Root/TutorialPulse") as TutorialPulse
 	_ok(pulse != null and pulse.target == t.hud.top_bar.speed_control, "time step pulses the speed readout")
+	vp.stop()
 	SimClock.set_speed(4.0)
 	await tree.process_frame
 	_ok(t.current()["id"] == &"station", "time -> station")
@@ -84,6 +89,7 @@ func _run() -> void:
 	t.hud.fly_home()
 	for i in 3:
 		await tree.process_frame
+	vp.stop()
 	t._check()
 	_ok(t.current()["id"] == &"build_mining", "station -> build_mining (%s)" % t.current().get("id"))
 	_ok(Economy.credits >= 2000, "mining top-up (%d cr)" % Economy.credits)

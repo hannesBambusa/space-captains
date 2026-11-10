@@ -20,7 +20,11 @@ extends Node
 ## A step ends on its own when the game shows it done: [method _is_met],
 ## checked every [constant CHECK_EVERY] real seconds and on the events the
 ## old card listened to; info steps (welcome, rivals) end on the card's
-## Next button. Saved in the game ([method save_state], GameSnapshot
+## Next button. A met step is latched ([member met]) and waits for SOLA to
+## finish its line ([method _held], the card's voice) before it moves on,
+## so the voice is never cut off; the card's Next skips the wait. Events a
+## step counts that land while the step before it is still being read are
+## kept ([member _ore_in], [member _tech_seen]). Saved in the game ([method save_state], GameSnapshot
 ## "tutorial"); a save without it loads with the tutorial off, one with
 ## only "step" is a quick card.
 
@@ -58,12 +62,16 @@ var mode: Mode = QUICK
 ## steps().size() is the done card.
 var step: int = OFF
 var hud: HUD
+## The current step is done and waits for the voice line to end.
+var met := false
 
 ## Chapter indices already topped up (academy).
 var _topped: Array[int] = []
 ## Per-step flags set by events since the step began.
 var _flag := false
 var _ore_in := false
+## A research project finished since the fund step began.
+var _tech_seen := false
 var _cam_start := Vector3.INF
 var _cam_dist := 0.0
 var _cam_yaw := 0.0
@@ -220,14 +228,14 @@ func setup(owner_hud: HUD) -> void:
 		hud.manager.building_changed.connect(_on_building)
 	ContractBoard.contract_posted.connect(func(_c: Contract) -> void: _check())
 	Economy.cargo_received.connect(func(ore: PackedInt32Array, _source: String) -> void:
-		if _id() == &"sell_ore":
+		if _id() in [&"post_mining", &"sell_ore"]:
 			for n in ore:
 				if n > 0:
 					_ore_in = true
 					break)
 	Research.tech_completed.connect(func(_t: TechDef) -> void:
-		if _id() == &"tech_done":
-			_flag = true
+		if _id() in [&"fund", &"tech_done"]:
+			_tech_seen = true
 		_check())
 	SimClock.speed_changed.connect(func(_s: float) -> void: _on_time())
 	SimClock.paused_changed.connect(func(_p: bool) -> void: _on_time())
@@ -348,9 +356,16 @@ func _begin_step() -> void:
 		show_station()
 
 
+## Clears the per-step flags. Entering sell_ore keeps the ore that came in
+## while post_mining was still being read, entering tech_done keeps a project
+## that finished during the fund step.
 func _reset_flags() -> void:
+	met = false
 	_flag = false
-	_ore_in = false
+	if _id() != &"sell_ore":
+		_ore_in = false
+	if _id() != &"tech_done":
+		_tech_seen = false
 	_cam_start = Vector3.INF
 	_cam_dist = 0.0
 
@@ -466,18 +481,31 @@ func _on_selected(target: Node3D) -> void:
 		_check()
 
 
-## Advances while the current step is already met.
+## Latches the current step once it is met, then advances when SOLA is
+## done reading its line.
 func _check() -> void:
-	if step >= 0 and not is_done_card() and _is_met(_id()):
+	if step < 0 or is_done_card():
+		return
+	if not met and _is_met(_id()):
+		met = true
+		changed.emit()
+	if met and not _held():
 		advance()
+
+
+## The card is still reading the current line.
+func _held() -> bool:
+	return hud != null and hud.tutorial_card != null and hud.tutorial_card.is_speaking()
 
 
 func _is_met(id: StringName) -> bool:
 	match id:
 		&"welcome", &"rivals":
 			return false
-		&"camera", &"time", &"factory", &"tech_done", &"raid":
+		&"camera", &"time", &"factory", &"raid", &"sell_ore":
 			return _flag
+		&"tech_done":
+			return _tech_seen
 		&"station":
 			return hud != null and hud.build_menu.visible
 		&"build_mining":
@@ -486,8 +514,6 @@ func _is_met(id: StringName) -> bool:
 			return _has_crew(MINING_ID)
 		&"post_mining":
 			return _listed(func(c: Contract) -> bool: return c is MiningContract)
-		&"sell_ore":
-			return false
 		&"merc":
 			return _has_crew(MERC_ID)
 		&"zone":
@@ -573,7 +599,8 @@ func _hook_factory() -> void:
 	_market = f.market
 	_market.sold.connect(func(_ore: int, units: int, _credits: int) -> void:
 		if _id() == &"sell_ore" and _ore_in and units > 0:
-			advance())
+			_flag = true
+			_check())
 
 
 # --- Settings ------------------------------------------------------------------
