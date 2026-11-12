@@ -80,7 +80,7 @@ var pending_at: float = 0.0
 func _ready() -> void:
 	add_to_group(SimStepper.GROUP)
 	_rng.randomize()
-	_next_raid = maxf(SimClock.time, start_offset) + first_raid_time
+	_next_raid = maxf(SimClock.time, start_offset) + first_raid_time * SectorModifier.num("raid_interval")
 
 
 func _process(_delta: float) -> void:
@@ -133,7 +133,7 @@ func pressure() -> float:
 
 ## Seconds to the next raid now (before jitter).
 func interval() -> float:
-	return lerpf(interval_range.x, interval_range.y, pressure())
+	return lerpf(interval_range.x, interval_range.y, pressure()) * SectorModifier.num("raid_interval")
 
 
 func wave_size() -> int:
@@ -141,6 +141,8 @@ func wave_size() -> int:
 	var n := first + int(elapsed() / growth_time) + int(float(maxi(colony_size() - colony_base, 0)) / float(maxi(colony_step, 1)))
 	if raids_sent < gentle_raids:
 		n = mini(n, raids_sent + first)
+	else:
+		n += int(SectorModifier.num("raid_extra", 0.0))
 	return clampi(n, 1, max_wave)
 
 

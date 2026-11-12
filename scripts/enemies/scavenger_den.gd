@@ -55,6 +55,14 @@ const RECALL_RADIUS := 14000.0
 const ALLY_RADIUS := 6000.0
 const CALL_INTERVAL := 3.0
 const ALERT_RESPAWN_MULT := 1.5
+## Swarm hives (faction "swarm") grow while they stand: one more drone out
+## every [constant SWARM_GROW_TIME] sim s up to [constant SWARM_MAX_GROWTH],
+## and at growth [constant SWARM_BUD_AT] they bud a new hive
+## (ThreatDirector.bud_hive). The Swarm left alone takes over.
+const SWARM_ID := &"swarm"
+const SWARM_GROW_TIME := 240.0
+const SWARM_MAX_GROWTH := 8
+const SWARM_BUD_AT: Array[int] = [3, 6]
 ## Defenders fight hostiles this close to the base, metres.
 const GUARD_RADIUS := 1600.0
 const MAX_GUN_POINTS := 6
@@ -77,6 +85,9 @@ var _spawn_seq: int = 0
 var skip_initial_spawns: bool = false
 ## SimClock.time it arrived (ThreatDirector); far past for start dens.
 var arrived_at: float = -1.0e9
+## Swarm growth: extra ships out on top of the def's cap ([method spawn_limit]).
+var growth: int = 0
+var _grow_clock := 0.0
 ## Sim seconds of the warp-in look (play_arrival).
 const ARRIVAL_LOOK_TIME := 6.0
 var _arrival_left: float = 0.0
@@ -163,12 +174,33 @@ func sim_step(dt: float) -> void:
 	durability.step(dt)
 	_prune()
 	_call_timer -= dt
-	if spawns.size() < def.spawn_cap:
+	if faction_def.id == SWARM_ID:
+		_swarm_step(dt)
+	if spawns.size() < spawn_limit():
 		_respawn_clock -= dt * (ALERT_RESPAWN_MULT if is_alerted() else 1.0)
 		if _respawn_clock <= 0.0:
 			_respawn_clock = def.respawn_time
-			spawn_pack(mini(faction_def.pack_size, def.spawn_cap - spawns.size()))
+			spawn_pack(mini(faction_def.pack_size, spawn_limit() - spawns.size()))
 	_guns(dt)
+
+
+## Ships this base keeps out: the def's cap plus a Swarm hive's growth.
+func spawn_limit() -> int:
+	return def.spawn_cap + growth
+
+
+func _swarm_step(dt: float) -> void:
+	if is_arriving() or growth >= SWARM_MAX_GROWTH:
+		return
+	_grow_clock += dt
+	if _grow_clock < SWARM_GROW_TIME:
+		return
+	_grow_clock = 0.0
+	growth += 1
+	if SWARM_BUD_AT.has(growth):
+		var world := CombatWorld.of(self)
+		if world and world.threats:
+			world.threats.bud_hive(self)
 
 
 # --- Arrival ----------------------------------------------------------------------
@@ -234,8 +266,8 @@ func get_status_text() -> String:
 	if dead:
 		return "Destroyed"
 	if is_arriving():
-		return "Arriving, %d/%d out" % [spawns.size(), def.spawn_cap]
-	return "Active, %d/%d out" % [spawns.size(), def.spawn_cap]
+		return "Arriving, %d/%d out" % [spawns.size(), spawn_limit()]
+	return "Active, %d/%d out" % [spawns.size(), spawn_limit()]
 
 
 func hull_fraction() -> float:
@@ -244,7 +276,7 @@ func hull_fraction() -> float:
 
 ## Target panel blurb.
 func info_text() -> String:
-	return faction_def.den_info % [claim_name(), def.spawn_cap]
+	return faction_def.den_info % [claim_name(), spawn_limit()]
 
 
 ## Lower-case kind for headers and tooltips: "scavenger hideout".
@@ -596,7 +628,7 @@ func save_state() -> Dictionary:
 	return {"id": SaveIds.of(self), "name": def.name if def else String(name), "dead": dead, "durability": SaveUtil.durability(durability),
 			"total_spawned": total_spawned, "stash": stash, "respawn_clock": _respawn_clock, "spawn_seq": _spawn_seq,
 			"gun_cooldown": _gun_cooldown, "arrived_at": arrived_at, "rng": SaveUtil.rng_state(_rng), "spawns": sp, "raiders": rd,
-			"alert_until": _alert_until, "alert_line_at": _alert_line_at}
+			"alert_until": _alert_until, "alert_line_at": _alert_line_at, "growth": growth, "grow_clock": _grow_clock}
 
 
 ## State without the ships (see [method restore_ships]). A dead den gets its
@@ -612,6 +644,8 @@ func load_state(d: Dictionary) -> void:
 	arrived_at = float(d.get("arrived_at", arrived_at))
 	_alert_until = float(d.get("alert_until", -1.0e9))
 	_alert_line_at = float(d.get("alert_line_at", -1.0e9))
+	growth = int(d.get("growth", 0))
+	_grow_clock = float(d.get("grow_clock", 0.0))
 	SaveUtil.set_rng(_rng, d.get("rng", {}))
 	if bool(d.get("dead", false)) and not dead:
 		dead = true

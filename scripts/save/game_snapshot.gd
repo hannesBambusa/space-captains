@@ -82,6 +82,8 @@ static func capture(tree: SceneTree) -> Dictionary:
 	var fw := {}
 	for id: StringName in stations:
 		fw[String(id)] = capture_system(stations[id], trips, false)
+		if not (stations[id] as SystemWorld).has_station:
+			fw[String(id)]["remote_work"] = true
 	if home:
 		d["contracts"] = ContractCodec.save_all(trips, func(c: Contract) -> bool: return not stations.has(ContractCodec.system_of(c)))
 	var systems: Dictionary = (d["cluster"] as Dictionary).get("systems", {})
@@ -110,6 +112,9 @@ static func station_worlds(tree: SceneTree) -> Dictionary:
 	for id: StringName in vm.worlds:
 		var w := vm.world(id)
 		if w and not w.is_home and w.has_station and (vm.is_pinned(id) or RivalData.is_rival_world(w)):
+			out[id] = w
+		elif w and not w.is_home and not w.has_station and RemoteWork.is_held(tree, id):
+			# Held live for remote work: saved whole like a station world.
 			out[id] = w
 	return out
 
@@ -161,6 +166,7 @@ static func capture_system(w: SystemWorld, trips: Array[Contract] = [], with_con
 	d["raids"] = world.raids.save_state() if world and world.raids else {}
 	d["threats"] = world.threats.save_state() if world and world.threats else {}
 	d["gate_raids"] = world.gate_raids.save_state() if world and world.gate_raids else {}
+	d["warlord"] = world.warlords.save_state() if world and world.warlords else {}
 	d["claims"] = world.claims.save_state() if world and world.claims else {}
 	d["zones"] = world.zones.save_state() if world and world.zones else {}
 	if w.supply:
@@ -300,7 +306,7 @@ static func apply_scene(tree: SceneTree, d: Dictionary) -> void:
 	for key: String in fw:
 		var id := StringName(key)
 		var st := Sector.state(id)
-		if vm == null or st == null or st.station.is_empty():
+		if vm == null or st == null or (st.station.is_empty() and not bool((fw[key] as Dictionary).get("remote_work", false))):
 			continue
 		st.ships.clear()
 		st.scrap.clear()
@@ -421,6 +427,9 @@ static func _apply_links(c: Dictionary, refs: SaveRefs) -> void:
 		world.raids.load_state(d.get("raids", {}), refs)
 	if world and world.gate_raids:
 		world.gate_raids.relink()
+	if world and world.warlords:
+		world.warlords.load_state(d.get("warlord", {}))
+		world.warlords.relink()
 	_restore_camera.call_deferred(w, d.get("camera", {}))
 
 

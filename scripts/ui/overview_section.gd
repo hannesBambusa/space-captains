@@ -2,15 +2,21 @@ class_name OverviewSection
 extends VBoxContainer
 ## One section of the left panel ([OverviewPanel]): a header strip
 ## (collapse arrow, icon, title, a note such as "2 raiding", the count) over
-## a body of rows. Click the header to fold the section. Folded sections are
-## kept per id in user://settings.cfg ([overview] collapsed), so they stay
-## folded across games.
+## a body of rows. Click the header to fold the section. Flight ops look: a
+## large thin title over a hairline, no icon. Sections in [constant
+## FOLDED_BY_DEFAULT] start folded. The choice is kept per id in
+## user://settings.cfg ([overview] collapsed for folded default-open
+## sections, [overview] opened for opened default-folded ones), so it stays
+## across games.
 
 signal toggled(section: OverviewSection)
 
 const SETTINGS_PATH := "user://settings.cfg"
+## The reference list under the live ones: folded until opened.
+const FOLDED_BY_DEFAULT: Array[StringName] = [&"star", &"planets", &"structures", &"gates", &"scrap"]
 
 static var _folded: PackedStringArray = []
+static var _opened: PackedStringArray = []
 static var _loaded := false
 
 var id: StringName
@@ -24,7 +30,7 @@ var _note: Label
 var _count: Label
 
 
-func _init(section_id: StringName, title: String, icon_name: StringName, font_size: int, header_height: float) -> void:
+func _init(section_id: StringName, title: String, _icon_name: StringName, font_size: int, header_height: float) -> void:
 	id = section_id
 	name = "Section_" + String(section_id)
 	add_theme_constant_override("separation", 0)
@@ -32,7 +38,7 @@ func _init(section_id: StringName, title: String, icon_name: StringName, font_si
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_header = Button.new()
 	_header.focus_mode = Control.FOCUS_NONE
-	_header.custom_minimum_size.y = header_height
+	_header.custom_minimum_size.y = header_height + 12.0
 	_header.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_header.pressed.connect(func() -> void: set_collapsed(not collapsed, true))
 	add_child(_header)
@@ -40,20 +46,23 @@ func _init(section_id: StringName, title: String, icon_name: StringName, font_si
 	h.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	h.offset_left = 6.0
 	h.offset_right = -8.0
-	h.add_theme_constant_override("separation", 6)
+	h.offset_left = 2.0
+	h.add_theme_constant_override("separation", 8)
 	_header.add_child(h)
 	_arrow = Control.new()
 	_arrow.custom_minimum_size = Vector2(9.0, 9.0)
 	_arrow.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_arrow.draw.connect(_draw_arrow)
 	h.add_child(_arrow)
-	h.add_child(HudStyle.icon_rect(icon_name, float(font_size), HudStyle.HOLO))
-	_title = UIUtil.label(title, &"HeaderLabel")
-	_title.add_theme_font_size_override("font_size", font_size)
+	_title = UIUtil.label(title, &"TitleLabel")
+	_title.add_theme_font_size_override("font_size", font_size + 7)
+	_title.add_theme_font_override("font", HudStyle.font("Light", false, false, 1))
+	_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	h.add_child(_title)
 	h.add_child(UIUtil.spacer())
 	_note = UIUtil.label("", &"SubHeaderLabel")
-	_note.add_theme_font_size_override("font_size", font_size - 1)
+	_note.add_theme_font_size_override("font_size", font_size - 2)
+	_note.uppercase = true
 	_note.visible = false
 	h.add_child(_note)
 	_count = UIUtil.label("", &"NumberLabel")
@@ -69,7 +78,7 @@ func _init(section_id: StringName, title: String, icon_name: StringName, font_si
 	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(body)
 	_load()
-	collapsed = _folded.has(String(id))
+	collapsed = not _opened.has(String(id)) if FOLDED_BY_DEFAULT.has(id) else _folded.has(String(id))
 	body.visible = not collapsed
 
 
@@ -142,19 +151,28 @@ static func _load() -> void:
 		_folded = v
 	elif v is Array:
 		_folded = PackedStringArray(v)
+	var o: Variant = cfg.get_value("overview", "opened", PackedStringArray())
+	if o is PackedStringArray:
+		_opened = o
+	elif o is Array:
+		_opened = PackedStringArray(o)
 
 
 func _store(on: bool) -> void:
 	var key := String(id)
-	if on and not _folded.has(key):
-		_folded.append(key)
-	elif not on:
-		var i := _folded.find(key)
+	# Default-folded sections remember being opened, the others being folded.
+	var list := _opened if FOLDED_BY_DEFAULT.has(id) else _folded
+	var want := not on if FOLDED_BY_DEFAULT.has(id) else on
+	if want and not list.has(key):
+		list.append(key)
+	elif not want:
+		var i := list.find(key)
 		if i >= 0:
-			_folded.remove_at(i)
+			list.remove_at(i)
 	var cfg := ConfigFile.new()
 	# A missing or broken file starts empty; other settings in it are kept.
 	cfg.load(SETTINGS_PATH)
 	cfg.set_value("overview", "collapsed", _folded)
+	cfg.set_value("overview", "opened", _opened)
 	if cfg.save(SETTINGS_PATH) != OK:
 		push_warning("OverviewSection: could not save %s" % SETTINGS_PATH)

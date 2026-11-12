@@ -2,7 +2,9 @@ class_name OverviewPanel
 extends VBoxContainer
 ## Left panel, tabbed (the tab row stays when collapsed with its button or
 ## Tab). The pilots have their own list on the right ([PilotColumn]).
-## - ALL (default): contracts, threats and the system in one scrolling view.
+## - ALL (default): threats, contracts, clusters, then the reference list
+##   (star, planets, stations, gates, scrap; folded by default) in one
+##   scrolling view.
 ## - SYSTEM: star, planets (moons nested), asteroid clusters (live: new
 ##   ones appear, mined-out ones go), stations and structures (player
 ##   buildings with live status; a forward station's upkeep and water),
@@ -29,7 +31,7 @@ extends VBoxContainer
 ## Size: the width follows the window (wider, with larger text, when the
 ## window has fewer pixels than the 1920x1080 canvas); the height fits the
 ## content, at most down to [member bottom_margin] above the screen bottom
-## (the research list, contract strip and event feed live below it). The
+## (the event feed lives below it). The
 ## list scrolls with an eased wheel.
 
 enum Tab { ALL, SYSTEM, CONTRACTS, THREATS }
@@ -46,14 +48,14 @@ const ROCK_COLOR := Color(0.6, 0.6, 0.62)
 const SCRAP_COLOR := Color(0.85, 0.8, 0.68)
 ## Sections in list order: id, title, icon, tab.
 const SECTIONS := [
-	[&"contracts", "POSTED CONTRACTS", &"tab_contracts", Tab.CONTRACTS],
-	[&"threats", "HOSTILES OUT", &"tab_threats", Tab.THREATS],
-	[&"star", "STAR", &"star", Tab.SYSTEM],
-	[&"planets", "PLANETS", &"planet", Tab.SYSTEM],
-	[&"clusters", "ASTEROID CLUSTERS", &"belt", Tab.SYSTEM],
-	[&"structures", "STATIONS AND STRUCTURES", &"station", Tab.SYSTEM],
-	[&"gates", "JUMP GATES", &"gate", Tab.SYSTEM],
-	[&"scrap", "SCRAP FIELDS", &"scrap", Tab.SYSTEM],
+	[&"threats", "Threats", &"tab_threats", Tab.THREATS],
+	[&"contracts", "Contracts", &"tab_contracts", Tab.CONTRACTS],
+	[&"clusters", "Clusters", &"belt", Tab.SYSTEM],
+	[&"star", "Star", &"star", Tab.SYSTEM],
+	[&"planets", "Planets", &"planet", Tab.SYSTEM],
+	[&"structures", "Stations", &"station", Tab.SYSTEM],
+	[&"gates", "Gates", &"gate", Tab.SYSTEM],
+	[&"scrap", "Scrap fields", &"scrap", Tab.SYSTEM],
 ]
 ## Widths of the right column per section, px at the base text size.
 const RIGHT_WIDTHS := {&"contracts": 22.0, &"threats": 50.0, &"clusters": 66.0}
@@ -111,6 +113,10 @@ func _ready() -> void:
 	sb.content_margin_right = 8.0
 	sb.content_margin_top = 8.0
 	sb.content_margin_bottom = 8.0
+	# Flight ops: no box, the edge shading behind carries the contrast.
+	if sb is ChamferBox:
+		(sb as ChamferBox).bg_color = Color(0, 0, 0, 0)
+		(sb as ChamferBox).bg_bottom = Color(0, 0, 0, 0)
 	_frame.add_theme_stylebox_override(&"panel", sb)
 	add_child(_frame)
 	var fv := VBoxContainer.new()
@@ -699,10 +705,22 @@ func _sync_threats() -> void:
 					items.append([_key("ship", sc), _make_ship_row.bind(sc, d.faction_def)])
 					ships += 1
 					raiders += 1
+	# The pirate warlord (home): its flagship row while it is here, and a
+	# line for the warning, the visit or the time it is away.
+	var wl := world.warlords if world else null
+	if wl and is_instance_valid(wl.ship) and not wl.ship.dead and wl.ship.is_visible_in_tree():
+		items.append([_key("ship", wl.ship), _make_ship_row.bind(wl.ship, wl.ship.faction_def)])
+		ships += 1
+		raiders += 1
+	var wl_text := wl.outlook_text() if wl else ""
+	if not wl_text.is_empty():
+		items.append(["warlord", _make_note.bind("", &"warning")])
 	if items.is_empty():
 		items.append(["none", _make_note.bind("No hostile bases detected.")])
 	items.append(["outlook", _make_note.bind("", &"clock")])
 	_sync(&"threats", items)
+	if not wl_text.is_empty():
+		_note_text(_cached(&"threats", "warlord"), wl_text)
 	for h: Array in heads:
 		var head := _cached(&"threats", h[0])
 		if head:
@@ -744,7 +762,7 @@ func _make_den_row(d: ScavengerDen) -> Control:
 		tip.text("It %s." % d.claim_text())
 		tip.stat("Hull", "%d%%" % roundi(hull * 100.0), HudStyle.hull_color(hull))
 		tip.bar(hull, HudStyle.hull_color(hull))
-		tip.stat("Ships out", "%d/%d" % [d.spawns.size(), d.def.spawn_cap])
+		tip.stat("Ships out", "%d/%d" % [d.spawns.size(), d.spawn_limit()])
 		_tip_distance(tip, d)
 		tip.hint("Click: fly to it and select it to post a bounty.")
 	_updaters[row] = func() -> void:
@@ -762,7 +780,7 @@ func _make_den_row(d: ScavengerDen) -> Control:
 func _den_subtitle(d: ScavengerDen) -> String:
 	if not d.is_alive():
 		return "destroyed"
-	return "%s%d/%d out" % ["arriving, " if d.is_arriving() else "", d.spawns.size(), d.def.spawn_cap]
+	return "%s%d/%d out" % ["arriving, " if d.is_arriving() else "", d.spawns.size(), d.spawn_limit()]
 
 
 ## A ship out: faction dot, callsign, what it does, distance, state badge.

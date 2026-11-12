@@ -1,0 +1,51 @@
+[gd_resource type="Resource" script_class="FactionDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/enemies/faction_def.gd" id="1_fac"]
+[ext_resource type="Resource" path="res://data/loadouts/swarm_drone.tres" id="2_load"]
+
+[resource]
+script = ExtResource("1_fac")
+id = &"swarm"
+display_name = "The Swarm"
+unit_name = "Drone"
+den_kind = "swarm hive"
+color = Color(0.55, 1, 0.3, 1)
+raider_color = Color(0.72, 1, 0.45, 1)
+light_color = Color(0.5, 1, 0.3, 1)
+ship_model_path = "res://assets/models/ships/construction_drone.glb"
+den_model_path = ""
+ship_fallback_scale = 0.9
+den_fallback_scale = 1.15
+fallback_tint = 0.6
+always_tint = true
+loadout = ExtResource("2_load")
+hit_radius = 6.0
+ship_accuracy = 0.45
+ship_dodge = 0.2
+hunts_miners = true
+hunts_salvagers = true
+hunts_pods = true
+hunts_armed = true
+aggression = 0.95
+flee_hull = 0.0
+steal_share = 0.0
+pack_size = 4
+raid_style = 1
+raid_weight = 1.3
+raid_size = Vector2i(5, 8)
+wreck_loot = 12
+raid_loot_mult = 0.5
+den_hull = 5200.0
+den_shields = 400.0
+den_shield_regen = 30.0
+den_hit_radius = 46.0
+den_guns = 3
+den_gun_damage = 3.0
+den_gun_rate = 4.0
+den_gun_range = 600.0
+bounty_mult = 1.4
+loot_mult = 0.8
+den_bounty_danger = 5
+den_info = "A Swarm hive, grown out of the rock near %s. Launches drones up to %d at a time, more every few minutes it stands, and buds new hives when it has grown. Destroy it early."
+intro = "Something new is in the system: rogue drones, no pilots, no demands. They shoot to kill and their hives grow while they stand."
+ship_info = "Rogue drone from %s. Hunts every ship it finds and shoots to kill."

@@ -46,6 +46,8 @@ const SCAVENGER_DEN_MODEL := "res://assets/models/buildings/scavenger_den.glb"
 @export var ship_fallback_scale: float = 1.0
 @export var den_fallback_scale: float = 1.0
 @export_range(0.0, 1.0, 0.01) var fallback_tint: float = 0.55
+## Tint the faction's own ship model too (the Swarm's drones reuse a model).
+@export var always_tint: bool = false
 
 @export_group("Ship")
 ## Hull, shields, speed and weapon. Null = the "Scavenger" role default.

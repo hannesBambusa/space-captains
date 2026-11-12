@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | built (follow-ups done but the play test and raid sizes), needs a play test |
-| **Branch** | main (S0 to S5 in db35437, follow-ups in c4c3778; raider range fix uncommitted) |
+| **Branch** | main (S0 to S5 in db35437, follow-ups in c4c3778, raider range fix in 2090349; all committed) |
 | **Updated** | 2026-11-05 |
 | **Scope** | Surface outposts on planets and moons (4 km landing zone, own world while viewed), replacing planet raids. S0 to S5 built; follow-ups in Remaining. |
 

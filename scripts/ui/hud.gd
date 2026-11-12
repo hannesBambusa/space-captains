@@ -22,7 +22,7 @@ extends CanvasLayer
 ## viewed system's (home's or a forward station's), what the build menu,
 ## the overview's structures and placement use. In a system without a
 ## station the build menu is hidden and placement cancelled. The pilot list
-## and the contract strip list every system, home first, the others tagged
+## and the overview's contracts list every system, home first, the others tagged
 ## "[Ostra]" ([method system_tag]). The top bar's system name opens the
 ## system menu (stations marked). A click on a forward station opens the
 ## [StationPanel]. [method focus] switches the view to the system of what
@@ -63,9 +63,8 @@ var gate_panel: GatePanel
 var station_panel: StationPanel
 ## Built in code: the pilot list under the minimap.
 var pilots: PilotColumn
-## Built in code: posted contracts, bottom left above the event feed.
-var contracts: ContractStrip
-## Built in code: funded research, bottom left above the contract list.
+## Built in code: funded research, top of the right column under the clock
+## (flight ops: the posted contracts are the left column's Contracts section).
 var research: ResearchList
 ## Built in code: the first-time tutorial and its card (top left, right of
 ## the left panel).
@@ -78,6 +77,10 @@ var ledger: LedgerPanel
 ## The rival corporation (rival corporation plan): R or the top bar's RIVAL.
 var rival_panel: RivalPanel
 var treaty_card: TreatyCard
+## Chase camera on one captain (V, the captain panel's Ride button).
+var ride_along: RideAlong
+## Captain radio chatter (voiced lines and a subtitle).
+var radio: RadioChatter
 
 ## Width of the right column (minimap, pilot list, selection panels).
 const RIGHT_WIDTH := 380.0
@@ -91,6 +94,10 @@ var _select_home_on_view := false
 
 func _ready() -> void:
 	add_to_group(GROUP)
+	var shade := EdgeShade.new()
+	shade.name = "EdgeShade"
+	$Root.add_child(shade)
+	$Root.move_child(shade, 0)
 	var tree := get_tree()
 	solar_system = SolarSystem.of(self)
 	camera = RTSCamera.of(self)
@@ -154,14 +161,11 @@ func _ready() -> void:
 	$Root.add_child(pilots)
 	$Root.move_child(pilots, minimap.get_index() + 1)
 	minimap.custom_minimum_size.x = RIGHT_WIDTH
-	contracts = ContractStrip.new()
-	contracts.name = "Contracts"
-	$Root.add_child(contracts)
-	$Root.move_child(contracts, event_feed.get_index())
 	research = ResearchList.new()
 	research.name = "Research"
+	research.width = RIGHT_WIDTH
 	$Root.add_child(research)
-	$Root.move_child(research, contracts.get_index())
+	$Root.move_child(research, minimap.get_index())
 	tutorial = Tutorial.new()
 	tutorial.name = "Tutorial"
 	add_child(tutorial)
@@ -193,11 +197,10 @@ func _ready() -> void:
 	if view_manager:
 		view_manager.view_changed.connect(_on_view_changed)
 	top_bar.research_pressed.connect(select_lab)
-	contracts.setup(self)
 	research.setup(self)
 	# Placed at once when it shows or grows, not on the next layout tick.
-	research.visibility_changed.connect(_layout_bottom_left, CONNECT_DEFERRED)
-	research.minimum_size_changed.connect(_layout_bottom_left, CONNECT_DEFERRED)
+	research.visibility_changed.connect(_layout_right, CONNECT_DEFERRED)
+	research.minimum_size_changed.connect(_layout_right, CONNECT_DEFERRED)
 	ledger = LedgerPanel.new()
 	ledger.name = "Ledger"
 	$Root.add_child(ledger)
@@ -216,6 +219,15 @@ func _ready() -> void:
 	treaty_card = TreatyCard.new()
 	treaty_card.name = "TreatyCard"
 	$Root.add_child(treaty_card)
+	ride_along = RideAlong.new()
+	ride_along.name = "RideAlong"
+	$Root.add_child(ride_along)
+	ride_along.setup(self)
+	radio = RadioChatter.new()
+	radio.name = "RadioChatter"
+	$Root.add_child(radio)
+	radio.setup(self)
+	_announce_sector.call_deferred()
 	tutorial.setup(self)
 	tutorial_card.setup(self, tutorial)
 	get_viewport().size_changed.connect(_layout_right)
@@ -243,12 +255,21 @@ func selection_panels() -> Array[PanelContainer]:
 	return out
 
 
-## Minimap on top, the pilot list under it down to the open selection
-## panel (or the screen bottom); the panel is capped to the room left under
-## the pilot list's title row and scrolls inside.
+## Under the top bar's clock: the research list (while anything is funded),
+## the minimap, the pilot list down to the open selection panel (or the
+## screen bottom); the panel is capped to the room left under the pilot
+## list's title row and scrolls inside.
 func _layout_right() -> void:
 	var root := $Root as Control
 	var vp := root.size
+	var y := top_bar.position.y + top_bar.size.y + GAP
+	if research.visible:
+		var rh := research.get_combined_minimum_size().y
+		research.position = Vector2(vp.x - EDGE - RIGHT_WIDTH, y)
+		research.size = Vector2(RIGHT_WIDTH, rh)
+		y += rh + GAP
+	if absf(minimap.position.y - y) > 0.5:
+		minimap.position.y = y
 	var top := minimap.position.y + minimap.size.y + GAP
 	var bottom := vp.y - EDGE
 	var open_panel: PanelContainer = null
@@ -281,25 +302,13 @@ func _layout_right() -> void:
 
 
 ## Bottom left: the event feed at the bottom (room for its full height kept,
-## so nothing jumps), the contract list above it, the research list above
-## that, the left panel above them all.
+## so nothing jumps), the left panel above it.
 func _layout_bottom_left() -> void:
 	var root := $Root as Control
 	var vp := root.size
 	var feed_h := float(event_feed.max_visible) * 28.0
 	var bottom := vp.y - EDGE - feed_h - GAP
-	var used := 0.0
-	if contracts.visible:
-		var h := contracts.get_combined_minimum_size().y
-		contracts.position = Vector2(EDGE, bottom - h)
-		contracts.size = Vector2(contracts.width, h)
-		used = h + GAP
-	if research.visible:
-		var h := research.get_combined_minimum_size().y
-		research.position = Vector2(EDGE, bottom - used - h)
-		research.size = Vector2(research.width, h)
-		used += h + GAP
-	var margin := vp.y - bottom + used + 4.0
+	var margin := vp.y - bottom + 4.0
 	if absf(overview.bottom_margin - margin) > 0.5:
 		overview.bottom_margin = margin
 		overview._fit_height()
@@ -359,6 +368,18 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	elif k and k.pressed and not k.echo and k.physical_keycode == KEY_R and Corps.has_rival() and not (k.ctrl_pressed or k.meta_pressed or k.alt_pressed):
 		rival_panel.toggle()
 		get_viewport().set_input_as_handled()
+
+
+
+## A new game's sector modifier: one feed line and a toast (once).
+func _announce_sector() -> void:
+	var line := Sector.take_announcement()
+	if line.is_empty():
+		return
+	EventLog.post_public(line, EventLog.Kind.INFO)
+	var pm := get_tree().root.get_node_or_null(^"PauseMenu")
+	if pm and pm.has_method(&"toast"):
+		pm.call(&"toast", "Sector: %s" % SectorModifier.find(Sector.modifier)["name"])
 
 
 ## Selects the Science Lab (the top bar's research box, the research

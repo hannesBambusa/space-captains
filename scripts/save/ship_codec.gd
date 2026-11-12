@@ -38,7 +38,7 @@ const KIND_MOBILE := "mobile"
 const SLOTS: Array[int] = [ShipModule.Slot.TOOL, ShipModule.Slot.CARGO, ShipModule.Slot.DEFENSE, ShipModule.Slot.ENGINE, ShipModule.Slot.SENSOR]
 
 const BRAIN_FIELDS: PackedStringArray = ["last_refusal", "last_refusal_target", "last_decision", "_timer", "_resting_on_break", "_calm_time", "_threat_timer", "_escort_wait_home"]
-const MERC_FIELDS: PackedStringArray = ["retreating", "solo_brave", "_patrol_until", "_patrol_angle", "_patrol_point", "_wait_time", "_ward_was_out", "_passing_timer", "_patrol_zone_id", "strike_system", "strike_until"]
+const MERC_FIELDS: PackedStringArray = ["retreating", "solo_brave", "_patrol_until", "_patrol_angle", "_patrol_point", "_wait_time", "_ward_was_out", "_passing_timer", "_patrol_zone_id", "strike_system", "strike_until", "remote_system"]
 const SHIP_FIELDS: PackedStringArray = ["trip_lowest_hull", "trip_was_hit", "repair_credit", "repair_session_paid", "repair_from", "_visit_timer", "_visit_pending", "_trait_timer"]
 
 
@@ -154,6 +154,9 @@ static func _save_scavenger(s: ScavengerShip, d: Dictionary) -> void:
 			"faction": String(s.faction_def.id) if s.faction_def else String(Factions.DEFAULT_ID)}
 	if s.ai and s.ai.lead():
 		d["scavenger"]["lead"] = SaveIds.of(s.ai.lead())
+	if s is WarlordShip:
+		var wl := s as WarlordShip
+		d["warlord"] = {"name": wl.warlord_name, "title": wl.title, "visit": wl.visit, "retreat": wl.retreat_time}
 	if s is ClaimConstructor:
 		var c := s as ClaimConstructor
 		d["constructor"] = {"planet": c.planet.def.name if is_instance_valid(c.planet) else "", "angle": c.site_angle, "gang": c.gang,
@@ -337,6 +340,13 @@ static func _create_scavenger(ctx: Node, d: Dictionary, refs: SaveRefs) -> Ship:
 		c.deploying = bool(cd.get("deploying", false))
 		c.deploy_progress = float(cd.get("progress", 0.0))
 		s = c
+	elif d.has("warlord"):
+		var wd: Dictionary = d["warlord"]
+		var wl := WarlordShip.new()
+		wl.setup_warlord(fdef, String(wd.get("name", "?")), String(wd.get("title", "")), int(wd.get("visit", 1)))
+		wl.retreat_time = float(wd.get("retreat", -1.0))
+		wl.ai_driven = wl.retreat_time < 0.0
+		s = wl
 	else:
 		s = ScavengerShip.new()
 		s.setup_scavenger(den, String(sd.get("callsign", "?")), bool(sd.get("raider", false)), fdef)

@@ -44,6 +44,9 @@ func setup_scavenger(from_den: ScavengerDen, call_sign: String, raider: bool, fd
 ## Stand-in scavenger model: faction tint and scale.
 func _prepare_model(model: Node3D) -> void:
 	if _model_path == faction_def.ship_model_path:
+		if faction_def.always_tint:
+			ModelLoader.tint(model, faction_def.color, faction_def.fallback_tint)
+			model.scale *= faction_def.ship_fallback_scale
 		return
 	ModelLoader.tint(model, faction_def.color, faction_def.fallback_tint)
 	model.scale *= faction_def.ship_fallback_scale

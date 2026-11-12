@@ -88,6 +88,8 @@ static func start(s: Ship, gate_hops: PackedStringArray, dwell_time: float = 0.0
 	else:
 		t.phase = Phase.APPROACH
 	EventLog.post("%s is heading for %s" % [s.get_display_name(), t.gate_name], EventLog.Kind.INFO, s)
+	if s.captain and s.faction == Combat.Faction.PLAYER:
+		RadioChatter.say(s.captain, &"jump", s)
 	s.status_changed.emit(s)
 	return t
 

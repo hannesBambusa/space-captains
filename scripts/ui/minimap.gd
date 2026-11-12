@@ -16,7 +16,7 @@ extends PanelContainer
 
 const ZOOM_LEVELS: Array[float] = [1.0, 0.25, 0.0625]
 const STAR_COLOR := Color(1.0, 0.86, 0.55)
-const ORBIT_COLOR := Color(0.373, 0.816, 0.886, 0.2)
+const ORBIT_COLOR := Color(0.93, 0.95, 0.96, 0.16)
 const PLANET_COLOR := Color(0.75, 0.82, 0.95)
 const BELT_COLOR := Color(0.75, 0.62, 0.48, 0.28)
 ## Cluster blob tint per ore (rock, iron, titanium, crystal).
@@ -60,6 +60,12 @@ var _anchor: Node3D
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Flight ops: no panel box, the map field and the edge shading carry it.
+	var sb := get_theme_stylebox(&"panel").duplicate() as StyleBox
+	if sb is ChamferBox:
+		(sb as ChamferBox).bg_color = Color(0, 0, 0, 0)
+		(sb as ChamferBox).bg_bottom = Color(0, 0, 0, 0)
+	add_theme_stylebox_override(&"panel", sb)
 	# The header icons are drawn far below their texture size (14 px from 64,
 	# less again at 1280x720): without mipmaps the thin collapse dash fell
 	# between texels and vanished.
@@ -412,23 +418,11 @@ func _draw_clusters(c: Control, sys: SolarSystem, sc: float, xf: Transform2D) ->
 func _draw_map() -> void:
 	var c := _canvas
 	var size := c.size
-	c.draw_rect(Rect2(Vector2.ZERO, size), Color(HudStyle.VOID, 0.82), true)
-	# Survey grid and corner brackets.
-	for i in range(1, 4):
-		var g := size.x * float(i) / 4.0
-		c.draw_line(Vector2(g, 0), Vector2(g, size.y), Color(HudStyle.HOLO, 0.06), 1.0)
-		c.draw_line(Vector2(0, g), Vector2(size.x, g), Color(HudStyle.HOLO, 0.06), 1.0)
-	var bk := Color(HudStyle.HOLO, 0.7)
-	for corner: Vector2 in [Vector2(0, 0), Vector2(1, 0), Vector2(0, 1), Vector2(1, 1)]:
-		var p := corner * size
-		var sx := 1.0 if corner.x == 0.0 else -1.0
-		var sy := 1.0 if corner.y == 0.0 else -1.0
-		c.draw_line(p, p + Vector2(10.0 * sx, 0), bk, 1.0)
-		c.draw_line(p, p + Vector2(0, 10.0 * sy), bk, 1.0)
+	# Flight ops: a faint dark field, no grid or brackets; edge shading behind.
+	c.draw_rect(Rect2(Vector2.ZERO, size), Color(HudStyle.VOID, 0.38), true)
 	if mode == Mode.CLUSTER:
 		var vm := hud.view_manager if hud else null
 		_graph.draw(c, vm.viewed_id() if vm else ClusterNetwork.HOME_ID, _hover)
-		c.draw_rect(Rect2(Vector2.ZERO, size), HudStyle.HAIRLINE, false, 1.0)
 		return
 	if hud == null or hud.solar_system == null:
 		return
@@ -501,7 +495,6 @@ func _draw_map() -> void:
 			c.draw_circle(m, 2.4, ShipMarkers.color_for(n))
 	if is_instance_valid(selected) and selected.is_inside_tree():
 		c.draw_arc(_to_map(selected.global_position), 5.5, 0.0, TAU, 20, ShipMarkers.SELECT_COLOR, 1.5, true)
-	c.draw_rect(Rect2(Vector2.ZERO, size), HudStyle.HAIRLINE, false, 1.0)
 
 
 ## The camera's footprint on the plane (screen corners), or its pivot.

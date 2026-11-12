@@ -1,8 +1,9 @@
 class_name EventFeed
 extends VBoxContainer
 ## Compact event feed, bottom-left: the last few EventLog lines, newest at
-## the bottom, each with an icon per kind (info, combat, loss, threat,
-## reward) and a coloured edge, sliding in and fading out after
+## the bottom, set straight on the scene (flight ops): a dot in the kind's
+## colour (info, combat, loss, threat, reward; a hostile faction's own
+## colour), a mono time stamp and the line, sliding in and fading out after
 ## [member hold_time] seconds. Click an
 ## entry: the camera flies to the ship or place it is about (and selects the
 ## ship when it still exists).
@@ -10,7 +11,6 @@ extends VBoxContainer
 const KIND_COLORS: Array[Color] = [
 	Color(0.78, 0.84, 0.92), Color(1.0, 0.72, 0.4), Color(1.0, 0.42, 0.36), Color(1.0, 0.36, 0.3), Color(0.6, 1.0, 0.68),
 ]
-const KIND_ICONS: Array[StringName] = [&"feed_info", &"feed_combat", &"feed_loss", &"feed_threat", &"feed_reward"]
 
 @export var max_visible: int = 5
 ## Seconds an entry stays before it starts to fade.
@@ -73,25 +73,25 @@ func _on_posted(e: Dictionary) -> void:
 	var fid := StringName(e.get("faction", &""))
 	# Lines about a hostile faction wear its colour (scavengers keep the kind colour).
 	var tone: Color = KIND_COLORS[kind] if fid.is_empty() or fid == Factions.DEFAULT_ID else Factions.get_def(fid).color
-	var edge := ColorRect.new()
-	edge.color = tone
-	edge.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE)
-	edge.offset_right = 2.0
-	b.add_child(edge)
 	var h := HBoxContainer.new()
 	h.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	h.offset_left = 9.0
 	h.offset_right = -6.0
-	h.add_theme_constant_override("separation", 7)
+	h.add_theme_constant_override("separation", 10)
 	b.add_child(h)
-	h.add_child(HudStyle.icon_rect(KIND_ICONS[kind], 14.0, tone))
+	var dot := Control.new()
+	dot.custom_minimum_size = Vector2(6.0, 6.0)
+	dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dot.draw.connect(func() -> void: dot.draw_circle(dot.size * 0.5, 3.0, tone, true, -1.0, true))
+	h.add_child(dot)
 	var t := int(float(e["time"]))
 	var clock := UIUtil.label("%02d:%02d" % [floori(t / 60.0) % 60, t % 60], &"SmallLabel")
 	clock.add_theme_font_override("font", HudStyle.mono("Regular"))
-	clock.add_theme_color_override("font_color", HudStyle.TEXT_FAINT)
+	clock.add_theme_color_override("font_color", HudStyle.TEXT_DIM)
 	h.add_child(clock)
 	var l := UIUtil.label(String(e["text"]))
-	l.add_theme_color_override("font_color", tone.lerp(Color.WHITE, 0.55))
+	l.add_theme_color_override("font_color", tone.lerp(HudStyle.TEXT_BRIGHT, 0.75))
 	l.add_theme_font_size_override("font_size", 14)
 	l.clip_text = true
 	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS

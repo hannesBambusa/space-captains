@@ -32,6 +32,11 @@ var _pick_diff: CorpRegistry.Difficulty = CorpRegistry.Difficulty.NORMAL
 var _count_buttons: Array[Button] = []
 var _diff_buttons: Array[Button] = []
 var _new_hint: Label
+## Sector modifier choice (an id or SectorModifier.RANDOM) and its buttons.
+var _pick_mod: StringName = SectorModifier.STANDARD
+var _mod_buttons: Array[Button] = []
+var _mod_ids: Array[StringName] = []
+var _mod_hint: Label
 var _last_hover := -1.0
 
 
@@ -257,7 +262,8 @@ func _show_graphics() -> void:
 
 ## The New game page (rival corporation plan): how many rival corps (none,
 ## 1, 2 or 3) and one difficulty for all of them, remembered for next time
-## (Corps.set_next_difficulty / set_next_rival_count), then Start.
+## (Corps.set_next_difficulty / set_next_rival_count), the sector modifier
+## ([SectorModifier], or Random; Sector.set_next_modifier), then Start.
 func _build_new(stack: Control) -> void:
 	_new = VBoxContainer.new()
 	_new.custom_minimum_size = Vector2(420, 0)
@@ -294,6 +300,30 @@ func _build_new(stack: Control) -> void:
 	_new_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_new_hint.custom_minimum_size.x = 420.0
 	_new.add_child(_new_hint)
+	_new.add_child(UIUtil.label("SECTOR", &"SubHeaderLabel"))
+	var mods := HFlowContainer.new()
+	mods.add_theme_constant_override("h_separation", 6)
+	mods.add_theme_constant_override("v_separation", 6)
+	mods.custom_minimum_size.x = 420.0
+	_new.add_child(mods)
+	var mg := ButtonGroup.new()
+	_mod_ids.clear()
+	for m in SectorModifier.LIST:
+		_mod_ids.append(m["id"])
+	_mod_ids.append(SectorModifier.RANDOM)
+	for id in _mod_ids:
+		var tip := "One of the others, rolled when the game starts" if id == SectorModifier.RANDOM else String(SectorModifier.find(id)["blurb"])
+		var b := _choice(SectorModifier.name_of(id).to_upper(), mg, tip)
+		b.custom_minimum_size = Vector2(0, 32)
+		b.pressed.connect(func() -> void:
+			_pick_mod = id
+			_update_new())
+		mods.add_child(b)
+		_mod_buttons.append(b)
+	_mod_hint = UIUtil.label("", &"DimLabel")
+	_mod_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_mod_hint.custom_minimum_size.x = 420.0
+	_new.add_child(_mod_hint)
 	_new.add_child(_button("Start game", _start_new))
 	_new.add_child(_button("Back", _show_main))
 	_new.hide()
@@ -319,6 +349,7 @@ func _show_new() -> void:
 	var off := Corps.next_difficulty == CorpRegistry.Difficulty.OFF
 	_pick_count = 0 if off else Corps.next_rival_count
 	_pick_diff = CorpRegistry.Difficulty.NORMAL if off else Corps.next_difficulty
+	_pick_mod = Sector.next_modifier
 	_update_new()
 	_new.show()
 
@@ -329,6 +360,10 @@ func _update_new() -> void:
 	for i in _diff_buttons.size():
 		_diff_buttons[i].set_pressed_no_signal(i + 1 == int(_pick_diff))
 		_diff_buttons[i].disabled = _pick_count == 0
+	for i in _mod_buttons.size():
+		_mod_buttons[i].set_pressed_no_signal(_mod_ids[i] == _pick_mod)
+	_mod_hint.text = "One of the five sectors other than Standard, rolled at the start. The first feed line says which." \
+			if _pick_mod == SectorModifier.RANDOM else String(SectorModifier.find(_pick_mod)["blurb"])
 	if _pick_count == 0:
 		_new_hint.text = "No rival corporation: only you and the pirates."
 	else:
@@ -340,6 +375,7 @@ func _start_new() -> void:
 	Corps.set_next_difficulty(CorpRegistry.Difficulty.OFF if _pick_count == 0 else _pick_diff)
 	if _pick_count > 0:
 		Corps.set_next_rival_count(_pick_count)
+	Sector.set_next_modifier(_pick_mod)
 	SaveManager.new_game()
 
 

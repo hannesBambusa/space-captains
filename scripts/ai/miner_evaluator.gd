@@ -61,6 +61,9 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 	var e := Evaluation.new()
 	e.contract = contract
 	var km := SpaceNav.distance_to_belt(mc.belt, brain.home_position()) / 1000.0
+	if RemoteWork.is_remote(mc, brain):
+		# Another system (RemoteWork): to the gate, the jumps, the way to the rocks.
+		km = RemoteWork.trip_km(brain, mc, brain.home_position(), mc.belt.global_position)
 	var danger := mc.get_danger()
 	var base_danger := danger
 	var cap := brain.captain

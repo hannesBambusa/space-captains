@@ -126,6 +126,8 @@ const RETARGET_MARGIN := 1.3
 var mode: Mode = Mode.NONE
 ## The system of a war strike ([method strike_to]), "" = none.
 var strike_system: StringName = &""
+## A bounty in another system (RemoteWork): the system the gate trip goes to.
+var remote_system: StringName = &""
 ## Sim time a strike gives up at the target (stuck, nothing left to hit).
 var strike_until: float = 0.0
 var combat_target: Node3D
@@ -421,7 +423,9 @@ func _decide_merc() -> void:
 		return
 	if _rejoin_fleet():
 		return
-	var e := evaluator.pick(self, ContractBoard.get_available(-1, system_id(), corp_id()))
+	var pool := ContractBoard.get_available(-1, system_id(), corp_id())
+	pool.append_array(RemoteWork.contracts_for(self))
+	var e := evaluator.pick(self, pool)
 	if e and e.accept and _take(e.contract, e):
 		return
 	if e and not e.accept:
@@ -456,6 +460,10 @@ func _decide_merc() -> void:
 func _take(contract: Contract, e: RoleEvaluator.Evaluation = null) -> bool:
 	var bounty := contract as BountyContract
 	var terms: Dictionary = e.terms if e else {}
+	var remote := RemoteWork.is_remote(contract, self)
+	if remote and (terms.has("join_fleet") or not bounty):
+		# Remote work: bounties only, flown alone (fleets form in one system).
+		return false
 	if terms.has("join_fleet"):
 		if bounty == null or bounty.fleet == null:
 			return false
@@ -482,6 +490,8 @@ func _take(contract: Contract, e: RoleEvaluator.Evaluation = null) -> bool:
 	else:
 		note_accept(e, "Accepted %s, %s" % [DecisionNotes.job_name(contract), contract.get_reward_text()])
 	decided.emit(self, true, last_decision)
+	if remote:
+		return _launch_remote(m, t)
 	_launch(m, t)
 	if bounty and terms.has("call_fleet"):
 		MercFleet.call_fleet(bounty, ship, int(terms["call_fleet"]))
@@ -615,7 +625,33 @@ func return_home(for_repairs: bool) -> void:
 	_set_state(State.RETURNING)
 
 
+## Out to a remote bounty (RemoteWork): the job stays, the hunt starts on
+## arrival ([method end_transit]). False (taker removed) when there is no way.
+func _launch_remote(m: Mode, t: Trip) -> bool:
+	mode = m
+	trip = t
+	retreating = false
+	combat_target = null
+	_closing = false
+	remote_system = t.contract.system_id
+	var hops := Sector.hops_between(system_id(), remote_system)
+	if hops.is_empty() or GateTransit.start(ship, hops) == null:
+		remote_system = &""
+		_end_trip()
+		mode = Mode.NONE
+		_back_to_docked()
+		return false
+	if captain:
+		note(CaptainLog.Kind.COMBAT, CaptainLog.Outcome.DID, "Flew out to %s for %s" % [_system_label(remote_system), t.contract.get_target_name()],
+				"A bounty in another system: %d jump%s each way" % [hops.size(), "" if hops.size() == 1 else "s"])
+	return true
+
+
 func begin_transit() -> void:
+	if not remote_system.is_empty() and trip:
+		# Out to a remote bounty: keep the job.
+		_set_state(State.HUNTING)
+		return
 	var strike := strike_system
 	return_home(false)
 	mode = Mode.NONE
@@ -636,6 +672,13 @@ func _gate_home() -> bool:
 
 
 func end_transit() -> void:
+	if not remote_system.is_empty() and trip and SystemWorld.of(ship) and SystemWorld.of(ship).system_id == remote_system:
+		# At the remote bounty's system: the hunt starts here.
+		remote_system = &""
+		retreating = false
+		_enter_work_state()
+		return
+	remote_system = &""
 	mode = Mode.NONE
 	retreating = false
 	if takes_ship_back():
@@ -667,6 +710,9 @@ func strike_to(system_id: StringName) -> bool:
 
 ## A gate trip on a strike ends at the target: the brain flies on.
 func takes_ship_back() -> bool:
+	if not remote_system.is_empty() and trip and is_instance_valid(ship):
+		var here := SystemWorld.of(ship)
+		return here != null and here.system_id == remote_system
 	if strike_system.is_empty() or not is_instance_valid(ship):
 		return false
 	var w := SystemWorld.of(ship)

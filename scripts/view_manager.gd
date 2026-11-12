@@ -54,6 +54,8 @@ var rival: RivalCorp
 var outposts: Outposts
 ## Which rival station worlds run live, and the data sim of the others.
 var rival_worlds: RivalWorlds
+## Remote mining and bounty work in systems without a station (keeps them live).
+var remote_work: RemoteWork
 
 ## Remote hosts by id, and the real time each is dropped at (INF while viewed).
 var _hosts: Dictionary = {}
@@ -97,6 +99,9 @@ func _enter_tree() -> void:
 	rival_worlds = RivalWorlds.new()
 	rival_worlds.name = "RivalWorlds"
 	add_child(rival_worlds)
+	remote_work = RemoteWork.new()
+	remote_work.name = "RemoteWork"
+	add_child(remote_work)
 
 
 func _ready() -> void:

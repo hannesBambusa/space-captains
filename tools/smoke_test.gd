@@ -105,6 +105,8 @@ var colony := false
 var rival := false
 ## --rivals=N: N rivals (1 to 3; implies --rival).
 var rival_count := 1
+## --modifier=<id>: the run's sector modifier (Standard by default).
+var modifier: StringName = SectorModifier.STANDARD
 ## --rival --war: contact at minute 2, war at minute 3, a player strike at 8.
 var rival_war := false
 ## --rival --eliminate: war at minute 2, the rival HQ knocked out at 3: the
@@ -215,12 +217,17 @@ func _ready() -> void:
 			rival_expand = true
 		elif a == "--lab":
 			rival_lab = true
+		elif a.begins_with("--modifier="):
+			# A sector modifier for this run (SectorModifier id, or "random").
+			modifier = StringName(a.trim_prefix("--modifier="))
 		elif a == "--rival-live":
 			# The rival station worlds stay pinned live (the data sim off), to compare.
 			RivalWorlds.data_enabled = false
 	# Never the player's menu setting: Off unless --rival (Normal).
 	Corps.next_difficulty = CorpRegistry.Difficulty.NORMAL if rival else CorpRegistry.Difficulty.OFF
 	Corps.next_rival_count = rival_count
+	# Never the player's menu setting either: Standard unless --modifier=.
+	Sector.next_modifier = modifier
 	_log = SmokeLogger.new()
 	OS.add_logger(_log)
 	seed(SEED)

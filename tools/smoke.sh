@@ -25,6 +25,7 @@
 #   unless the scuttle destroys it and the rival is eliminated by minute 5.
 #   --expand (with --rival): the rival gets Forward operations and its charts
 #   at minute 1; fails unless it founds a forward station.
+#   --modifier=ID: the run's sector modifier (SectorModifier id or random; Standard by default).
 #   --rival-live (with --rival): rival station worlds stay pinned live (the
 #   data sim for unviewed rival worlds off), for comparisons.
 set -u
@@ -60,6 +61,7 @@ while [ $# -gt 0 ]; do
 		--lab) WAR="--lab"; shift ;;
 		--surface) SURFACE="--surface"; shift ;;
 		--miners=*) SURFACE="$SURFACE $1"; shift ;;
+		--modifier=*) SURFACE="$SURFACE $1"; shift ;;
 		*) echo "unknown arg: $1" >&2; exit 2 ;;
 	esac
 done

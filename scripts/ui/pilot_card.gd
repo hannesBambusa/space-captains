@@ -461,7 +461,7 @@ static func _fit(f: Font, text: String, fsize: int, max_w: float) -> String:
 	return text.left(lo).strip_edges() + "..."
 
 
-## One row over open space: no box, outlined text. Left tick: red
+## One row over open space: no box, thinly outlined text, the role icon. Left tick: red
 ## (pulsing) in combat, amber when damaged. Hover lifts a faint strip,
 ## selection an amber one.
 func _draw_compact() -> void:
@@ -485,14 +485,12 @@ func _draw_compact() -> void:
 		var tc := Color(branch_color, 0.55)
 		draw_line(Vector2(tx, 0), Vector2(tx, mid if branch == Branch.LAST else hgt), tc, 1.0)
 		draw_line(Vector2(tx, mid), Vector2(tx + 8.0, mid), tc, 1.0)
-	# Small role badge.
+	# Role mark: the role icon in its colour, no badge (flight ops).
 	var bs := 15.0
 	var b := Rect2(6 + ind, mid - bs * 0.5, bs, bs)
-	var pts := PackedVector2Array([b.position, Vector2(b.end.x - 4, b.position.y), Vector2(b.end.x, b.position.y + 4), b.end, Vector2(b.position.x, b.end.y)])
-	draw_colored_polygon(pts, Color(role_col.darkened(0.6), 0.85))
 	var ric := H.icon(H.role_icon(String(_data["role"])))
 	if ric:
-		draw_texture_rect(ric, b.grow(-2.5), false, role_col.lerp(Color.WHITE, 0.25))
+		draw_texture_rect(ric, b.grow(-1.5), false, role_col.lerp(Color.WHITE, 0.15))
 	var base := mid + 4.5
 	var x := b.end.x + 6.0
 	var right := w - 4.0
@@ -570,5 +568,5 @@ func _crown(at: Vector2, color: Color) -> void:
 func _text(f: Font, at: Vector2, text: String, fsize: int, color: Color) -> void:
 	if text.is_empty():
 		return
-	draw_string_outline(f, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fsize, 3, Color(0, 0, 0, 0.75))
+	draw_string_outline(f, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fsize, 2, Color(0, 0, 0, 0.55))
 	draw_string(f, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fsize, color)

@@ -119,6 +119,8 @@ var modules_bought: int = 0
 var flight_log := CaptainLog.new()
 ## The ship flown now (null while stranded or dead).
 var ship: Ship
+## Radio voice slot (0 or 1, RadioChatter); -1 = from the name ([method voice_slot]).
+var voice: int = -1
 ## True while waiting at the home outpost without a ship (after ejecting).
 var stranded: bool = false
 ## While the ship is only data (between gates or in a system that is not
@@ -127,6 +129,11 @@ var stranded: bool = false
 ## rebuilds them on load.
 var away_slot: int = -1
 var away_in: String = ""
+
+
+## The radio voice slot: [member voice], or one picked from the name (no RNG draw).
+func voice_slot() -> int:
+	return voice if voice >= 0 else absi(hash(captain_name)) % 2
 
 
 func get_personality_name() -> String:
@@ -447,7 +454,7 @@ const SAVE_FIELDS: PackedStringArray = [
 	"nerve", "greed", "diligence", "piloting", "skill", "loyalty", "teamwork",
 	"loads_delivered", "credits_earned", "wallet", "credits_spent", "kills", "escorts_completed", "alive",
 	"reputation", "rank", "traits", "history", "hired_at", "career_since", "crystal_loads", "salvage_loads", "raid_loads", "surveys", "discoveries",
-	"solo_jobs", "team_jobs", "fights_survived", "ejections", "modules_bought", "stranded",
+	"solo_jobs", "team_jobs", "fights_survived", "ejections", "modules_bought", "stranded", "voice",
 ]
 
 

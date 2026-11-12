@@ -100,6 +100,9 @@ func evaluate(brain: CaptainBrain, contract: Contract) -> Evaluation:
 	var from := (brain as MercenaryBrain).job_origin() if brain is MercenaryBrain else brain.home_position()
 	var site := contract.get_site_position(from)
 	var km := SpaceNav.flat_distance(site, from) / 1000.0
+	if RemoteWork.is_remote(contract, brain):
+		# Another system (RemoteWork): to the gate, the jumps, the way to the target.
+		km = RemoteWork.trip_km(brain, contract, from, site)
 	var danger := contract.get_danger()
 	var escort := contract is EscortContract
 	var scale := ESCORT_PAY_SCALE if escort else BOUNTY_PAY_SCALE

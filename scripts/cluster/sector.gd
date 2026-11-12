@@ -21,6 +21,12 @@ extends Node
 ## [member discoveries] with the finder and the time, marked delivered when
 ## the survey reaches home (P4 pays them out). Saved under
 ## "cluster"."discoveries".
+##
+## Sector modifier ([SectorModifier]): [member modifier] is the running
+## game's, picked in [method reset] from [member next_modifier] (the New
+## game page's choice, kept in user://settings.cfg; Random rolls one of the
+## others). Saved under "cluster"."modifier"; a save without it is Standard.
+## [method take_announcement] hands the HUD the briefing line once.
 
 ## Names newly revealed in system [param id] (planets with their moons,
 ## clusters, bases, derelicts, gates).
@@ -52,11 +58,20 @@ var outposts: Dictionary = {}
 ## The Outposts node's RNG state from the last load ({} = seed it fresh).
 var outposts_rng: Dictionary = {}
 
+## The running game's [SectorModifier] id.
+var modifier: StringName = SectorModifier.STANDARD
+## The New game page's choice (an id or SectorModifier.RANDOM).
+var next_modifier: StringName = SectorModifier.STANDARD
+var _announce := false
+
 var _rng := RandomNumberGenerator.new()
+
+const SETTINGS_PATH := "user://settings.cfg"
 
 
 func _ready() -> void:
 	_rng.randomize()
+	_load_settings()
 	# scenes/game.tscn started on its own (editor) still has a network.
 	reset()
 
@@ -65,6 +80,42 @@ func _ready() -> void:
 ## rival region per rival of the next new game (Corps.next_rival_count).
 func reset() -> void:
 	start(_rng.randi(), Corps.regions_for_new_game() if is_inside_tree() and get_node_or_null(^"/root/Corps") else 1)
+	modifier = next_modifier
+	if modifier == SectorModifier.RANDOM:
+		var pool := SectorModifier.random_pool()
+		modifier = pool[_rng.randi() % pool.size()]
+	modifier = SectorModifier.find(modifier)["id"]
+	_announce = modifier != SectorModifier.STANDARD
+	# After Economy.reset (SaveManager._reset_globals): the start money.
+	var add := int(SectorModifier.num("credits_add", 0.0))
+	if add != 0 and is_inside_tree() and get_node_or_null(^"/root/Economy"):
+		Economy.credits = maxi(Economy.credits + add, 0)
+
+
+## Remembers [param id] (or SectorModifier.RANDOM) for the next new game.
+func set_next_modifier(id: StringName) -> void:
+	next_modifier = id
+	var cfg := ConfigFile.new()
+	cfg.load(SETTINGS_PATH)
+	cfg.set_value("sector", "modifier", String(id))
+	cfg.save(SETTINGS_PATH)
+
+
+func _load_settings() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(SETTINGS_PATH) != OK:
+		return
+	var id := StringName(cfg.get_value("sector", "modifier", String(SectorModifier.STANDARD)))
+	next_modifier = id if id == SectorModifier.RANDOM else SectorModifier.find(id)["id"]
+
+
+## The briefing line about a non-standard modifier, once per new game ("" after).
+func take_announcement() -> String:
+	if not _announce:
+		return ""
+	_announce = false
+	var m := SectorModifier.find(modifier)
+	return "Sector survey: %s. %s" % [m["name"], m["blurb"]]
 
 
 ## Builds the network of [param net_seed] with fresh (empty) states and
@@ -109,12 +160,16 @@ func save_state() -> Dictionary:
 		c["system"] = String(c["system"])
 		disc.append(c)
 	return {"seed": get_seed(), "generator_version": SystemGenerator.VERSION, "regions": network.rival_ids.size() if network else 1,
+			"modifier": String(modifier),
 			"systems": sys, "transits": tr, "discoveries": disc, "outposts": _outposts_out(), "outposts_rng": _outposts_rng_out()}
 
 
 ## [param d]: the "cluster" key of a save. Empty (an older save): keeps the
 ## network the reset made, so the game gets a seed now and saves it.
 func load_state(d: Dictionary) -> void:
+	# A save without one (older games) is Standard, whatever the menu says.
+	modifier = SectorModifier.find(StringName(d.get("modifier", "standard")))["id"]
+	_announce = false
 	if d.is_empty() or not d.has("seed"):
 		return
 	start(int(d["seed"]), int(d.get("regions", 1)))

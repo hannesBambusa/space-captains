@@ -254,10 +254,13 @@ func new_game(tutorial: bool = false) -> void:
 	var cover := await LoadingScreen.cover(get_tree(), ("Starting the tutorial" if tutorial else "Starting %s" % slot_name(slot)))
 	await _leave_scene()
 	var keep_difficulty := Corps.next_difficulty
+	var keep_modifier := Sector.next_modifier
 	if tutorial:
 		Corps.next_difficulty = CorpRegistry.Difficulty.OFF
+		Sector.next_modifier = SectorModifier.STANDARD
 	_reset_globals()
 	Corps.next_difficulty = keep_difficulty
+	Sector.next_modifier = keep_modifier
 	current_slot = slot
 	Tutorial.academy_next = tutorial
 	_enter_game({})

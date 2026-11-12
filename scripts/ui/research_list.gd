@@ -1,7 +1,7 @@
 class_name ResearchList
 extends VBoxContainer
-## Bottom-left list of the funded research, above the contract list, floating
-## over space like the pilot and contract lists: a title row (RESEARCH, the
+## List of the funded research at the top of the right column, under the
+## top bar's clock, floating over space like the pilot list: a title row (RESEARCH, the
 ## count, the researchers and their wages, collapse) over a rule line, then
 ## one outlined row per project that is worked on or was started (field
 ## coloured icon, name, thin progress bar, % and time left, "1 res"). A
@@ -12,7 +12,7 @@ extends VBoxContainer
 ## Click a row: the Science Lab is selected with that project in view; hover:
 ## the project's rich tooltip (ResearchTip: benefits, cost, progress). A
 ## finished project flashes for [member flash_time] seconds and posts a
-## "Research done" toast. The HUD places it (HUD._layout_bottom_left).
+## "Research done" toast. The HUD places it (HUD._layout_right).
 
 const H := preload("res://scripts/ui/theme/hud_style.gd")
 const ROW_H := 22.0
@@ -160,9 +160,9 @@ func _ready() -> void:
 	top.add_theme_constant_override("separation", 6)
 	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(top)
-	top.add_child(H.icon_rect(&"research", 13.0, H.HOLO))
-	_title = UIUtil.label("RESEARCH", &"HeaderLabel")
-	_title.add_theme_font_size_override("font_size", 13)
+	_title = UIUtil.label("Research", &"TitleLabel")
+	_title.add_theme_font_size_override("font_size", 21)
+	_title.add_theme_font_override("font", H.font("Light", false, false, 1))
 	top.add_child(_title)
 	top.add_child(UIUtil.spacer())
 	_staff = UIUtil.label("", &"SmallLabel")
@@ -286,7 +286,7 @@ func _rebuild() -> void:
 			flashing.append(ft)
 	_had_lab = _lab() != null
 	visible = _had_lab and (not active.is_empty() or not flashing.is_empty())
-	_title.text = "RESEARCH %d" % active.size()
+	_title.text = "Research  %d" % active.size()
 	var old := {}
 	for l in _lines:
 		old[l.tech.id] = l

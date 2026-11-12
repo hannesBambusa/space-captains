@@ -256,6 +256,14 @@ func _refresh_form() -> void:
 		_profit.text = "Factory pays ~%d / load, you pay %d: %s%d" % [load_value, _form.reward, "+" if margin >= 0 else "", margin]
 		_profit.add_theme_color_override("font_color", HudStyle.GOOD if margin >= 0 else HudStyle.BAD)
 	_form.fair.text = "Fair pay here is about %d cr (%s). One load = %d %s.%s" % [fair, PostContractForm.fair_verdict(reward, fair), mats, Economy.ore_name(ore), worth]
+	# Remote work (RemoteWork): no escorts out there, and the trip is long.
+	var bw := SystemWorld.of(belt)
+	var remote := bw != null and RemoteWork.is_site(bw.system_id)
+	if remote:
+		escorted = false
+		var jumps := Sector.hops_between(ClusterNetwork.HOME_ID, bw.system_id).size()
+		_form.fair.text += " Remote work: %d jump%s from home, miners fly the load back through the gates and want more for it." % [jumps, "" if jumps == 1 else "s"]
+	_escorted.visible = not remote
 	_escorted.set_pressed_no_signal(escorted)
 	_escort_row.visible = escorted
 	_escort_value.text = "%d cr" % escort_pay
@@ -263,6 +271,8 @@ func _refresh_form() -> void:
 	if escorted:
 		_form.hint.text += " Escorts: %d cr each per trip." % escort_pay
 	var why := ContractBoard.post_problem(reward)
+	if why.is_empty():
+		why = RemoteWork.post_block(belt)
 	if why.is_empty() and belt.is_depleted:
 		why = "Mined out, nothing left to post on"
 	_form.set_problem(why)

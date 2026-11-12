@@ -389,6 +389,8 @@ func _apply_safety() -> void:
 		combat.threats.arrivals = not running
 	if combat.gate_raids:
 		combat.gate_raids.enabled = not running
+	if combat.warlords:
+		combat.warlords.enabled = not running
 
 
 func _index_of(id: StringName) -> int:

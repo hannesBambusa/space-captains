@@ -1,38 +1,41 @@
 class_name HudStyle
 extends RefCounted
-## Shared look of the HUD, carried over from the player guide
-## (docs/space_captains_guide.html): a ship-console readout with holo-cyan
-## hairlines and corner brackets on blue-black panels, amber for actions,
-## selection and credits. Fonts (SIL OFL, assets/ui/fonts): Saira Condensed
-## for headings, labels and buttons, Saira for body text, IBM Plex Mono for
-## numbers. Small monochrome icons (assets/ui/icons/*.svg, tinted in code)
-## and a few widget helpers. [HudThemeBuilder] turns the palette into
+## Shared look of the HUD, "flight ops" (ongoing-implementations/hud-flight-ops.md):
+## mission-control readouts set straight on the scene, ice-white type, faint
+## white hairlines, nearly clear panels over edge shading ([EdgeShade]), amber
+## for actions, selection and credits, a cool ice blue for secondary info.
+## Fonts (SIL OFL, assets/ui/fonts): Saira (thin weights for big readouts and
+## titles, Light for body text), Saira Condensed for buttons and tabs, IBM Plex
+## Mono for numbers. Small monochrome icons (assets/ui/icons/*.svg, tinted in
+## code) and a few widget helpers. [HudThemeBuilder] turns the palette into
 ## ui/theme.tres; widgets use these constants for the colours they set.
 
-# Guide tokens: --holo, --holo-dim, --amber, --void, --hull, --panel, --line.
-const HOLO := Color(0.373, 0.816, 0.886)
-const HOLO_SOFT := Color(0.561, 0.89, 0.941)
-const HOLO_DIM := Color(0.184, 0.435, 0.486)
-const VOID := Color(0.02, 0.035, 0.051)
-const ACCENT := Color(0.949, 0.647, 0.255)
-const ACCENT_SOFT := Color(1.0, 0.753, 0.42)
-const ACCENT_DIM := Color(0.949, 0.647, 0.255, 0.35)
-const PANEL_BG := Color(0.051, 0.09, 0.122, 0.9)
-const PANEL_BG_BOTTOM := Color(0.039, 0.071, 0.094, 0.93)
-const RAISED_BG := Color(0.071, 0.122, 0.157, 0.94)
-const INSET_BG := Color(0.02, 0.035, 0.051, 0.66)
-const HAIRLINE := Color(0.106, 0.173, 0.216)
-const HAIRLINE_STRONG := Color(0.184, 0.435, 0.486, 0.85)
-const TEXT := Color(0.788, 0.867, 0.894)
-const TEXT_BRIGHT := Color(0.918, 0.957, 0.969)
-const TEXT_DIM := Color(0.49, 0.592, 0.635)
-const TEXT_FAINT := Color(0.33, 0.41, 0.45)
-const GOOD := Color(0.435, 0.851, 0.604)
-const WARN := Color(0.97, 0.8, 0.3)
-const BAD := Color(0.91, 0.341, 0.29)
-const SHIELD := Color(0.42, 0.62, 1.0)
-const HULL := Color(0.435, 0.851, 0.604)
-const CREDITS := Color(0.949, 0.647, 0.255)
+## Secondary info (ice blue): section icons, progress fills, hover frames.
+const HOLO := Color(0.6, 0.82, 0.93)
+const HOLO_SOFT := Color(0.8, 0.91, 0.97)
+const HOLO_DIM := Color(0.42, 0.55, 0.62)
+const VOID := Color(0.012, 0.018, 0.024)
+const ACCENT := Color(1.0, 0.702, 0.278)
+const ACCENT_SOFT := Color(1.0, 0.8, 0.5)
+const ACCENT_DIM := Color(1.0, 0.702, 0.278, 0.35)
+## Panels with reading text (selection panels, the tutorial card): dark
+## enough to read over a planet; the lists on the scene clear theirs.
+const PANEL_BG := Color(0.012, 0.02, 0.028, 0.86)
+const PANEL_BG_BOTTOM := Color(0.012, 0.02, 0.028, 0.9)
+const RAISED_BG := Color(0.05, 0.065, 0.08, 0.62)
+const INSET_BG := Color(0.0, 0.0, 0.0, 0.32)
+const HAIRLINE := Color(0.93, 0.95, 0.96, 0.14)
+const HAIRLINE_STRONG := Color(0.93, 0.95, 0.96, 0.32)
+const TEXT := Color(0.89, 0.92, 0.94)
+const TEXT_BRIGHT := Color(0.96, 0.975, 0.985)
+const TEXT_DIM := Color(0.58, 0.63, 0.67)
+const TEXT_FAINT := Color(0.37, 0.41, 0.44)
+const GOOD := Color(0.494, 0.886, 0.659)
+const WARN := Color(1.0, 0.82, 0.36)
+const BAD := Color(1.0, 0.416, 0.361)
+const SHIELD := Color(0.5, 0.7, 1.0)
+const HULL := Color(0.494, 0.886, 0.659)
+const CREDITS := Color(1.0, 0.702, 0.278)
 
 ## Pilot roles: colour of the emblem badge and the role icon. Kept apart
 ## from each other and from the holo cyan of the frames.
@@ -50,14 +53,14 @@ const ROLE_SHORT := {"Miner": "Miners", "Mercenary": "Mercs", "Salvager": "Salva
 const FONT_DIR := "res://assets/ui/fonts/"
 const ICON_DIR := "res://assets/ui/icons/"
 const BUILD_ICON_DIR := "res://assets/ui/icons/build/"
-const WEIGHTS := {"Regular": 400, "Medium": 500, "SemiBold": 600, "Bold": 700}
+const WEIGHTS := {"Thin": 200, "Light": 300, "Regular": 400, "Medium": 500, "SemiBold": 600, "Bold": 700}
 
 static var _fonts: Dictionary = {}
 static var _icons: Dictionary = {}
 
 
-## Saira at [param weight] ("Regular", "Medium", "SemiBold", "Bold"),
-## Saira Condensed with [param condensed] (Regular falls back to Medium).
+## Saira at [param weight] ("Thin", "Light", "Regular", "Medium", "SemiBold", "Bold"),
+## Saira Condensed with [param condensed] (Thin to Regular fall back to Medium).
 ## Tabular figures with [param tabular]; [param spacing] adds px per glyph.
 static func font(weight: String = "Regular", condensed: bool = false, tabular: bool = false, spacing: int = 0) -> Font:
 	var key := "%s|%s|%s|%d" % [weight, condensed, tabular, spacing]
@@ -66,7 +69,7 @@ static func font(weight: String = "Regular", condensed: bool = false, tabular: b
 	var wght: int = WEIGHTS.get(weight, 400)
 	var out: Font
 	if condensed:
-		out = _variant(FONT_DIR + "SairaCondensed-" + ("Medium" if weight == "Regular" else weight) + ".ttf", 0, tabular, spacing)
+		out = _variant(FONT_DIR + "SairaCondensed-" + ("Medium" if weight in ["Thin", "Light", "Regular"] else weight) + ".ttf", 0, tabular, spacing)
 	else:
 		out = _variant(FONT_DIR + "Saira-Variable.ttf", wght, tabular, spacing)
 	if out == null:
@@ -178,8 +181,10 @@ static func initials(full_name: String) -> String:
 static func outline_labels(node: Node) -> void:
 	if node is Label:
 		var l := node as Label
-		l.add_theme_constant_override("outline_size", 4)
-		l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.75))
+		# Thin: the flight ops weights smear under a thick outline; the edge
+		# shading behind does most of the work.
+		l.add_theme_constant_override("outline_size", 2)
+		l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.55))
 	for c in node.get_children():
 		outline_labels(c)
 

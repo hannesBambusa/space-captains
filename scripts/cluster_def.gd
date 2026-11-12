@@ -76,9 +76,11 @@ const RESERVE_BY_ORE: PackedFloat32Array = [1.0, 1.6, 1.0, 0.5]
 ## most, crystal clusters the fewest (12 to 96 by ore).
 func get_reserve() -> int:
 	if reserve_loads > 0:
-		return reserve_loads
+		return maxi(roundi(reserve_loads * SectorModifier.num("reserve")), 1)
 	var s := clampf((size / SPREAD - 1000.0) / 2000.0, 0.0, 1.0)
 	var base := clampf(25.0 + 20.0 * s + 15.0 * richness, 25.0, 60.0)
+	# The sector modifier scales every cluster's ore (SectorModifier "reserve").
+	base *= SectorModifier.num("reserve")
 	return maxi(roundi(base * RESERVE_BY_ORE[clampi(ore_type, 0, RESERVE_BY_ORE.size() - 1)]), 10)
 
 

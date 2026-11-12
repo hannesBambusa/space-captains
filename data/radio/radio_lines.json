@@ -1,0 +1,87 @@
+{
+  "about": "Captain radio chatter (RadioChatter). Two voices per personality: slot 0 and slot 1 (Captain.voice). Files: assets/audio/voice/radio/<personality>_<slot>/<event>_<n>.mp3, made by tools/gen_radio_lines.py. Changing a line: regenerate its two files.",
+  "model_id": "eleven_multilingual_v2",
+  "voice_settings": {"stability": 0.45, "similarity_boost": 0.8, "style": 0.3, "use_speaker_boost": true, "speed": 1.05},
+  "voices": {
+    "bold": ["N2lVS1w4EtoT3dr4eOWO", "cgSgspJ2msm6clMCkdW9"],
+    "cautious": ["onwK4e9ZLuTAKqWW03F9", "Xb7hH8MSUJpSbSDYk0k2"],
+    "greedy": ["JBFqnCBsd6RMkjVDRZzb", "FGY2WhTYpPnrIDTdsKH5"],
+    "lazy": ["IKne3meq5aSn9XLyUdCD", "SAz9YHcvj6GT2YYXdXww"]
+  },
+  "voice_names": {
+    "bold": ["Callum", "Jessica"],
+    "cautious": ["Daniel", "Alice"],
+    "greedy": ["George", "Laura"],
+    "lazy": ["Charlie", "River"]
+  },
+  "lines": {
+    "bold": {
+      "launch_mining": ["Heading out. Rocks won't mine themselves.", "Undocking. Let's get rich."],
+      "launch_bounty": ["Bounty's mine. Moving out.", "Got a target. Going hunting."],
+      "on_site": ["On site. Drills spinning.", "At the rocks. Starting the cut."],
+      "loaded": ["Hold's full. Coming home.", "Fully loaded, heading back."],
+      "delivered": ["Load delivered. Easy money.", "Cargo's in. Who's next?"],
+      "under_fire": ["Taking fire! Bring it on!", "They're shooting at me. Big mistake."],
+      "shields_down": ["Shields are gone. Still flying!", "Lost my shields. Doesn't matter."],
+      "fleeing": ["Pulling back, just for now!", "Too hot even for me. Falling back!"],
+      "kill": ["Splash one!", "Scratch one raider."],
+      "hunting": ["Target in sight. Going in.", "I see them. Engaging."],
+      "repairs": ["Need patching up. Back soon.", "Hull's chewed up. Coming in for repairs."],
+      "jump": ["Jumping out. See you on the other side.", "Into the gate!"],
+      "refusal": ["Not worth the fuel.", "That pay's an insult."],
+      "warlord": ["That's a big one. I like big ones.", "Warlord's here. Finally, a real fight."],
+      "raid_alert": ["Raiders inbound! Let them come!", "Contacts on scope. Weapons hot."]
+    },
+    "cautious": {
+      "launch_mining": ["Undocking. Keeping an eye on the scopes.", "Heading out. Nice and careful."],
+      "launch_bounty": ["Accepted. I'll approach with care.", "Moving out. I'll keep my distance until I'm sure."],
+      "on_site": ["On site. Scanning for trouble before I start.", "Arrived. Drilling now, eyes open."],
+      "loaded": ["Hold's full. Heading home the safe way.", "Loaded up. Returning now."],
+      "delivered": ["Load delivered, no trouble.", "Cargo's in. Glad to be home."],
+      "under_fire": ["I'm under fire! Need help out here!", "Contact! They're shooting at me!"],
+      "shields_down": ["Shields are down! I'm exposed!", "Shields gone, this is bad!"],
+      "fleeing": ["I'm getting out of here!", "Breaking off, too dangerous!"],
+      "kill": ["Got it. Hostile down.", "Target destroyed. Checking for others."],
+      "hunting": ["Target spotted. Approaching carefully.", "I have the target. Engaging."],
+      "repairs": ["Returning for repairs before it gets worse.", "The damage report isn't pretty. Coming in."],
+      "jump": ["Entering the gate. Wish me luck.", "Jumping now. Stay safe, everyone."],
+      "refusal": ["Too risky for that pay.", "Sorry, not out there."],
+      "warlord": ["That's a warlord's flagship. Keep your distance.", "Warlord on scope. Nobody be a hero."],
+      "raid_alert": ["Raiders inbound. Everyone stay close to the station.", "Hostiles incoming. Shields up."]
+    },
+    "greedy": {
+      "launch_mining": ["Undocking. Time is money.", "Off to make some credits."],
+      "launch_bounty": ["Bounty accepted. That one's mine.", "A price on their head? Say no more."],
+      "on_site": ["On site. Let's see what this rock is worth.", "Drilling. Every load counts."],
+      "loaded": ["Full hold. Heading home to get paid.", "Loaded with profit. Coming back."],
+      "delivered": ["Load delivered. Where's my money?", "Cargo's in. Pay up."],
+      "under_fire": ["They're shooting at my investment!", "Taking fire! This wasn't in the contract!"],
+      "shields_down": ["Shields are gone. Repairs are going to cost me!", "No shields. This is getting expensive."],
+      "fleeing": ["Not dying for this pay. I'm out!", "Cutting my losses. Retreating!"],
+      "kill": ["Got one. That's a bonus, right?", "Target down. Pay me."],
+      "hunting": ["There's my paycheck. Engaging.", "Target in range. Time to collect."],
+      "repairs": ["Coming in for repairs. Hope they're cheap.", "Ship's damaged. Docking for repairs."],
+      "jump": ["Jumping. Long trips pay more, I hope.", "Through the gate. The meter's running."],
+      "refusal": ["Pay more and we'll talk.", "For that money? No."],
+      "warlord": ["A warlord. I hope someone's paying for this one.", "Big target. Big bounty, I hope."],
+      "raid_alert": ["Raiders. Keep them away from my cargo.", "Hostiles inbound. Who's paying for the defence?"]
+    },
+    "lazy": {
+      "launch_mining": ["Fine, I'm going. Undocking.", "Alright, alright. Heading out."],
+      "launch_bounty": ["Okay, I'll take it. Don't rush me.", "Guess I'm going hunting."],
+      "on_site": ["Made it. Drilling, I suppose.", "On site. Starting... now."],
+      "loaded": ["Hold's full. Finally, going home.", "Done here. Heading back."],
+      "delivered": ["Delivered. Nap time.", "Cargo's in. Wake me later."],
+      "under_fire": ["Hey! Somebody's shooting at me!", "Ugh, taking fire."],
+      "shields_down": ["Shields are gone. Great. Just great.", "No shields. Wonderful."],
+      "fleeing": ["Nope. I'm out.", "Not worth it. Heading back."],
+      "kill": ["Huh. Got one.", "Target down. Can I go home now?"],
+      "hunting": ["There they are. Let's get this over with.", "Found them. Engaging, I guess."],
+      "repairs": ["Coming in for repairs. And a coffee.", "Ship needs fixing. Docking."],
+      "jump": ["Jumping. Wake me when we're there.", "Into the gate. Long flight."],
+      "refusal": ["Too much work.", "Ask someone else."],
+      "warlord": ["Oh no. That's a big one.", "A warlord? Not my problem. Is it my problem?"],
+      "raid_alert": ["Raiders again? Seriously?", "Hostiles incoming. Of course."]
+    }
+  }
+}

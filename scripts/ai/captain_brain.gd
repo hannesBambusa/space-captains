@@ -305,6 +305,8 @@ func update(dt: float) -> void:
 			else:
 				# Keep the threat fresh (can_warp reads it) without fleeing empty.
 				current_threat(dt)
+			if _gate_home():
+				return
 			_steer_home(pace)
 		State.FLEEING:
 			_update_flee(dt)
@@ -373,6 +375,7 @@ func _decide() -> void:
 		_back_to_docked()
 		return
 	var contracts := ContractBoard.get_available(-1, system_id(), corp_id())
+	contracts.append_array(RemoteWork.contracts_for(self))
 	var e := evaluator.pick(self, contracts)
 	if e == null:
 		last_decision = "No contracts posted"
@@ -483,6 +486,12 @@ func _take(contract: Contract, e: RoleEvaluator.Evaluation = null) -> bool:
 	if escort_contract() and not _escort_joined():
 		_start_escort_wait()
 		return true
+	# Remote work (RemoteWork): through the gates first; the job stays.
+	if RemoteWork.is_remote(contract, self):
+		if _gate_to(contract.system_id):
+			return true
+		_abort_trip()
+		return false
 	ship.start_undock()
 	_set_state(State.UNDOCKING)
 	return true
@@ -608,23 +617,73 @@ func _release(c: Contract) -> void:
 
 
 ## A gate trip takes the ship (GateTransit): the job is dropped and the
-## brain waits as RETURNING (it does not run until the trip ends).
+## brain waits as RETURNING (it does not run until the trip ends). A remote
+## job (RemoteWork) is kept: out to it, or home with the load.
 func begin_transit() -> void:
+	if remote_trip():
+		_set_state(State.RETURNING if trip.loaded else State.TRAVELING_TO_JOB)
+		return
 	_abort_trip()
 	_set_state(State.RETURNING)
 
 
 ## The gate trip ended outside home with no hop left: true = the brain
-## flies the ship there (an explorer's survey), false = it holds (PARK).
+## flies the ship there (an explorer's survey, a remote job), false = it
+## holds (PARK).
 func takes_ship_back() -> bool:
-	return false
+	return remote_trip() and not trip.loaded and system_id() == trip.contract.system_id
 
 
-## Back at home after a gate trip: fly to the outpost and dock.
+## Back at home after a gate trip: fly to the outpost and dock. At a remote
+## job's system: on to the job. Home with a remote load: dock and deliver.
 func end_transit() -> void:
-	trip = null
+	if remote_trip() and not trip.loaded and system_id() == trip.contract.system_id:
+		_set_state(State.TRAVELING_TO_JOB)
+		ship.status_changed.emit(ship)
+		return
+	if not (trip and trip.loaded and is_instance_valid(trip.contract) and trip.contract.system_id != system_id()):
+		trip = null
 	_set_state(State.RETURNING)
 	ship.status_changed.emit(ship)
+
+
+## The trip's contract is in another system than the ship's home (RemoteWork).
+func remote_trip() -> bool:
+	return trip != null and is_instance_valid(trip.contract) and not trip.contract.system_id.is_empty() \
+			and trip.contract.system_id != home_system_id()
+
+
+## The system of the ship's home building ("" when homeless).
+func home_system_id() -> StringName:
+	var w := SystemWorld.of(ship.home) if is_instance_valid(ship) and is_instance_valid(ship.home) else null
+	return w.system_id if w else &""
+
+
+## Away from the home building's system (a remote job, a flight home).
+func away_from_home() -> bool:
+	var h := home_system_id()
+	return not h.is_empty() and system_id() != h
+
+
+## Starts a gate trip to [param id]. False when there is no way.
+func _gate_to(id: StringName) -> bool:
+	if ship.transit:
+		return true
+	var hops := Sector.hops_between(system_id(), id)
+	return not hops.is_empty() and GateTransit.start(ship, hops) != null
+
+
+## Away from home on a remote job (miners only; explorers and mercenaries
+## run their own gate trips): through the gates home, the trip stays when loaded.
+func _gate_home() -> bool:
+	if not (ship is MinerShip) or not away_from_home():
+		return false
+	if remote_trip() and not trip.loaded:
+		_abort_trip()
+	if _gate_to(home_system_id()):
+		return true
+	_set_state(State.IDLE)
+	return true
 
 
 func _abort_trip() -> void:
@@ -845,6 +904,9 @@ func flee() -> void:
 
 ## Fleeing: run to the guardian until close or the danger passed, then home.
 func _update_flee(dt: float) -> void:
+	# Away on a remote job: the way to safety is the gate home.
+	if _gate_home():
+		return
 	if current_threat(dt) < 0.05:
 		_calm_time += dt
 	else:

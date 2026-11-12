@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | ready for review |
-| **Branch** | — |
-| **Updated** | 2026-11-06 |
+| **Status** | done (2026-11-10, by the user's call); data sim gaps, smoke `--war` quirk and play test deferred, see Remaining |
+| **Branch** | main (all committed, last in 2090349) |
+| **Updated** | 2026-11-10 |
 | **Scope** | A full-mirror AI rival corp, home 4 to 5 jumps out, that picks peace, pact, harassment or war on its own. R0 to R8 and M1 (1 to 3 rivals that also deal with each other) and the data sim for unviewed rival worlds built and smoke-tested; not playtested or visually checked. |
 
 Planned on 2026-11-02 from an interview with the user; work started the same day.
@@ -17,7 +17,7 @@ Planned on 2026-11-02 from an interview with the user; work started the same day
 - `scripts/rival/**`: `rival_mind.gd`, `rival_corp.gd`, `rival_manager.gd`, `war_strikes.gd`, `station_loss.gd`, and (data sim, committed in c4c3778, with their `.uid`) `rival_worlds.gd`, `rival_data.gd`, `rival_plan.gd`
 - `scripts/ui/rival_panel.gd`, `scripts/ui/treaty_card.gd`, `scripts/ui/end_screen.gd`
 
-**Shared** (stage hunks; `scripts/miner_ship.gd` and `scripts/sfx.gd` also carry the user's own uncommitted changes and are not touched by this feature):
+**Shared** (only parts of these files are this feature's; `scripts/miner_ship.gd` and `scripts/sfx.gd` are not touched by it):
 
 - `project.godot` (Corps autoload after Sector)
 - `scripts/cluster/`: `cluster_network.gd`, `system_generator.gd`, `forward_stations.gd`, `system_host.gd`, `station_supply.gd`, `derelict_loot.gd`, `discovery_bounty.gd`; data sim also `remote_system_state.gd` (`world`), `remote_sim.gd` (arrival hook)
@@ -25,10 +25,10 @@ Planned on 2026-11-02 from an interview with the user; work started the same day
 - `scripts/combat/`: `combat.gd`, `combat_world.gd`, `static_combatant.gd`, `projectile_pool.gd`
 - `scripts/building.gd`, `scripts/building_manager.gd`, `scripts/buildings/`: `factory.gd`, `factory_market.gd`, `outfitter.gd`, `salvage_yard.gd`, `science_lab.gd`, `structure_repair.gd`, `structure_hull.gd`, `defense_structure.gd`, `defense_turret.gd`, `forward_station_yard.gd`
 - `scripts/contracts/contract.gd`, `scripts/contracts/contract_board.gd` (data sim: `shelve`), `scripts/save/`: `contract_codec.gd`, `game_snapshot.gd`, `save_manager.gd`, `ship_codec.gd`
-- `scripts/ai/`: `captain_brain.gd`, `mercenary_brain.gd`, `merc_fleet.gd`, `decision_notes.gd`, `miner_evaluator.gd` (escort queue, 2026-11-05, uncommitted); `scripts/enemies/scavenger_brain.gd`, `scripts/enemies/gate_raid_source.gd`; `scripts/defense/`: `defense_zones.gd`, `defense_zone.gd`, `colony_alarm.gd`
+- `scripts/ai/`: `captain_brain.gd`, `mercenary_brain.gd`, `merc_fleet.gd`, `decision_notes.gd`, `miner_evaluator.gd` (escort queue, 2026-11-05); `scripts/enemies/scavenger_brain.gd`, `scripts/enemies/gate_raid_source.gd`; `scripts/defense/`: `defense_zones.gd`, `defense_zone.gd`, `colony_alarm.gd`
 - `scripts/ships/`: `ship.gd`, `ship_loadout.gd`, `cargo_shuttle.gd`, `repair_bay.gd`, `mobile_station.gd`; `scripts/lander_ship.gd`, `scripts/progression/career.gd`
 - `scripts/ui/hud.gd`, `scripts/ui/top_bar.gd`, `scripts/ui/main_menu.gd`
-- Follow-ups (2026-11-04, uncommitted): `scripts/ui/ship_markers.gd`, `scripts/ui/minimap.gd`, `scripts/ui/cluster_graph.gd` (rival colours), `scripts/sim_stepper.gd` (`--profile`)
+- Follow-ups (2026-11-04): `scripts/ui/ship_markers.gd`, `scripts/ui/minimap.gd`, `scripts/ui/cluster_graph.gd` (rival colours), `scripts/sim_stepper.gd` (`--profile`)
 - `tools/smoke.sh`, `tools/smoke_test.gd` (data sim: `--rival-live`, flows, data trip, strike arrival, data census)
 - `docs/DESIGN.md` ("Rival corporation" section, stage R), `CLAUDE.md` (conventions and smoke flags)
 
@@ -73,12 +73,12 @@ Planned on 2026-11-02 from an interview with the user; work started the same day
 - Growth, `--rival --minutes 60` (no fixed seed, so a spread): before (pinned) 5 runs: always 3 mining outposts, 9 miners, 1 merc outpost, 3 to 4 mercs, lab; explorer outpost in 3, research 0 / 0 / 1 / 4 / 3 techs, charted 0 to 10; one run mined nothing all game. After (data) 3 runs plus 3 rivals in one: 9 miners each, 3 to 8 mercs, research 0 to 7 techs (0 in 2 of 6), charted 0 to 8, one with 2 merc outposts and 4 turrets; data mining 110 to 123 loads an hour.
 - Smoke: every `--rival` run checks a data trip (rival 1's HQ data -> live at 4:00, live -> data at 5:00, buildings and their captains the same each way); `--save-roundtrip` compares data worlds too ("<id> data" census keys); `--war --minutes 18` drops the strike target to data before the launch when nothing holds it live (2 of 4 runs; else "target kept live: <reason>", e.g. its own ships away) and then fails unless the strikers reach it live ("SMOKE rival strike"; seen 3 times, about 4 min after launch); `--rival-live` turns the data sim off.
 
-**Research stall and milestones (2026-11-05, uncommitted: `rival_corp.gd`, `rival_manager.gd`, `rival_mind.gd`, `rival_plan.gd`, `tools/smoke_test.gd`):**
+**Research stall and milestones (2026-11-05: `rival_corp.gd`, `rival_manager.gd`, `rival_mind.gd`, `rival_plan.gd`, `tools/smoke_test.gd`):**
 - **Diagnosis:** `RivalManager.run_plan` (both modes) counts which plan step used each tick's actions and why the research step did nothing (`plan_stats`, `stat`; the smoke prints "SMOKE rival plan"). In six 60 min runs the step was reached almost every tick and was blocked on money: tech short of credits about 200 of 299 ticks, the researcher hire short of credits 130 to 230. One rival held 2,545 iron and 733 cr: the Factory takes iron too slowly.
 - **Fix:** `RivalManager.sell_surplus` (both modes): iron above 4x its keep (1,200) sells to the corp office, 20 units a tick at 6 cr (an AI-only crutch like the swaps). After: 5 of 6 runs research (2 to 5 techs), 5 of 6 build the Explorer Outpost and chart. Before: 1 of 3.
 - **Milestones:** the player hears when a rival reaches one (`RivalCorp._milestones`, `MILESTONES`, `BIG_MILESTONES`): its first Mining Outpost, first Mercenary Outpost, first Defense Turret, Science Lab, Explorer Outpost, Outfitter, Shield Generator, third Mining Outpost, second Mercenary Outpost, first research, first forward station. Event feed and intel ("Intel: <name> built ..." once in contact, "Long-range intel: a rival charter built ..." before), a toast for the Science Lab, Explorer Outpost, first research and first forward station. Counted at every station of the rival, live or data (`_finished_buildings`, `RivalData.count`). Announced once (keys in the mind's stats "milestones", saved); a save from before milestones marks what the rival has without announcing it (`RivalMind.from_dict` sets "milestones_silent"). Checked: `--rival --minutes 20`, `--rivals=3 --minutes 25`, `--rival --save-roundtrip`, 0 errors.
 
-**Pirate raids measured, escort queue fixed (2026-11-05, uncommitted: `scripts/ai/miner_evaluator.gd`, `scripts/rival/rival_data.gd` class notes, `tools/smoke_test.gd`):**
+**Pirate raids measured, escort queue fixed (2026-11-05: `scripts/ai/miner_evaluator.gd`, `scripts/rival/rival_data.gd` class notes, `tools/smoke_test.gd`):**
 - **Raids on a live rival cost it almost nothing,** so the data sim does not model them (`RivalData` class notes). Two `--rival --rival-live --minutes=60` runs: 5 and 8 raids, 0 rival ships lost, no cargo stolen, rival miners fleeing 4 to 7 of 370 to 410 miner-minutes. Every ship destroyed in a 60 min run was a pirate (30 by mercs, 7 by turrets). The smoke `SMOKE rival flows` line now ends with "pirate raids live N (L ships lost, D captains dead)" (`_pirate`, `_on_ship_lost`, hooked in `_on_node_added`).
 - **Found while measuring: live rival mining stalled in 2 of 5 runs** (14 and 18 loads an hour against 94 to 166). A well-paid escorted contract (150 cr/load) pulled all 9 miners into `WAITING_ESCORT` behind one escort. Fix for every miner, the player's too: `MinerEvaluator` refuses an escorted contract ("Too many waiting for an escort", `ESCORT_QUEUE`, `waiting_for_escort`) while as many miners already wait on it as mercenaries took its escort contract (at least one). After, 4 live 60 min runs: 170, 156, 80 and 67 loads, never more than 3 waiting; the two lower runs spent a lot of time fleeing (pirate pressure, not a stall). Regression: default, `--long`, `--forward --save-roundtrip`, `--rival --save-roundtrip`, `--colony` pass with 0 errors.
 - **Rival growth re-checked after the fix:** 5 of 5 runs research (`--rival --minutes 60`: 3 data-mode runs, 5 techs each, 111 to 120 loads; 2 `--rival-live` runs, 4 and 5 techs, 92 and 141 loads). The one run that never researched (live, 240 iron, 799 cr) matches the escort stall: no mining, no money.
@@ -113,6 +113,8 @@ Planned on 2026-11-02 from an interview with the user; work started the same day
 - **The smoke test reseeds every new node's RNG members in order** (`_seed_rngs`): new nodes with RNGs shift the seeds of everything after them, so `--rival` runs differ from Off runs on the player side too.
 
 ## Remaining
+
+Deferred by the user on 2026-11-10 (marked done; revisit later). Not blocking.
 
 - **Data sim gaps (not modelled while data):** escorts, defence zones, den bounties, poaching from or by a data rival (`WarStrikes.poach_candidate` and `RivalCorp._poach` need live captains), shuttle sabotage against a data rival. Pirate raids are out on purpose (measured negligible live, see Built). `scripts/rival/rival_data.gd`, `scripts/rival/rival_plan.gd`
 - **Playtest in the game (user):** the rival panel's look was checked; how war, offers and strikes feel was not.

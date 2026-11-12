@@ -59,7 +59,7 @@ script = ExtResource("4_top")
 [node name="Overview" type="VBoxContainer" parent="Root"]
 layout_mode = 1
 offset_left = 12.0
-offset_top = 52.0
+offset_top = 150.0
 offset_right = 412.0
 mouse_filter = 2
 script = ExtResource("5_over")
@@ -84,7 +84,7 @@ anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -12.0
-offset_top = 52.0
+offset_top = 160.0
 offset_right = -12.0
 grow_horizontal = 0
 mouse_filter = 2

@@ -46,6 +46,12 @@ var claimed_for: Dictionary = {}
 var site: DenArrivalSite
 ## New bases arrive (false in a forward station system).
 var arrivals := true
+## Hives the Swarm budded ([method bud_hive]): runtime DenDefs, saved as
+## "extra_dens" and rebuilt from their template on load.
+var extra_dens: Array[DenDef] = []
+## The most Swarm hives standing at once.
+const MAX_HIVES := 3
+const HIVE_NUMERALS: PackedStringArray = ["II", "III", "IV", "V", "VI", "VII", "VIII"]
 
 var _last_time: float = 0.0
 
@@ -71,7 +77,7 @@ func sim_step(_dt: float) -> void:
 	var alive := _alive_bases(sys)
 	var crowded := alive >= sd.crowd_bases
 	var rate := 1.0 + sd.cleared_speedup if alive == 0 else (sd.crowd_slowdown if crowded else 1.0)
-	threat_time += dt * rate
+	threat_time += dt * rate * SectorModifier.num("threat")
 	if not arrivals:
 		return
 	if pending:
@@ -261,6 +267,71 @@ func _toast(text: String) -> void:
 		pm.call(&"toast", text)
 
 
+
+# --- Swarm budding --------------------------------------------------------------
+
+## A grown Swarm hive buds (ScavengerDen._swarm_step): a new hive warps in
+## elsewhere in the system, while fewer than [constant MAX_HIVES] stand.
+func bud_hive(parent: ScavengerDen) -> void:
+	var sys := _system()
+	if sys == null or parent == null or parent.def == null:
+		return
+	var alive := 0
+	for den in sys.dens:
+		if is_instance_valid(den) and den.is_alive() and den.faction_def and den.faction_def.id == ScavengerDen.SWARM_ID:
+			alive += 1
+	if alive >= MAX_HIVES:
+		return
+	var n := extra_dens.size() + 1
+	var base := _template(sys, parent.def.name)
+	if base == null:
+		base = parent.def
+	var anchor := clampf(base.anchor_radius + (5000.0 if n % 2 == 1 else -6000.0), 14000.0, 46000.0)
+	var nd := _bud_def(base, "%s %s" % [base.name, HIVE_NUMERALS[mini(n - 1, HIVE_NUMERALS.size() - 1)]],
+			fposmod(parent.def.angle_deg + 95.0 * float(n), 360.0), anchor)
+	extra_dens.append(nd)
+	arrived[nd.name] = SimClock.time
+	var den := sys.arrive_den(nd, true)
+	den.arrived_at = SimClock.time
+	EventLog.post("The Swarm is spreading: %s budded a new hive, %s" % [parent.def.name, nd.name], EventLog.Kind.THREAT, den, Vector3.INF, "", ScavengerDen.SWARM_ID)
+	_toast("Swarm hive budded: raid danger rising")
+	changed.emit()
+
+
+## A copy of [param base] as a budded hive at [param angle] / [param anchor].
+func _bud_def(base: DenDef, hive_name: String, angle: float, anchor: float) -> DenDef:
+	var d := base.duplicate() as DenDef
+	d.name = hive_name
+	d.belt_name = ""
+	d.angle_deg = angle
+	d.anchor_radius = anchor
+	d.radial_offset = 0.0
+	d.arrival_order = 99
+	d.min_arrival_time = 0.0
+	d.claim_planet = ""
+	d.initial_spawns = 2
+	return d
+
+
+## The system's own den def a budded hive copies (by name; any Swarm one as a fallback).
+func _template(sys: SolarSystem, base_name: String) -> DenDef:
+	var any: DenDef = null
+	for def in sys.system_def.dens:
+		if def.get_faction() and def.get_faction().id == ScavengerDen.SWARM_ID:
+			if def.name == base_name or base_name.begins_with(def.name):
+				return def
+			any = def
+	return any
+
+
+func _extra_out() -> Array:
+	var out := []
+	var sys := _system()
+	for d in extra_dens:
+		var base := _template(sys, d.name) if sys else null
+		out.append({"name": d.name, "angle": d.angle_deg, "anchor": d.anchor_radius, "base": base.name if base else ""})
+	return out
+
 # --- Save ---------------------------------------------------------------------
 
 func save_state() -> Dictionary:
@@ -268,7 +339,8 @@ func save_state() -> Dictionary:
 	for id in introduced:
 		intro.append(String(id))
 	return {"threat_time": threat_time, "arrived": arrived.duplicate(), "pending": pending.name if pending else "", "pending_at": pending_at,
-			"last_arrival": last_arrival, "introduced": intro, "claimed_for": claimed_for.duplicate(), "arrivals": arrivals}
+			"last_arrival": last_arrival, "introduced": intro, "claimed_for": claimed_for.duplicate(), "arrivals": arrivals,
+			"extra_dens": _extra_out()}
 
 
 ## Before the dens are loaded: builds the arrived dens (no warp-in; their
@@ -289,7 +361,14 @@ func load_state(d: Dictionary) -> void:
 		return
 	pending = null
 	var pending_name := String(d.get("pending", ""))
-	for def in sys.system_def.dens:
+	extra_dens.clear()
+	for e: Dictionary in d.get("extra_dens", []):
+		var base := _template(sys, String(e.get("base", "")))
+		if base:
+			extra_dens.append(_bud_def(base, String(e.get("name", "")), float(e.get("angle", 0.0)), float(e.get("anchor", 20000.0))))
+	var all: Array[DenDef] = sys.system_def.dens.duplicate()
+	all.append_array(extra_dens)
+	for def in all:
 		if arrived.has(def.name):
 			var den := sys.arrive_den(def, false)
 			den.arrived_at = float(arrived[def.name])

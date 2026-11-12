@@ -1,7 +1,7 @@
 class_name AudioSettings
 extends RefCounted
 ## Player volume per audio bus (default_bus_layout.tres: Master, Music,
-## Ambient (sends to Music), SFX, UI, Voice: the tutorial's spoken lines), kept as linear 0..1 under [audio] in
+## Ambient (sends to Music), SFX, UI, Voice: the tutorial's spoken lines, Radio: captain chatter, filtered), kept as linear 0..1 under [audio] in
 ## user://settings.cfg (the shared settings file, see WindowMode). Applied
 ## once at start by the Sfx autoload; the volume sliders ([VolumeSliders])
 ## set and save.
@@ -9,7 +9,7 @@ extends RefCounted
 const SETTINGS_PATH := "user://settings.cfg"
 const SECTION := "audio"
 ## Buses with a player slider, in slider order.
-const BUSES: Array[StringName] = [&"Music", &"SFX", &"UI", &"Voice"]
+const BUSES: Array[StringName] = [&"Music", &"SFX", &"UI", &"Voice", &"Radio"]
 const DEFAULT := 0.8
 
 

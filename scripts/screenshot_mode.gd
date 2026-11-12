@@ -7,6 +7,7 @@ extends Node
 ##   --time=<seconds>             advance sim time before the shot
 ##   --frames=<n>                 frames to render before the shot (default [member wait_frames])
 ##   --novsync                    disable vsync so the printed frame times are uncapped
+##   --nohud                      hide the HUD (a clean shot of the 3D view)
 ## Prints FPS, CPU process time and GPU frame time (of the system's
 ## SubViewport) averaged over the last frames. Saves the window (system and
 ## HUD). Lives at the top of scenes/game.tscn, beside the HUD.
@@ -42,6 +43,10 @@ func _ready() -> void:
 			measure_frames = mini(measure_frames, wait_frames / 2)
 		elif arg == "--novsync":
 			DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+		elif arg == "--nohud":
+			var hud := get_parent().get_node_or_null(^"HUD") as CanvasLayer
+			if hud:
+				hud.hide.call_deferred()
 	if _path.is_empty():
 		set_process(false)
 		return

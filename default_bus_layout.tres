@@ -4,12 +4,6 @@
 resource_name = "HardLimiter"
 ceiling_db = -0.5
 
-[sub_resource type="AudioEffectCompressor" id="AudioEffectCompressor_sfx"]
-resource_name = "Compressor"
-threshold = -14.0
-attack_us = 2000.0
-release_ms = 180.0
-
 [sub_resource type="AudioEffectCompressor" id="AudioEffectCompressor_duck"]
 resource_name = "VoiceDuck"
 threshold = -28.0
@@ -17,6 +11,39 @@ ratio = 2.5
 attack_us = 20000.0
 release_ms = 500.0
 sidechain = &"Voice"
+
+[sub_resource type="AudioEffectCompressor" id="AudioEffectCompressor_sfx"]
+resource_name = "Compressor"
+threshold = -14.0
+attack_us = 2000.0
+release_ms = 180.0
+
+[sub_resource type="AudioEffectHighPassFilter" id="AudioEffectHighPassFilter_radio"]
+resource_name = "RadioHighPass"
+cutoff_hz = 450.0
+resonance = 0.7
+
+[sub_resource type="AudioEffectLowPassFilter" id="AudioEffectLowPassFilter_radio"]
+resource_name = "RadioLowPass"
+cutoff_hz = 2700.0
+resonance = 0.7
+
+[sub_resource type="AudioEffectDistortion" id="AudioEffectDistortion_radio"]
+resource_name = "RadioCrunch"
+mode = 3
+drive = 0.4
+post_gain = -4.0
+
+[sub_resource type="AudioEffectCompressor" id="AudioEffectCompressor_radio"]
+resource_name = "RadioSquash"
+threshold = -22.0
+ratio = 6.0
+attack_us = 1000.0
+release_ms = 120.0
+
+[sub_resource type="AudioEffectAmplify" id="AudioEffectAmplify_radio"]
+resource_name = "RadioLevel"
+volume_db = -18.0
 
 [resource]
 bus/0/effect/0/effect = SubResource("AudioEffectHardLimiter_master")
@@ -55,3 +82,19 @@ bus/5/mute = false
 bus/5/bypass_fx = false
 bus/5/volume_db = 0.0
 bus/5/send = &"Master"
+bus/6/name = &"Radio"
+bus/6/solo = false
+bus/6/mute = false
+bus/6/bypass_fx = false
+bus/6/volume_db = -2.0
+bus/6/send = &"Master"
+bus/6/effect/0/effect = SubResource("AudioEffectHighPassFilter_radio")
+bus/6/effect/0/enabled = true
+bus/6/effect/1/effect = SubResource("AudioEffectLowPassFilter_radio")
+bus/6/effect/1/enabled = true
+bus/6/effect/2/effect = SubResource("AudioEffectDistortion_radio")
+bus/6/effect/2/enabled = true
+bus/6/effect/3/effect = SubResource("AudioEffectCompressor_radio")
+bus/6/effect/3/enabled = true
+bus/6/effect/4/effect = SubResource("AudioEffectAmplify_radio")
+bus/6/effect/4/enabled = true

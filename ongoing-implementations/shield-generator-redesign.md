@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | done |
-| **Branch** | main (field effect committed in db35437; model change uncommitted) |
+| **Branch** | main (model in 688c6a1, field effect in db35437; all committed) |
 | **Updated** | 2026-11-04 |
 | **Scope** | Rebuild the Shield Generator model in the worn-industrial style of the redesigned turret / merc outpost / mining outpost, and make it feel like a force field (in-game animated field orb). |
 

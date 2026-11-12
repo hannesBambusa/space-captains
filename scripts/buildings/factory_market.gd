@@ -124,7 +124,7 @@ func demand_name(ore: int) -> String:
 
 ## Credits per unit the Factory is willing to pay now.
 func willing_price(ore: int) -> float:
-	return lerpf(price_floor[ore], price_ceiling[ore], demand(ore))
+	return lerpf(price_floor[ore], price_ceiling[ore], demand(ore)) * SectorModifier.num("ore_price")
 
 
 ## Willingness now minus about [member trend_window] samples ago, credits.

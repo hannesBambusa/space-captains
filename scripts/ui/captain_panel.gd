@@ -18,6 +18,7 @@ extends PanelContainer
 ## takes the height the Details tab had, so the panel keeps its size.
 ## An open Factory buy order shows as one line under the wallet: the part,
 ## the deposit and its state ("waiting for titanium", "ready for pickup").
+## The Ride button starts [RideAlong] on this captain.
 
 const ATTR_COLOR := Color(0.55, 0.85, 1.0)
 const HULL_COLOR := Color(0.45, 0.95, 0.55)
@@ -118,6 +119,13 @@ func _ready() -> void:
 		top.add_child(tb)
 		_tab_buttons.append(tb)
 	top.add_child(UIUtil.spacer())
+	var ride := UIUtil.button("Ride", &"IconButton")
+	ride.custom_minimum_size = Vector2(48.0, 22.0)
+	ride.tooltip_text = "Ride along: the camera chases this captain, through fights and gate jumps (V)"
+	ride.pressed.connect(func() -> void:
+		if hud and hud.ride_along and ship and ship.captain:
+			hud.ride_along.start(ship.captain))
+	top.add_child(ride)
 	var close := UIUtil.button("x", &"IconButton")
 	close.custom_minimum_size = Vector2(26.0, 22.0)
 	close.tooltip_text = "Deselect (Esc)"

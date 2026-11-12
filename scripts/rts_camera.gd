@@ -176,6 +176,11 @@ func set_yaw(yaw_deg: float, snap: bool = false) -> void:
 		_apply()
 
 
+## Eases the total pitch to [param deg] (a tilt fly, as in [method frame_area]).
+func set_pitch(deg: float) -> void:
+	_pitch_goal = deg
+
+
 func set_distance(dist: float, snap: bool = false) -> void:
 	_target_dist = clampf(dist, min_distance, max_distance)
 	if snap:

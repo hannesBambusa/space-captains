@@ -250,6 +250,8 @@ func _refresh() -> void:
 		var alive := (target is ScavengerDen or target is ScavengerShip) and Combat.is_live(target)
 		var have := ContractBoard.bounty_on(target)
 		var why := ContractBoard.update_problem(have, reward) if have else ContractBoard.post_problem(reward, true)
+		if why.is_empty() and have == null:
+			why = RemoteWork.post_block(target)
 		_post.text = "Update bounty" if have else "Post bounty"
 		_post.disabled = not alive or not why.is_empty() or (have != null and reward == have.reward)
 		_post.tooltip_text = why

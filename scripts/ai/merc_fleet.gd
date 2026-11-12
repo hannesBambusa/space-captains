@@ -199,7 +199,7 @@ static func den_need(den: ScavengerDen) -> float:
 			ehp += DEN_SHIP_SHARE * (s.stats.max_hull + s.stats.max_shields) * (1.0 + s.stats.dodge)
 			dps += DEN_SHIP_SHARE * s.stats.dps()
 			out += 1
-	var home := maxi(den.def.spawn_cap - out, 0) if den.def else 0
+	var home := maxi(den.spawn_limit() - out, 0) if den.def else 0
 	if home > 0 and den.faction_def:
 		var p := faction_ship(den.faction_def)
 		ehp += DEN_SHIP_SHARE * float(home) * p.x

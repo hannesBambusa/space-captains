@@ -129,7 +129,8 @@ func _pick_ore() -> int:
 	for b in system.belts:
 		if not b.is_depleted and have.has(b.def.ore_type):
 			have[b.def.ore_type] += 1
-	var weights := {AsteroidBelt.OreType.IRON: 0.55, AsteroidBelt.OreType.TITANIUM: 0.3, AsteroidBelt.OreType.CRYSTAL: 0.15}
+	var weights := {AsteroidBelt.OreType.IRON: 0.55 * SectorModifier.num("iron"), AsteroidBelt.OreType.TITANIUM: 0.3 * SectorModifier.num("titanium"),
+			AsteroidBelt.OreType.CRYSTAL: 0.15 * SectorModifier.num("crystal")}
 	var total := 0.0
 	for o: int in weights:
 		weights[o] = float(weights[o]) / float(1 + int(have[o]) * 2)

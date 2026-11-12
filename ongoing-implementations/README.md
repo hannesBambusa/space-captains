@@ -19,8 +19,14 @@ ending a session. A stale doc is worse than no doc, because it is trusted.
 
 | Feature | Doc | Status | Branch |
 |---|---|---|---|
-| Rival corporation | [`rival-corporation.md`](rival-corporation.md) | Ready for review, needs your play test; data sim committed (c4c3778); research stall fix, milestones, escort queue fix uncommitted | — |
-| Planet outposts | [`planet-outposts.md`](planet-outposts.md) | Built, raider range fix uncommitted, needs play test | main |
+| Remote work | [`remote-work.md`](remote-work.md) | Built, needs your play test | main |
+| Radio chatter | [`radio-chatter.md`](radio-chatter.md) | Built, needs your listen test | main |
+| Boss threats (warlord, Swarm) | [`boss-threats.md`](boss-threats.md) | Built (warlord and Swarm), needs your play test | main |
+| Sector modifiers | [`sector-modifiers.md`](sector-modifiers.md) | Built, needs your play test | main |
+| Follow cam (ride along) | [`follow-cam.md`](follow-cam.md) | Built, needs your feel test | main |
+| Rival corporation | [`rival-corporation.md`](rival-corporation.md) | Done; data sim gaps and play test deferred | main |
+| Planet outposts | [`planet-outposts.md`](planet-outposts.md) | Built, all committed, needs play test | main |
 | Shield generator redesign | [`shield-generator-redesign.md`](shield-generator-redesign.md) | Done | main |
-| Merc outpost redesign | [`merc-outpost-redesign.md`](merc-outpost-redesign.md) | Done, committed (c4c3778); doc can be deleted | main |
-| Tutorial academy and SOLA voice | [`tutorial-academy.md`](tutorial-academy.md) | Built and committed; needs your listen and play test | main |
+| Merc outpost redesign | [`merc-outpost-redesign.md`](merc-outpost-redesign.md) | Done | main |
+| Tutorial academy and SOLA voice | [`tutorial-academy.md`](tutorial-academy.md) | Done; listen and play test deferred | main |
+| HUD flight ops redesign | [`hud-flight-ops.md`](hud-flight-ops.md) | In progress: look, top, both columns built; timeline next | main |

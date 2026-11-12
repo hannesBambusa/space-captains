@@ -1,7 +1,7 @@
 class_name PilotColumn
 extends PanelContainer
 ## Right-hand pilot list, under the minimap, floating over space (no frame, no background,
-## outlined text): a title row (PILOTS, count, collapse) with a rule line
+## thinly outlined text): a title row (large thin "Pilots", count, collapse) with a rule line
 ## over a compact [PilotRoster] (summary line, small role chips, sort,
 ## one-row pilots). The HUD sets its height (HUD._layout_right) so it ends
 ## above an open selection panel; with too little room only the title row
@@ -32,10 +32,14 @@ func _ready() -> void:
 	var top := HBoxContainer.new()
 	top.add_theme_constant_override("separation", 6)
 	v.add_child(top)
-	top.add_child(H.icon_rect(&"tab_pilots", 14.0, H.HOLO))
-	top.add_child(UIUtil.label("PILOTS", &"HeaderLabel"))
+	var title := UIUtil.label("Pilots", &"TitleLabel")
+	title.add_theme_font_size_override("font_size", 21)
+	title.add_theme_font_override("font", H.font("Light", false, false, 1))
+	top.add_child(title)
 	_count = UIUtil.label("0", &"NumberLabel")
 	_count.add_theme_font_size_override("font_size", 14)
+	_count.add_theme_color_override("font_color", H.TEXT_DIM)
+	_count.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	top.add_child(_count)
 	_alert = UIUtil.label("", &"SubHeaderLabel")
 	_alert.add_theme_color_override("font_color", H.BAD)

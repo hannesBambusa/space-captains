@@ -37,6 +37,8 @@ var raids: RaidDirector
 var threats: ThreatDirector
 ## Raids through the jump gates from dangerous systems nearby (P4, home only).
 var gate_raids: GateRaidSource
+## Pirate warlords (home only), saved as "warlord".
+var warlords: WarlordDirector
 ## Faction planet claims: garrisons and re-claims (phase C3).
 var claims: PlanetClaims
 ## Defence zones and the colony alarm (mercenaries answer attacks).
@@ -113,6 +115,9 @@ func _ready() -> void:
 	gate_raids = GateRaidSource.new()
 	gate_raids.name = "GateRaidSource"
 	add_child(gate_raids)
+	warlords = WarlordDirector.new()
+	warlords.name = "WarlordDirector"
+	add_child(warlords)
 
 
 func register_shield(s: StationShield) -> void:
