@@ -1,7 +1,8 @@
 class_name RadioChatter
 extends PanelContainer
-## Captain radio chatter: short voiced lines from the player's captains in
-## the viewed system ("Taking fire!", "Hold's full. Coming home."), on the
+## Captain radio chatter: short voiced lines from the pilot the player has
+## selected ("Taking fire!", "Hold's full. Coming home."; nobody selected,
+## or something else: silence, [method _tuned]), on the
 ## Radio bus (filtered like a radio; its own volume slider), with a
 ## subtitle at the bottom centre. Lines and voices: data/radio/radio_lines.json
 ## (two voices per personality; [method Captain.voice_slot] picks one), files
@@ -69,7 +70,8 @@ static func of(tree: SceneTree) -> RadioChatter:
 
 
 ## Line [param ev] from [param c] (its ship by default). Quietly dropped
-## when the ship is not in the viewed system or a limit holds it back.
+## when its ship is not the selected one, not in the viewed system, or a
+## limit holds it back.
 static func say(c: Captain, ev: StringName, ship: Ship = null) -> void:
 	if c == null or not c.alive:
 		return
@@ -150,8 +152,13 @@ func _viewed() -> SystemWorld:
 	return hud.view_manager.viewed if hud and hud.view_manager else null
 
 
+## The ship whose radio the player hears: the selected one (null = none).
+func _tuned() -> Ship:
+	return hud.selection.get_selected_ship() if hud and hud.selection else null
+
+
 func _say(c: Captain, ev: StringName, s: Ship) -> void:
-	if hud == null or not hud.visible or SystemWorld.of(s) != _viewed():
+	if hud == null or not hud.visible or SystemWorld.of(s) != _viewed() or s != _tuned():
 		return
 	var pri := int(PRIORITY.get(ev, 1))
 	var now := _now()
@@ -312,14 +319,8 @@ func _watch_threats() -> void:
 			_someone_says(w, &"warlord")
 
 
-## A mercenary if there is one in [param w] (else any captain) says [param ev].
+## The selected pilot says [param ev], when its ship is in [param w].
 func _someone_says(w: SystemWorld, ev: StringName) -> void:
-	var pick: Ship = null
-	for n in SystemWorld.nodes_in(w, Ship.GROUP):
-		var s := n as Ship
-		if s == null or s.dead or s.captain == null or s.faction != Combat.Faction.PLAYER:
-			continue
-		if pick == null or (s is MercenaryShip and not pick is MercenaryShip):
-			pick = s
-	if pick:
-		say(pick.captain, ev, pick)
+	var s := _tuned()
+	if is_instance_valid(s) and not s.dead and s.captain and s.faction == Combat.Faction.PLAYER and SystemWorld.of(s) == w:
+		say(s.captain, ev, s)

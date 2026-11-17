@@ -6,7 +6,10 @@
 // slopes, cracks), lava (black basalt, glowing cracks low and in seams),
 // gas giant (the cloud deck: soft bands in the planet's tint, swirls, light
 // glow from below).
-// Detail fades with camera distance.
+// Relief: the mesh is coarse, so the small shapes of the ground (hummocks,
+// stones, pits) come from a procedural height (relief()) whose slope bends
+// the normal per pixel and darkens the hollows; three scales, the finest
+// only close to the camera.
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 
@@ -41,9 +44,22 @@ float fbm(vec2 p) {
 	return v;
 }
 
+uniform float relief_strength = 1.0;
+varying vec3 v_normal;
+
+// Small-scale ground height, metres: hummocks (~60 m), stones and ruts
+// (~7 m), grit (~1 m, weighted by fine_k).
+float relief(vec2 p, float fine_k) {
+	float a = fbm(p * 0.016) * 5.0;
+	float b = fbm(p * 0.11 + 11.0) * 0.7;
+	float c = fbm(p * 0.9 + 3.0) * 0.12 * fine_k;
+	return a + b + c;
+}
+
 void vertex() {
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_slope = 1.0 - clamp(NORMAL.y, 0.0, 1.0);
+	v_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 }
 
 void fragment() {
@@ -104,14 +120,37 @@ void fragment() {
 		rough = 1.0;
 	} else {
 		// Rocky.
-		vec3 dust = mix(vec3(0.27, 0.22, 0.18), vec3(0.36, 0.30, 0.24), big);
-		vec3 rock = mix(vec3(0.13, 0.12, 0.11), vec3(0.21, 0.19, 0.17), mid);
-		c = mix(dust, rock, steep * 0.85 + 0.15 * smoothstep(0.5, 0.8, mid));
+		vec3 dust = mix(vec3(0.17, 0.145, 0.125), vec3(0.27, 0.23, 0.19), big);
+		vec3 rock = mix(vec3(0.08, 0.075, 0.07), vec3(0.15, 0.135, 0.12), mid);
+		// Darker gravel fields between the paler dust.
+		float gravel = smoothstep(0.48, 0.66, fbm(p * 0.004 + 17.0));
+		c = mix(dust, rock, max(steep * 0.85 + 0.15 * smoothstep(0.5, 0.8, mid), gravel * 0.6));
 		c *= mix(0.88, 1.08, fine);
 	}
 	// Small stones and pits, close up only.
-	float near = 1.0 - smoothstep(200.0, 900.0, length(v_world - (INV_VIEW_MATRIX[3].xyz)));
+	float cam_dist = length(v_world - (INV_VIEW_MATRIX[3].xyz));
+	float near = 1.0 - smoothstep(200.0, 900.0, cam_dist);
 	c *= mix(1.0, mix(0.85, 1.08, vnoise(p * 1.4)), near);
+	if (terrain_type != 5) {
+		// Relief: bend the normal along the slope of the small-scale height
+		// and darken its hollows. The sample step widens with distance, so
+		// far ground keeps its broad shapes without shimmer.
+		float e = clamp(cam_dist * 0.004, 0.25, 6.0);
+		float fine_k = near;
+		float mid_k = 1.0 - smoothstep(900.0, 3200.0, cam_dist);
+		float h0 = relief(p, fine_k);
+		float hx = relief(p + vec2(e, 0.0), fine_k);
+		float hz = relief(p + vec2(0.0, e), fine_k);
+		float k = relief_strength * mix(0.35, 1.0, mid_k);
+		// Snow and sand lie smoother than bare rock.
+		if (terrain_type == 2 || terrain_type == 3) {
+			k *= 0.6;
+		}
+		vec3 n = normalize(v_normal + vec3(-(hx - h0) / e, 0.0, -(hz - h0) / e) * k);
+		NORMAL = normalize((VIEW_MATRIX * vec4(n, 0.0)).xyz);
+		float hollow = smoothstep(1.6, 3.4, fbm(p * 0.016) * 5.0);
+		c *= mix(0.8, 1.05, hollow);
+	}
 	ALBEDO = c * tint;
 	ROUGHNESS = rough;
 	EMISSION = glow;

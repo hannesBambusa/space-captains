@@ -72,6 +72,10 @@ func _run() -> void:
 	var voiced := 0
 	var last := ""
 	var raided := false
+	# Nobody selected: silence. Then the miner's radio only.
+	var others := 0
+	var quiet_until := Time.get_ticks_msec() + 4000
+	var tuned := false
 	SimClock.set_speed(24.0)
 	var end := Time.get_ticks_msec() + 80000
 	while Time.get_ticks_msec() < end:
@@ -82,9 +86,15 @@ func _run() -> void:
 			var den := raids.pick_den()
 			if den:
 				raids.warn_raid(den, 2)
+		if not tuned and Time.get_ticks_msec() > quiet_until:
+			tuned = true
+			_ok(heard.is_empty(), "silent with no pilot selected")
+			hud.selection.select(miner)
 		var text := hud.radio._label.text if hud.radio.visible else ""
 		if text != last and not text.is_empty():
 			last = text
+			if not tuned or not text.begins_with(miner.captain.captain_name + ":"):
+				others += 1
 			heard[text] = true
 			var p := hud.radio._player
 			if p.playing and p.stream:
@@ -93,4 +103,5 @@ func _run() -> void:
 	SimClock.set_speed(1.0)
 	_ok(heard.size() >= 3, "%d different lines heard" % heard.size())
 	_ok(voiced >= 3, "%d of them voiced" % voiced)
+	_ok(others == 0, "only the selected pilot is heard (%d other lines)" % others)
 	tree.quit(0 if _fails.is_empty() else 1)

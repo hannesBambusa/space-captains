@@ -78,6 +78,8 @@ var _tracers: Array = []
 var _sync := 0.0
 ## Landing time of the raid whose dropships are already shown.
 var _drops_for := -1.0
+## Rocks, aprons, tracks and lights (looks only).
+var dressing: SurfaceDressing
 
 
 static func current(tree: SceneTree) -> SurfaceWorld:
@@ -101,6 +103,7 @@ func _ready() -> void:
 	gm.shader = load("res://shaders/terrain_surface.gdshader")
 	gm.set_shader_parameter("terrain_type", outpost.planet_type)
 	gm.set_shader_parameter("amp", 80.0)
+	gm.set_shader_parameter("relief_strength", 2.4)
 	ground.material_override = gm
 	add_child(ground)
 	if terrain.has_liquid():
@@ -130,6 +133,9 @@ func _ready() -> void:
 	camera.current = true
 	for b in outpost.buildings:
 		_add_building_node(b)
+	dressing = SurfaceDressing.new()
+	dressing.setup(self)
+	add_child(dressing)
 	for i in outpost.deposits.size():
 		_add_deposit_node(i)
 	for i in outpost.nests.size():
@@ -159,26 +165,54 @@ func _build_environment() -> void:
 	mat.ground_bottom_color = (t[0] as Color).darkened(0.5)
 	sky.sky_material = mat
 	env.sky = sky
+	mat.sun_angle_max = 6.0
+	mat.sun_curve = 0.08
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.3
-	env.tonemap_exposure = 0.85
+	env.ambient_light_energy = 0.42
+	env.tonemap_exposure = 0.95
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	env.glow_enabled = true
 	env.glow_intensity = 0.6
+	# Contact shadows under buildings, rocks and vehicles.
+	env.ssao_enabled = true
+	env.ssao_radius = 3.0
+	env.ssao_intensity = 2.2
+	env.adjustment_enabled = true
+	env.adjustment_contrast = 1.08
+	env.adjustment_saturation = 1.06
+	# Haze: thin near the base, the far ridges fade into the sky's colour and
+	# brighten toward the sun.
 	env.fog_enabled = true
 	env.fog_light_color = t[1]
-	env.fog_density = 0.0002 if terrain.is_gas() else 0.00012
+	env.fog_density = 0.0002 if terrain.is_gas() else HAZE.get(outpost.planet_type, 0.00012)
+	env.fog_aerial_perspective = 0.6
+	env.fog_sun_scatter = 0.25
+	env.fog_sky_affect = 0.0
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-38.0, 35.0, 0.0)
-	sun.light_energy = 1.15 if outpost.planet_type != PlanetDef.Type.LAVA else 0.8
+	# A low sun: long shadows show the lie of the land and the buildings' shapes.
+	sun.rotation_degrees = Vector3(-SUN_ELEVATION_DEG, 35.0, 0.0)
+	sun.light_energy = SUN_ENERGY.get(outpost.planet_type, 1.3)
 	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 3000.0
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_max_distance = 2400.0
+	sun.directional_shadow_blend_splits = true
+	sun.shadow_blur = 1.4
+	sun.light_angular_distance = 0.6
 	add_child(sun)
 	_build_sky(sun)
 
+
+## Height of the sun light over the horizon, degrees.
+const SUN_ELEVATION_DEG := 27.0
+## Sun strength by planet type: snow and pale sand need less, or they burn out.
+const SUN_ENERGY := {PlanetDef.Type.ICE: 0.85, PlanetDef.Type.DESERT: 1.1, PlanetDef.Type.LAVA: 0.95}
+## Haze density by planet type (PlanetDef.Type): airless rock is clear, a
+## desert dusty, an ocean world humid, a lava field smoky.
+const HAZE := {PlanetDef.Type.ROCKY: 0.00005, PlanetDef.Type.OCEAN: 0.00022, PlanetDef.Type.DESERT: 0.00026,
+		PlanetDef.Type.ICE: 0.00016, PlanetDef.Type.LAVA: 0.0003}
 
 ## Sky distance of the star disc and the parent planet, m (inside camera.far).
 const SKY_DIST := 16000.0
@@ -318,6 +352,8 @@ func _add_nest_node(i: int) -> void:
 ## A building placed from the HUD (already in the data).
 func add_building(b: Dictionary) -> void:
 	_add_building_node(b)
+	if dressing:
+		dressing.add_building(b)
 
 
 func _spawn_crew(c: Dictionary) -> Unit:
@@ -336,6 +372,8 @@ func _spawn_crew(c: Dictionary) -> Unit:
 func _add_unit(u: Unit, model: String, at: Vector2) -> Unit:
 	u.pos = at
 	u.node = SurfaceModels.make(model)
+	if not terrain.is_gas() and u.kind != "critter":
+		u.node.add_child(SurfaceDressing.make_dust(outpost.planet_type, HOVER))
 	add_child(u.node)
 	_place(u)
 	units.append(u)
@@ -495,7 +533,11 @@ func _place(u: Unit) -> void:
 		y = maxf(y, 0.0) + (DRONE_HEIGHT if u.kind != "critter" else DRONE_HEIGHT * 0.6)
 	else:
 		y += HOVER if u.kind != "critter" else 0.0
-	u.node.position = Vector3(u.pos.x, y, u.pos.y)
+	var at := Vector3(u.pos.x, y, u.pos.y)
+	var dust := u.node.get_node_or_null(^"Dust") as CPUParticles3D
+	if dust:
+		dust.emitting = u.node.position.distance_squared_to(at) > 0.0004
+	u.node.position = at
 	u.node.rotation = Vector3(0.0, u.heading, 0.0)
 
 

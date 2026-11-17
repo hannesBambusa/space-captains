@@ -5,23 +5,25 @@ extends Ship
 ## outposts and the Home Station.
 ##
 ## Trip: parked beside its outpost's apron (CargoDepot.berth_transform) it
-## loads once the depot has a load ready, backs out of the berth, turns on
-## the spot and flies to the approach point off the nearest station docking
-## pad (HomeStation.dock_pad; a taken one counts extra, [method _pick_pad]),
-## takes the pad (one shuttle per pad; the others hold beside the approach
-## point, or fly round to the other pad when it is free and that beats the
-## wait), descends onto it, unloads (the ore is credited to the player now,
-## Economy.receive_cargo; at a forward station less the hauling fee,
-## StationSupply.take_hauling_fee) and flies back with supplies (cosmetic). The whole
-## trip is flown in the station's non-rotating "Structures" frame, where the
-## outposts and the pads stand still: a short hop ([method _route]: straight
-## lines, bent round the station hub and any structure in the way),
-## outbound a little above the pads' height and back a little below it. No
-## cruise arcs, no warp, no open-space routing: in the world frame the
-## complex orbits at up to ~100 m/s, and the open-space flight sent the
-## shuttles on wide loops round the outposts and the approach points. The
-## "cargo_containers" mesh shows only while carrying something (smaller for
-## supplies).
+## loads once the depot has a load ready, leaves the berth, rises clear of
+## the outpost while it turns, and climbs straight for the gate of the
+## nearest station docking pad (HomeStation.dock_pad; a taken one counts
+## extra, [method _pick_pad]): the top of the glide onto the pad, on the
+## shuttle's own line to the pad when that comes in from the pad's side of
+## the hub, else at the edge of that sector ([method _gate_for]). It takes the pad (one shuttle per pad;
+## the others hold beside the gate, or fly round to the other pad when it is
+## free and that beats the wait), glides down onto it, unloads (the ore is
+## credited to the player now, Economy.receive_cargo; at a forward station
+## less the hauling fee, StationSupply.take_hauling_fee) and flies back with
+## supplies (cosmetic), gliding down to its berth. The whole trip is flown
+## in the station's non-rotating "Structures" frame, where the outposts and
+## the pads stand still: straight lines over the structures ([constant
+## OUT_HEIGHT], back at [constant BACK_HEIGHT], both above every roof), bent
+## only round the station hub ([method _route]). Climbs and descents follow
+## a slope (ShipMover.frame_climb_slope). No cruise arcs, no warp, no
+## open-space routing: in the world frame the complex orbits at up to
+## ~100 m/s. The "cargo_containers" mesh shows only while carrying something
+## (smaller for supplies).
 ##
 ## Raiders can shoot it while it flies between the outpost and the pads
 ## (to the station and back); docked, loading or on the pads it is safe.
@@ -45,23 +47,36 @@ const FALLBACK_CARGO_NODE := "miner_hold"
 const CRUISE_SPEED := 70.0
 const LOAD_TIME := 4.0
 const UNLOAD_TIME := 5.0
-## Pad approach point and line-up distance from the station centre, m.
-const PAD_APPROACH := 230.0
-const PAD_LINE_UP := 95.0
+## The glide onto a pad starts at its gate: this far from the pad, m, in the
+## direction the shuttle comes from, at most [constant GATE_SECTOR_DEG] off
+## the pad's outward line (never in over the hub). Leaving, the same the
+## other way round.
+const GLIDE_RUN := 110.0
+const GATE_SECTOR_DEG := 70.0
+## Speed through a gate the shuttle has to turn hard at (90 degrees or more), m/s.
+const GATE_TURN_SPEED := 18.0
 ## Resting height above a pad's origin, m.
 const PAD_HEIGHT := 2.3
-## Flat distance to the approach point where the shuttle takes its pad (or
-## starts to hold), m.
-const HANDOFF_DISTANCE := 60.0
-## Trip heights in the structures frame (pads and berths sit near 0), m:
-## outbound above, back below, so the two streams pass apart.
-const OUT_HEIGHT := 12.0
-const BACK_HEIGHT := -6.0
-## Keep-out circles the route bends round: the station hub (addons, solar
-## wings) and every structure's footprint plus [constant STRUCTURE_MARGIN], m.
-## HUB_CLEARANCE is the fallback; the station's is HomeStation.hub_clearance.
+## Flat distance to the gate where the shuttle takes its pad (or starts to
+## hold), m.
+const HANDOFF_DISTANCE := 150.0
+## Trip heights in the structures frame (pads and berths sit near 0, the
+## tallest roof is ~33 m), m: outbound and back at two heights, so the two
+## streams pass apart.
+const OUT_HEIGHT := 44.0
+const BACK_HEIGHT := 60.0
+## Height over the berth's line-up point where the trip starts and ends, m
+## (clear of the outpost's roof): the shuttle rises to it while it turns
+## away, and sinks from it while it turns to back in.
+const DOCK_OVER := 22.0
+## Climbs and descents: height per metre flown, the fastest rate (m/s), and
+## the speed at the top of a descent (m/s; it brakes to rest down the glide).
+const CLIMB_SLOPE := 0.36
+const CLIMB_RATE := 18.0
+const GLIDE_SPEED := 45.0
+## The keep-out circle the route bends round: the station hub (addons, solar
+## wings). HUB_CLEARANCE is the fallback; the station's is HomeStation.hub_clearance.
 const HUB_CLEARANCE := 120.0
-const STRUCTURE_MARGIN := 16.0
 ## Route waypoints sit this much outside a keep-out circle; arc step round it, radians.
 const ROUTE_SLACK := 1.06
 const ROUTE_ARC_STEP := 0.5
@@ -112,6 +127,8 @@ var total_delivered: int = 0
 var _timer: float = 0.0
 ## The current leg's route is set (cleared when the leg or its target changes).
 var _routed: bool = false
+## Gate of the pad headed for (frame space, [method _gate_for]).
+var _gate := Vector3.INF
 var _cargo_node: Node3D
 var _cargo_scale := Vector3.ONE
 
@@ -148,6 +165,8 @@ func _on_ready_ship() -> void:
 	if _cargo_node:
 		_cargo_scale = _cargo_node.scale
 	_update_cargo_look()
+	mover.frame_climb_slope = CLIMB_SLOPE
+	mover.climb_speed = CLIMB_RATE
 	mover.hold()
 
 
@@ -333,54 +352,61 @@ func _fly_to_pad() -> void:
 		_routed = false
 		if pad < 0:
 			return
-	var goal := _approach_local(pad)
 	if phase == Phase.OUTBOUND:
-		if not _routed:
-			_set_route(goal, OUT_HEIGHT)
+		if not _routed or _gate == Vector3.INF:
+			_route_to_gate()
 			_routed = true
 		_skip_passed()
-		if SpaceNav.flat_distance(position, goal) > HANDOFF_DISTANCE and not mover.path_done():
+		if SpaceNav.flat_distance(position, _gate) > HANDOFF_DISTANCE and not mover.path_done():
 			return
 	var mgr := BuildingManager.of(self)
 	if mgr and mgr.station_hull and mgr.station_hull.disabled:
 		_hold()
 		return
 	if _claim_pad(pad):
-		if phase == Phase.OUTBOUND:
-			mover.set_path(_landing_path())
-			phase = Phase.LANDING
-			status_changed.emit(self)
-		else:
-			# From the holding spot: back onto the pad's line, then down.
-			phase = Phase.OUTBOUND
-			_set_route(goal, OUT_HEIGHT)
+		# From the holding spot the gate is right there: straight down.
+		if phase != Phase.OUTBOUND or _gate == Vector3.INF:
+			_gate = _gate_for(pad, position)
+		mover.set_path(_landing_path())
+		phase = Phase.LANDING
+		status_changed.emit(self)
 		return
 	var other := (pad + 1) % maxi(_pad_count(), 1)
-	if not _pad_taken(other) and _route_length(position, _approach_local(other)) / ROUTE_ARC_SPEED + SWITCH_MARGIN < _pad_free_in(pad):
+	if not _pad_taken(other) and _route_length(position, _gate_for(other, position)) / ROUTE_ARC_SPEED + SWITCH_MARGIN < _pad_free_in(pad):
 		# The other pad is free and getting there beats waiting: fly round
 		# the hub to it (held from here on, so the shuttles waiting here do
 		# not all set off for it).
 		_claim_pad(other)
 		pad = other
 		phase = Phase.OUTBOUND
-		_set_route(_approach_local(pad), OUT_HEIGHT)
+		_route_to_gate()
+		_routed = true
 		status_changed.emit(self)
 		return
 	_hold()
+
+
+## Routes to the gate of [member pad] from here.
+func _route_to_gate() -> void:
+	_gate = _gate_for(pad, position)
+	_set_route(_gate, OUT_HEIGHT, OUT_HEIGHT)
 
 
 ## Both pads taken (or closed): wait beside the approach point.
 func _hold() -> void:
 	if phase == Phase.WAITING_PAD:
 		return
-	var d := _pad_dir(pad)
+	if _gate == Vector3.INF:
+		_gate = _gate_for(pad, position)
+	var p := _pad_local(pad)
+	var d := Vector3(_gate.x - p.x, 0.0, _gate.z - p.z).normalized()
 	var side := d.cross(Vector3.UP)
 	var queue := 0
 	for n in SystemWorld.nodes_in(self, GROUP):
 		var s := n as CargoShuttle
 		if s and s != self and not s.dead and s.phase == Phase.WAITING_PAD and s.pad == pad:
 			queue += 1
-	var spot := _approach_local(pad) + side * HOLD_SIDE + d * HOLD_SPACING * queue
+	var spot := _gate + side * HOLD_SIDE + d * HOLD_SPACING * queue
 	var pts: Array[ShipMover.Waypoint] = []
 	pts.append(ShipMover.Waypoint.new(Vector3(spot.x, OUT_HEIGHT, spot.z), 20.0, true, -d, 3.0))
 	mover.set_path(pts)
@@ -395,7 +421,11 @@ func _fly_home() -> void:
 	var berth := depot.berth_transform(slot_index)
 	var line_up := frame.to_local(home.to_global(berth.origin + home.dock_outward() * 20.0))
 	if not _routed:
-		_set_route(line_up, BACK_HEIGHT)
+		# Straight off the pad: out through the pad's gate on the way home.
+		var via := Vector3.INF
+		if pad >= 0 and SpaceNav.flat_distance(position, _pad_local(pad)) < GLIDE_RUN * 0.8:
+			via = _gate_for(pad, line_up)
+		_set_route(line_up, BACK_HEIGHT, line_up.y + DOCK_OVER, via)
 		_routed = true
 	_skip_passed()
 	if not mover.path_done():
@@ -527,7 +557,7 @@ func _pick_pad() -> int:
 	var nearest := 0
 	var nearest_d := INF
 	for i in _pad_count():
-		var d := _route_length(here, _approach_local(i))
+		var d := _route_length(here, _gate_for(i, here))
 		if d < nearest_d:
 			nearest_d = d
 			nearest = i
@@ -554,7 +584,7 @@ func _pad_free_in(index: int) -> float:
 		Phase.LIFTOFF:
 			return LIFTOFF_TIME * 0.5
 	# Claimed from afar, still on its way.
-	return SpaceNav.flat_distance(s.position, _approach_local(index)) / ROUTE_ARC_SPEED + LANDING_TIME + UNLOAD_TIME + LIFTOFF_TIME
+	return SpaceNav.flat_distance(s.position, _pad_local(index)) / ROUTE_ARC_SPEED + LANDING_TIME + UNLOAD_TIME + LIFTOFF_TIME
 
 
 func _pad_taken(index: int) -> bool:
@@ -582,41 +612,71 @@ func _pad_key(index: int) -> String:
 	return "%s/%d" % [_pad_system, index]
 
 
-## Frame-space waypoints from the approach point onto the pad, nose to the hub.
+## Frame-space waypoints through the gate and down onto the pad, nose to the hub.
 func _landing_path() -> Array[ShipMover.Waypoint]:
 	var p := _pad_local(pad)
 	var d := _pad_dir(pad)
+	# A hard turn at the gate is flown slower, so it does not swing wide.
+	var a := Vector3(_gate.x - position.x, 0.0, _gate.z - position.z)
+	var b := Vector3(p.x - _gate.x, 0.0, p.z - _gate.z)
+	var turn := a.angle_to(b) if a.length() > 20.0 else 0.0
+	var gate_speed := lerpf(GLIDE_SPEED, GATE_TURN_SPEED, clampf(turn / (PI * 0.5), 0.0, 1.0))
 	var pts: Array[ShipMover.Waypoint] = []
-	pts.append(ShipMover.Waypoint.new(d * PAD_LINE_UP + Vector3.UP * (p.y + 9.0), 25.0, false, -d, 6.0))
-	pts.append(ShipMover.Waypoint.new(Vector3(p.x, p.y + 9.0, p.z), 10.0, true, -d, 2.0, true))
+	pts.append(ShipMover.Waypoint.new(Vector3(_gate.x, OUT_HEIGHT, _gate.z), gate_speed, false, Vector3.ZERO, 14.0))
+	pts.append(ShipMover.Waypoint.new(Vector3(p.x, p.y + 9.0, p.z), GLIDE_SPEED, true, -d, 2.0, true))
 	pts.append(ShipMover.Waypoint.new(p + Vector3.UP * PAD_HEIGHT, 3.0, true, -d, 0.6))
 	return pts
 
 
-## Off the pad, turn round, out along the pad's line past the hub's keep-out
-## (the route home takes over there).
+## Off the pad, out a little and turn toward the way home (the route home
+## takes over there).
 func _liftoff_path() -> Array[ShipMover.Waypoint]:
 	var p := _pad_local(pad)
 	var d := _pad_dir(pad)
+	var top := Vector3(p.x, p.y + 9.0, p.z)
+	var face := d
+	var frame := _frame()
+	if frame and is_instance_valid(home) and depot and is_instance_valid(depot):
+		var to := _gate_for(pad, frame.to_local(home.to_global(depot.berth_transform(slot_index).origin))) - (top + d * 25.0)
+		to.y = 0.0
+		if to.length() > 1.0:
+			face = to.normalized()
 	var pts: Array[ShipMover.Waypoint] = []
-	pts.append(ShipMover.Waypoint.new(Vector3(p.x, p.y + 9.0, p.z), 4.0, true, -d, 1.0))
-	pts.append(ShipMover.Waypoint.new(Vector3(p.x, p.y + 9.0, p.z) + d * 25.0, 8.0, true, d, 3.0, true))
-	pts.append(ShipMover.Waypoint.new(d * (_hub_clearance() * ROUTE_SLACK + 15.0) + Vector3.UP * (p.y + 9.0), 30.0, false, Vector3.ZERO, 10.0))
+	pts.append(ShipMover.Waypoint.new(top, 4.0, true, -d, 1.0))
+	pts.append(ShipMover.Waypoint.new(top + d * 25.0, 8.0, true, face, 3.0, true))
 	return pts
 
 
 # --- Route ----------------------------------------------------------------------
 
-## Approach point of pad [param index], frame space (at the pads' height).
-func _approach_local(index: int) -> Vector3:
-	return _pad_dir(index) * PAD_APPROACH + Vector3.UP * (_pad_local(index).y + 9.0)
+## Gate of pad [param index] for a shuttle coming from (or leaving for)
+## [param from], frame space, at the pads' height: [constant GLIDE_RUN]
+## from the pad (less when [param from] is nearer), toward [param from] but
+## at most [constant GATE_SECTOR_DEG] off the pad's outward line.
+func _gate_for(index: int, from: Vector3) -> Vector3:
+	var p := _pad_local(index)
+	var d := _pad_dir(index)
+	var to := Vector3(from.x - p.x, 0.0, from.z - p.z)
+	var dist := to.length()
+	var dir := d
+	if dist > 1.0:
+		var lim := deg_to_rad(GATE_SECTOR_DEG)
+		dir = d.rotated(Vector3.UP, clampf(d.signed_angle_to(to / dist, Vector3.UP), -lim, lim))
+	return Vector3(p.x, p.y + 9.0, p.z) + dir * clampf(dist - 30.0, 40.0, GLIDE_RUN)
 
 
 ## Flies a route from here to [param goal] (frame space) at [param height]:
-## fly-through waypoints round the keep-outs, braking to rest at the goal
-## (the pad is taken, or the berth lined up, before it comes to a stop).
-func _set_route(goal: Vector3, height: float) -> void:
-	var pts := _route(position, goal)
+## fly-through waypoints round the hub, braking to rest at the goal at
+## [param end_height] (the pad is taken, or the berth lined up, before it
+## comes to a stop). A lower end height is reached on a glide down the last
+## stretch. [param via]: a first point to fly through (INF = none).
+func _set_route(goal: Vector3, height: float, end_height: float, via: Vector3 = Vector3.INF) -> void:
+	var pts: PackedVector3Array
+	if via == Vector3.INF:
+		pts = _route(position, goal)
+	else:
+		pts = PackedVector3Array([Vector3(via.x, 0.0, via.z)])
+		pts.append_array(_route(via, goal))
 	# Speed limit on the way to each waypoint: what its circle allows, and
 	# slow enough to brake for the goal in the route left after it.
 	var speeds := PackedFloat32Array()
@@ -627,12 +687,35 @@ func _set_route(goal: Vector3, height: float) -> void:
 		speeds[i] = minf(cap, sqrt(2.0 * ROUTE_BRAKE * left) + 8.0)
 		if i > 0:
 			left += SpaceNav.flat_distance(pts[i], pts[i - 1])
+	if via != Vector3.INF and pts.size() > 1:
+		# The first point is a turn, not a circle: slower the harder the
+		# turn, and slow enough to stop in the route left after it.
+		var a := Vector3(pts[0].x - position.x, 0.0, pts[0].z - position.z)
+		var b := Vector3(pts[1].x - pts[0].x, 0.0, pts[1].z - pts[0].z)
+		var turn := a.angle_to(b) if a.length() > 1.0 and b.length() > 1.0 else 0.0
+		var rest := 0.0
+		for i in range(1, pts.size()):
+			rest += SpaceNav.flat_distance(pts[i], pts[i - 1])
+		speeds[0] = minf(lerpf(GLIDE_SPEED, GATE_TURN_SPEED, clampf(turn / (PI * 0.5), 0.0, 1.0)), sqrt(2.0 * ROUTE_BRAKE * 0.75 * rest))
 	var wps: Array[ShipMover.Waypoint] = []
 	var prev := position
 	for i in pts.size():
 		var p := Vector3(pts[i].x, height, pts[i].z)
 		if i == pts.size() - 1:
-			wps.append(ShipMover.Waypoint.new(p, CRUISE_SPEED, true, Vector3.ZERO, 4.0))
+			# Top of the descent: far enough out to lose the height on the slope.
+			var run := (height - end_height) / CLIMB_SLOPE * 1.15 + 10.0
+			var last := SpaceNav.flat_distance(prev, p)
+			var glide := end_height < height - 1.0 and last > run + 20.0
+			if glide:
+				var back := (Vector3(prev.x, 0.0, prev.z) - Vector3(p.x, 0.0, p.z)).normalized()
+				var top := p + back * run
+				# Down to the glide speed by the top of the descent.
+				var slow := (CRUISE_SPEED * CRUISE_SPEED - GLIDE_SPEED * GLIDE_SPEED) / (2.0 * ROUTE_BRAKE)
+				if last - run > slow + 20.0:
+					var q := top + back * slow
+					wps.append(ShipMover.Waypoint.new(Vector3(q.x, height, q.z), CRUISE_SPEED, false, Vector3.ZERO, 12.0))
+				wps.append(ShipMover.Waypoint.new(Vector3(top.x, height, top.z), GLIDE_SPEED, false, Vector3.ZERO, 12.0))
+			wps.append(ShipMover.Waypoint.new(Vector3(p.x, end_height, p.z), GLIDE_SPEED if glide else CRUISE_SPEED, true, Vector3.ZERO, 4.0))
 			break
 		# A long leg into a slow stretch: full speed until the braking starts.
 		var brake := (CRUISE_SPEED * CRUISE_SPEED - speeds[i] * speeds[i]) / (2.0 * ROUTE_BRAKE)
@@ -679,11 +762,6 @@ func _keepouts() -> PackedVector3Array:
 	if frame and st != Vector3.INF:
 		var c := frame.to_local(st)
 		out.append(Vector3(c.x, c.z, _hub_clearance()))
-	var mgr := BuildingManager.of(self)
-	if mgr:
-		for b in mgr.buildings:
-			if is_instance_valid(b) and b.def and not b.def.station_addon and b.get_parent() == frame:
-				out.append(Vector3(b.position.x, b.position.z, b.def.footprint_radius + STRUCTURE_MARGIN))
 	return out
 
 
@@ -692,7 +770,7 @@ func _keepouts() -> PackedVector3Array:
 ## circle a waypoint goes round, 0 = none). Straight where clear; a leg
 ## that cuts a keep-out circle goes round it the shorter way (tangent, arc,
 ## tangent), [constant ROUTE_MAX_DEPTH] circles deep. Circles holding
-## either end are ignored (the shuttle's own outpost at the berth).
+## either end are ignored.
 func _route(from: Vector3, to: Vector3) -> PackedVector3Array:
 	var out := PackedVector3Array()
 	var circles := _keepouts()
@@ -751,8 +829,8 @@ func _route_into(out: PackedVector3Array, a: Vector2, b: Vector2, circles: Packe
 	_route_into(out, c + Vector2.from_angle(th0 + side * sweep) * r, b, circles, sub, depth + 1)
 
 
-## Building-space waypoints out of the berth, then turn on the spot toward
-## the route to the pad (it takes over there).
+## Building-space waypoints out of the berth, then up clear of the roof
+## while turning on the spot toward the route to the pad (it takes over there).
 func _undock_path() -> Array[ShipMover.Waypoint]:
 	var berth := depot.berth_transform(slot_index)
 	var out := home.dock_outward()
@@ -762,15 +840,15 @@ func _undock_path() -> Array[ShipMover.Waypoint]:
 	var frame := _frame()
 	if frame and pad >= 0:
 		var from := frame.to_local(home.to_global(exit))
-		var route := _route(from, _approach_local(pad))
+		var route := _route(from, _gate_for(pad, from))
 		var to := home.to_local(frame.to_global(Vector3(route[0].x, from.y, route[0].z))) - exit
 		to.y = 0.0
 		if to.length() > 1.0:
-			pts.append(ShipMover.Waypoint.new(exit + out * 4.0, 4.0, true, to.normalized(), 2.0, true))
+			pts.append(ShipMover.Waypoint.new(exit + out * 4.0 + Vector3.UP * DOCK_OVER, 4.0, true, to.normalized(), 2.0, true))
 	return pts
 
 
-## Line up outside the berth nose-out, then back in.
+## Sink to the berth's height outside it while turning nose-out, then back in.
 func _dock_path() -> Array[ShipMover.Waypoint]:
 	var berth := depot.berth_transform(slot_index)
 	var out := home.dock_outward()

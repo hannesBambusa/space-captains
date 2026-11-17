@@ -35,7 +35,7 @@ shuttle link port at the axle tail.
 Layout (Blender Z up, exported +Y up; Blender -Y = Godot +Z). Centre at origin, docking
 plane z = 0, docking face toward Blender -Y.
   rack      bays x = -15, -5, 5, 15, ships rest at y = -3.5 nose -Y (merc_interceptor
-            x +-4.05, nose y -10.56, bell y +3.25, z -1.23..2.05); corridors x bx +-4.3,
+            x +-3.85, nose y -10.56, bell y +3.25, z -1.23..2.05); corridors x bx +-4.3,
             z +-3.2 stay clear except the clamps (bottom z >= 2.40, top z <= -1.58)
   fingers   inner x = -10, 0, 10, outer x = +-20.6, y -12..4.9, guide arms to y -17,
             z 6.2
@@ -94,7 +94,7 @@ GAPS_IN = [-10.0, 0.0, 10.0]
 OUTER_FINGER_X = 20.6
 STATIONS = (-5.0, 0.5)                       # clamp yoke / saddle stations along y
 # merc_interceptor at rest (rotated pi at (bx, -3.5, 0)); --check re-measures the glb
-SHIP_HW, SHIP_ZMIN, SHIP_ZMAX = 4.05, -1.23, 2.05
+SHIP_HW, SHIP_ZMIN, SHIP_ZMAX = 3.85, -1.23, 2.05
 NOSE_Y, TAIL_Y = -10.56, 3.25
 LANE_HW, LANE_HH = 4.3, 3.2                  # docking corridor half sizes (x, z)
 LABELS = ["BAY 1", "BAY 2", "BAY 3", "BAY 4", "12", "MX-12", "MERC", "SPIN", "ORD", "PDC",

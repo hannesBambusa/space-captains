@@ -83,6 +83,12 @@ var lateral_efficiency: float = 0.45
 var reverse_efficiency: float = 0.6
 ## Vertical easing speed toward the goal height in a building frame, m/s.
 var climb_speed: float = 8.0
+## Building frames: 0 = ease to the goal height at [member climb_speed]
+## whatever the speed (docking). Above 0 the height changes along a slope:
+## at most this much height per metre flown (never under [constant
+## FRAME_CLIMB_MIN] m/s, at most [member climb_speed]), the nose pitches
+## with it, and a stop waypoint also waits for its height (cargo shuttles).
+var frame_climb_slope: float = 0.0
 ## World-frame climbs and dives: steepest flight path, slowest and fastest
 ## vertical speed, vertical acceleration (m/s, m/s^2), largest nose pitch.
 var climb_angle_deg: float = 16.0
@@ -133,6 +139,26 @@ const PITCH_DEADZONE := Vector2(2.0, 8.0)
 ## nose first and turns as it slows in.
 const FACE_NEAR_MARGIN := 8.0
 const FACE_NEAR_MIN := 12.0
+## Turning: the hull has inertia. Seconds of thruster burn to spin up to the
+## full turn rate (and to stop the spin again); combat flying ([member
+## agile]) spins up faster.
+const YAW_SPOOL := 0.4
+const YAW_SPOOL_AGILE := 0.25
+## The nose leads a turn: it swings onto the wanted course first (above
+## this relative speed, m/s) and the main drive then pushes the ship round,
+## so the hull slides through a turn instead of following its velocity
+## like a car on a road.
+const LEAD_MIN_SPEED := 3.0
+## Roll in a turn, shares of [member bank_max_deg]: from the spin itself
+## (only while moving: a ship turning on the spot stays level) and from the
+## sideways burn. The ship rolls into the turn.
+const BANK_FROM_SPIN := 0.55
+const BANK_FROM_BURN := 0.8
+const BANK_SPIN_SPEED := Vector2(3.0, 25.0)
+## Slowest climb or sink in a building frame with [member frame_climb_slope]
+## on (hovering), m/s, and its vertical acceleration, m/s^2.
+const FRAME_CLIMB_MIN := 6.0
+const FRAME_CLIMB_ACCEL := 14.0
 
 ## Velocity in the parent frame, m/s.
 var velocity := Vector3.ZERO
@@ -370,7 +396,7 @@ func step(dt: float) -> void:
 	ship.position = pos
 	var demand := clampf(a.length() / maxf(acceleration * dt, 1e-5), 0.0, 1.0) * maxf(forward().dot(a.normalized()) if a.length() > 1e-5 else 0.0, 0.25)
 	thrust = lerpf(thrust, demand, 1.0 - exp(-4.0 * dt))
-	_turn(dt, d)
+	_turn(dt, d, desired, a / dt)
 
 
 ## Fastest climb or dive the height control allows at flat speed
@@ -389,7 +415,16 @@ func vertical_limit(hs: float) -> float:
 ## than [member climb_angle_deg] once moving, and pitch the nose with it.
 func _step_height(y: float, dt: float) -> float:
 	var hs := SpaceNav.flat_length(velocity)
-	if not cruise_active:
+	if not cruise_active and frame_climb_slope > 0.0:
+		var gap := goal_y - y
+		var top_rate := clampf(hs * frame_climb_slope, FRAME_CLIMB_MIN, maxf(climb_speed, FRAME_CLIMB_MIN))
+		var rate := signf(gap) * minf(top_rate, sqrt(1.6 * FRAME_CLIMB_ACCEL * absf(gap)))
+		climb_rate = move_toward(climb_rate, rate, FRAME_CLIMB_ACCEL * dt)
+		y += climb_rate * dt
+		if absf(goal_y - y) < 0.05 and absf(climb_rate) < 0.5:
+			y = goal_y
+			climb_rate = 0.0
+	elif not cruise_active:
 		climb_rate = 0.0
 		y = move_toward(y, goal_y, climb_speed * dt)
 	else:
@@ -420,6 +455,10 @@ func _step_height(y: float, dt: float) -> float:
 	var pitch_target := clampf(atan2(vy_rel, maxf(hs_rel, 4.0)), -pitch_max, pitch_max)
 	if hs_rel < SLOW_PITCH_SPEED.y:
 		pitch_target *= lerpf(smoothstep(PITCH_DEADZONE.x, PITCH_DEADZONE.y, absf(vy_rel)), 1.0, smoothstep(SLOW_PITCH_SPEED.x, SLOW_PITCH_SPEED.y, hs_rel))
+	if not cruise_active and frame_climb_slope > 0.0:
+		# A slope in a building frame: the nose follows it once moving; a
+		# hovering rise or sink (over a berth or a pad) stays level.
+		pitch_target = clampf(atan2(climb_rate, maxf(hs, 12.0)), -base_max, base_max) * smoothstep(6.0, 24.0, hs)
 	pitch = lerpf(pitch, pitch_target, 1.0 - exp(-2.5 * dt))
 	return y
 
@@ -429,12 +468,20 @@ func relative_speed() -> float:
 	return (velocity - goal_vel).length()
 
 
-func _turn(dt: float, goal_dist: float) -> void:
+## [param desired]: the velocity the pilot wants; [param accel]: this
+## step's burn, m/s^2 (both in the parent frame).
+func _turn(dt: float, goal_dist: float, desired: Vector3, accel: Vector3) -> void:
 	# Face the motion relative to the target once close, so a ship matching
 	# an orbiting outpost's speed noses toward it instead of crabbing.
 	var blend := 1.0 - smoothstep(800.0, 3000.0, goal_dist)
 	var motion := velocity - goal_vel * blend
 	motion.y = 0.0
+	# The course the pilot wants (relative to the target): the nose swings
+	# onto it first and the drive pushes the ship round after it.
+	var course := desired - goal_vel * blend
+	course.y = 0.0
+	if course.length() <= LEAD_MIN_SPEED:
+		course = motion
 	var face := goal_face
 	var want_yaw := NAN
 	if warp_state == Warp.SPOOL and warp_dir != Vector3.ZERO:
@@ -447,18 +494,24 @@ func _turn(dt: float, goal_dist: float) -> void:
 		var near := maxf(spd * spd / (2.0 * acceleration * 0.45) + FACE_NEAR_MARGIN, FACE_NEAR_MIN)
 		var k := smoothstep(near, near * 2.0, goal_dist)
 		if k > 0.0:
-			want_yaw = lerp_angle(yaw_for(face), yaw_for(motion), k)
-	if face == Vector3.ZERO and motion.length() > 3.0:
-		face = motion
+			want_yaw = lerp_angle(yaw_for(face), yaw_for(course), k)
+	if face == Vector3.ZERO and course.length() > 3.0:
+		face = course
 	var turn := deg_to_rad(turn_rate_deg)
 	var target_rate := 0.0
 	if face != Vector3.ZERO or not is_nan(want_yaw):
 		var diff := angle_difference(yaw, want_yaw if not is_nan(want_yaw) else yaw_for(face))
 		target_rate = clampf(diff * 2.5, -turn, turn)
-	_yaw_rate = lerpf(_yaw_rate, target_rate, 1.0 - exp(-6.0 * dt))
+	# Thrusters spin the hull up and stop it again: no instant rate changes.
+	_yaw_rate = move_toward(_yaw_rate, target_rate, turn / (YAW_SPOOL_AGILE if agile else YAW_SPOOL) * dt)
 	yaw = wrapf(yaw + _yaw_rate * dt, -PI, PI)
-	var bank_target := clampf(-_yaw_rate / turn, -1.0, 1.0) * deg_to_rad(bank_max_deg)
-	bank = lerpf(bank, bank_target, 1.0 - exp(-3.0 * dt))
+	# Roll into the turn (+ = left side down, a left turn is a positive yaw
+	# rate): with the spin while moving, and with the sideways burn.
+	var right := Vector3(cos(yaw), 0.0, -sin(yaw))
+	var spin := _yaw_rate / turn * smoothstep(BANK_SPIN_SPEED.x, BANK_SPIN_SPEED.y, motion.length())
+	var burn := -accel.dot(right) / maxf(acceleration, 1e-3)
+	var bank_target := clampf(spin * BANK_FROM_SPIN + burn * BANK_FROM_BURN, -1.0, 1.0) * deg_to_rad(bank_max_deg)
+	bank = lerpf(bank, bank_target, 1.0 - exp(-2.5 * dt))
 
 
 func aligned(face: Vector3, tolerance_deg: float = 6.0) -> bool:
@@ -472,6 +525,8 @@ func _advance_path() -> void:
 	var done := false
 	if w.stop:
 		done = d <= w.radius and velocity.length() <= 1.5
+		if done and frame_climb_slope > 0.0 and not cruise_active:
+			done = absf(ship.position.y - w.pos.y) <= 1.5
 		if done and w.align and w.face != Vector3.ZERO:
 			done = aligned(w.face, 4.0)
 	else:

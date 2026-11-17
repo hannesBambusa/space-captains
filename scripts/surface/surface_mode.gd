@@ -9,9 +9,11 @@ extends CanvasLayer
 ## keeps simulating underneath the whole time.
 ##
 ## Camera: a tilted RTS view of the landing zone, pan with WASD, the arrows
-## or a middle / right drag, zoom with the wheel, turn with Q / E. Clicks
-## pick on the ground (SurfaceTerrain.raycast): select, or place a building
-## while the HUD is placing one.
+## or a middle / right drag, zoom with the wheel, turn with Q / E or a left
+## drag (like the system camera's orbit; the pitch follows the zoom). A left
+## click (released without dragging) picks on the ground
+## (SurfaceTerrain.raycast): select, or place a building while the HUD is
+## placing one.
 
 const GROUP := "surface_mode"
 const LAYER := 11
@@ -24,6 +26,10 @@ const PITCH_LOW := deg_to_rad(20.0)
 const LEVEL_FROM := 900.0
 ## Real seconds of the fade in from black on entering and leaving.
 const FADE := 0.45
+## Left drag: radians of turn per pixel, and the pixels a press may move
+## and still count as a click.
+const TURN_PER_PX := 0.0087
+const CLICK_SLOP := 6.0
 
 var outpost: OutpostState
 var world: SurfaceWorld
@@ -36,6 +42,10 @@ var _dist := 520.0
 var _target_dist := 520.0
 var _drag := false
 var _drag_from := Vector2.ZERO
+## Left button held: where it went down, and whether it became a turn drag.
+var _left_down := false
+var _left_from := Vector2.ZERO
+var _turning := false
 ## The system world hidden under the surface (restored on leaving).
 var _hidden: SystemWorld
 ## Key actions that still reach the game below (sim speed, pause menu).
@@ -273,15 +283,28 @@ func _unhandled_input(event: InputEvent) -> void:
 			_drag = mb.pressed
 			_drag_from = mb.position
 		elif mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
-			var p := ground_under(mb.position)
-			if p != Vector3.INF:
-				hud.clicked(p)
+			_left_down = true
+			_left_from = mb.position
+			_turning = false
+		elif mb.button_index == MOUSE_BUTTON_LEFT and _left_down:
+			_left_down = false
+			if not _turning:
+				var p := ground_under(mb.position)
+				if p != Vector3.INF:
+					hud.clicked(p)
 		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			hud.cancel()
 		get_viewport().set_input_as_handled()
 		return
 	var mm := event as InputEventMouseMotion
 	if mm:
+		if _left_down and (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) == 0:
+			_left_down = false
+		if _left_down:
+			if not _turning and mm.position.distance_to(_left_from) > CLICK_SLOP:
+				_turning = true
+			if _turning:
+				_yaw -= mm.relative.x * TURN_PER_PX
 		if _drag:
 			var d := mm.position - _drag_from
 			_drag_from = mm.position
